@@ -56,11 +56,12 @@ The syntax is `karya open <project> <task-command> <task-id>`. For example `kary
 
 ## Autocompletion
 
-When used in non-interative mode, it supports autocompletion in `bash` and `zsh`. Autocompletion is supported for subcommands 
+When used in non-interative mode, it supports autocompletion in `bash` and `zsh`. Autocompletion is supported for subcommands as well as possible argument options for each sub-command.
 
 ## Interactive use
 
-This tool can also be used interactively. To open an interactive prompt...
+This tool can also be used interactively.
+[**TBD**]
 
 At any time, you can use `exit` or `q` to exit interactive mode.
 
