@@ -38,11 +38,7 @@ This is a context sensitive command that will present information as a list.
 
 This sub-command picks a specified project. This can be used to perform specific task commands. For example `karya open vacation finish 2` will mark 2nd task in the vacation list as completed.
 
-### `edit`
-
-This sub-command opens a specific project's `notes.md` file in your favourite text editor. The editor is identified using the `$EDITOR` environment variable.
-
-### Task specific commands
+#### Task specific commands
 
 The following commands change the state of a specific task. Each task is identified by a number that `karya` assigns it based on where it appears in `notes.md` (or in other markdown files that `notes.md` refers to).
 
@@ -53,6 +49,10 @@ The following commands change the state of a specific task. Each task is identif
 * `due <task-number> <date-time>` - Sets the due date for a specific task. 
 
 The syntax is `karya open <project> <task-command> <task-id>`. For example `karya open vacation finish <task-id>`. You may have to run `karya ls vacation` first to get the task ID.
+
+### `edit`
+
+This sub-command opens a specific project's `notes.md` file in your favourite text editor. The editor is identified using the `$EDITOR` environment variable.
 
 ## Autocompletion
 
