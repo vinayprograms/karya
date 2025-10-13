@@ -78,14 +78,14 @@ func listProjects() {
 		}
 	}
 
-	fmt.Printf("\n%-${maxLen}s  TASKS  NOTES \n", "PROJECT")
+	fmt.Printf("\n%-*s  TASKS  NOTES \n", maxLen, "PROJECT")
 	prjCount, totalTasks, totalNotes := 0, 0, 0
 	for _, p := range projects {
 		// Get note count
 		cmd := exec.Command("note", p.name, "count")
 		noteOutput, _ := cmd.Output()
 		noteCount, _ := strconv.Atoi(strings.TrimSpace(string(noteOutput)))
-		fmt.Printf("%-${maxLen}s  %5d %5d\n", p.name, p.tasks, noteCount)
+		fmt.Printf("%-*s  %5d %5d\n", maxLen, p.name, p.tasks, noteCount)
 		prjCount++
 		totalTasks += p.tasks
 		totalNotes += noteCount
