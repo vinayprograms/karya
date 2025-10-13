@@ -38,6 +38,13 @@ func TestReadNReview(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	file := filepath.Join(tempDir, "reading-list.md")
+	// Create file
+	f, err := os.Create(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
 	readNReview("https://example.com", file)
 
 	content, err := os.ReadFile(file)
