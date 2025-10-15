@@ -21,12 +21,15 @@ type Task struct {
 	Assignee string
 	Project  string
 	Zettel   string
+	config   *Config
 }
 
 // IsActive returns true if the task is active (not completed)
 func (t *Task) IsActive() bool {
-	activeKeywords := []string{"TODO", "TASK", "NOTE", "REMINDER", "EVENT", "MEETING", "CALL", "EMAIL", "MESSAGE", "FOLLOWUP", "REVIEW", "CHECKIN", "CHECKOUT", "RESEARCH", "READING", "WRITING", "DRAFT", "EDITING", "FINALIZE", "SUBMIT", "PRESENTATION", "WAITING", "DEFERRED", "DELEGATED"}
-	for _, kw := range activeKeywords {
+	if t.config == nil {
+		return false
+	}
+	for _, kw := range t.config.ActiveKeywords {
 		if t.Keyword == kw {
 			return true
 		}
@@ -36,8 +39,10 @@ func (t *Task) IsActive() bool {
 
 // IsCompleted returns true if the task is completed
 func (t *Task) IsCompleted() bool {
-	completedKeywords := []string{"ARCHIVED", "CANCELED", "DELETED", "DONE", "COMPLETED", "CLOSED"}
-	for _, kw := range completedKeywords {
+	if t.config == nil {
+		return false
+	}
+	for _, kw := range t.config.CompletedKeywords {
 		if t.Keyword == kw {
 			return true
 		}
@@ -47,7 +52,9 @@ func (t *Task) IsCompleted() bool {
 
 // Config holds configuration
 type Config struct {
-	PRJDIR string
+	PRJDIR            string
+	ActiveKeywords    []string
+	CompletedKeywords []string
 }
 
 // NewConfig creates a config from shared config
@@ -61,7 +68,11 @@ func NewConfig() *Config {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
-	return &Config{PRJDIR: cfg.PRJDIR}
+	return &Config{
+		PRJDIR:            cfg.PRJDIR,
+		ActiveKeywords:    cfg.ActiveKeywords,
+		CompletedKeywords: cfg.CompletedKeywords,
+	}
 }
 
 // FindFiles finds README.md files in project directories
@@ -75,7 +86,7 @@ func (c *Config) FindFiles(project string) ([]string, error) {
 }
 
 // ProcessFile processes a README.md file and returns tasks
-func ProcessFile(filePath string) ([]*Task, error) {
+func (c *Config) ProcessFile(filePath string) ([]*Task, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -95,7 +106,7 @@ func ProcessFile(filePath string) ([]*Task, error) {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
-		task := ParseLine(line, project, zettel)
+		task := c.ParseLine(line, project, zettel)
 		if task != nil {
 			tasks = append(tasks, task)
 		}
@@ -104,7 +115,7 @@ func ProcessFile(filePath string) ([]*Task, error) {
 }
 
 // ParseLine parses a task line and returns a Task
-func ParseLine(line, project, zettel string) *Task {
+func (c *Config) ParseLine(line, project, zettel string) *Task {
 	// Regex to match: ^[A-Z]+: .+( #[^ ]+)?( @[^ ]+)?( >> [^ ]+)?$
 	re := regexp.MustCompile(`^([A-Z]+):\s*(.+?)(?:\s*#([^ ]+))?(?:\s*@([^ ]+))?(?:\s*>>\s*([^ ]+))?$`)
 	matches := re.FindStringSubmatch(line)
@@ -114,7 +125,7 @@ func ParseLine(line, project, zettel string) *Task {
 
 	keyword := matches[1]
 	// Check if keyword is valid
-	if !isValidKeyword(keyword) {
+	if !c.isValidKeyword(keyword) {
 		return nil
 	}
 
@@ -140,7 +151,22 @@ func ParseLine(line, project, zettel string) *Task {
 		Assignee: assignee,
 		Project:  project,
 		Zettel:   zettel,
+		config:   c,
 	}
+}
+
+func (c *Config) isValidKeyword(keyword string) bool {
+	for _, kw := range c.ActiveKeywords {
+		if keyword == kw {
+			return true
+		}
+	}
+	for _, kw := range c.CompletedKeywords {
+		if keyword == kw {
+			return true
+		}
+	}
+	return false
 }
 
 func isValidKeyword(keyword string) bool {
@@ -183,7 +209,7 @@ func (c *Config) ListTasks(project string, showPending bool) ([]*Task, error) {
 		go func() {
 			defer wg.Done()
 			for file := range fileChan {
-				tasks, err := ProcessFile(file)
+				tasks, err := c.ProcessFile(file)
 				if err != nil {
 					// Skip files with errors
 					continue
@@ -256,7 +282,7 @@ func (c *Config) SummarizeProjects() (map[string]int, error) {
 		go func() {
 			defer wg.Done()
 			for file := range fileChan {
-				tasks, err := ProcessFile(file)
+				tasks, err := c.ProcessFile(file)
 				if err != nil {
 					continue
 				}

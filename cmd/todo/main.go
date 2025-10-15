@@ -217,6 +217,8 @@ func main() {
 
 	subcommand := os.Args[1]
 	switch subcommand {
+	case "-h", "--help", "help":
+		printHelp()
 	case "ls", "list":
 		project := ""
 		if len(os.Args) > 2 {
@@ -233,7 +235,7 @@ func main() {
 			log.Fatal(err)
 		}
 		showProjectsTable(summary)
-	case "projlist":
+	case "pl":
 		summary, err := config.SummarizeProjects()
 		if err != nil {
 			log.Fatal(err)
@@ -243,6 +245,43 @@ func main() {
 		// Project name - show interactive TUI for that project
 		showInteractiveTUI(config, subcommand)
 	}
+}
+
+func printHelp() {
+	help := `todo - Interactive task manager
+
+USAGE:
+    todo [COMMAND] [OPTIONS]
+
+COMMANDS:
+    (no command)        Show interactive TUI with all tasks
+    ls [PROJECT]        List tasks in plain text format (for scripting)
+    projects            Show project summary table with task counts
+    pl                  Show project list in plain text format
+    <project-name>      Show interactive TUI filtered to specific project
+    -h, --help, help    Show this help message
+
+INTERACTIVE MODE:
+    Type to filter      Filter tasks by typing
+    j/k or ↑/↓          Navigate tasks
+    Enter               Edit selected task at specific line
+    q                   Quit (when not filtering)
+    Esc                 Exit filter mode or quit
+    Ctrl+C              Quit
+
+EXAMPLES:
+    todo                # Show all tasks in interactive TUI
+    todo ls             # List all tasks (plain text)
+    todo ls myproject   # List tasks for specific project
+    todo projects       # Show project summary table
+    todo pl             # Show project list (plain text)
+    todo myproject      # Show tasks for myproject in TUI
+
+ENVIRONMENT:
+    EDITOR              Editor to use (supports vim, nvim, emacs, nano, code)
+                        Can include arguments, e.g., EDITOR="emacs -nw"
+`
+	fmt.Print(help)
 }
 
 func showInteractiveTUI(config *task.Config, project string) {
