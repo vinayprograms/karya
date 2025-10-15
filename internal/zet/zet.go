@@ -34,6 +34,11 @@ type Zettel struct {
 	Path  string
 }
 
+// FilterValue implements list.Item
+func (z Zettel) FilterValue() string {
+	return z.ID + " " + z.Title
+}
+
 // NewConfig creates a new config
 func NewConfig() (*Config, error) {
 	zetDir := os.Getenv("ZETDIR")
