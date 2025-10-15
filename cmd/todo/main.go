@@ -35,7 +35,8 @@ var (
 )
 
 type taskItem struct {
-	task *task.Task
+	task           *task.Task
+	projectColWidth int
 }
 
 func (i taskItem) FilterValue() string {
@@ -47,7 +48,7 @@ func (i taskItem) FilterValue() string {
 func (i taskItem) Title() string {
 	var parts []string
 
-	parts = append(parts, prjColor.Render(fmt.Sprintf("%-15s", i.task.Project)))
+	parts = append(parts, prjColor.Render(fmt.Sprintf("%-*s", i.projectColWidth, i.task.Project)))
 	parts = append(parts, prjColor.Render(fmt.Sprintf("%-16s", i.task.Zettel)))
 
 	var titleStyle lipgloss.Style
@@ -112,12 +113,13 @@ func (d taskDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 }
 
 type model struct {
-	list     list.Model
-	tasks    []*task.Task
-	config   *task.Config
-	project  string
-	quitting bool
-	watcher  *fsnotify.Watcher
+	list            list.Model
+	tasks           []*task.Task
+	config          *task.Config
+	project         string
+	quitting        bool
+	watcher         *fsnotify.Watcher
+	projectColWidth int
 }
 
 func (m model) Init() tea.Cmd {
@@ -187,9 +189,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Within same priority, sort by project name
 				return m.tasks[i].Project < m.tasks[j].Project
 			})
+			m.projectColWidth = calculateProjectColWidth(m.tasks)
 			items := make([]list.Item, len(m.tasks))
 			for i, t := range m.tasks {
-				items[i] = taskItem{task: t}
+				items[i] = taskItem{task: t, projectColWidth: m.projectColWidth}
 			}
 			m.list.SetItems(items)
 			m.list.ResetSelected()
@@ -232,9 +235,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.tasks[i].Project < m.tasks[j].Project
 		})
 
+		m.projectColWidth = calculateProjectColWidth(m.tasks)
 		items := make([]list.Item, len(m.tasks))
 		for i, t := range m.tasks {
-			items[i] = taskItem{task: t}
+			items[i] = taskItem{task: t, projectColWidth: m.projectColWidth}
 		}
 		m.list.SetItems(items)
 		m.list.ResetSelected()
@@ -332,6 +336,16 @@ func findTaskLine(filePath, keyword, title string) (int, error) {
 	}
 
 	return 1, scanner.Err()
+}
+
+func calculateProjectColWidth(tasks []*task.Task) int {
+	maxLen := 15
+	for _, t := range tasks {
+		if len(t.Project) > maxLen {
+			maxLen = len(t.Project)
+		}
+	}
+	return maxLen
 }
 
 func main() {
@@ -478,9 +492,10 @@ func showInteractiveTUI(config *task.Config, project string) {
 		return tasks[i].Project < tasks[j].Project
 	})
 
+	projectColWidth := calculateProjectColWidth(tasks)
 	items := make([]list.Item, len(tasks))
 	for i, t := range tasks {
-		items[i] = taskItem{task: t}
+		items[i] = taskItem{task: t, projectColWidth: projectColWidth}
 	}
 
 	delegate := taskDelegate{DefaultDelegate: list.NewDefaultDelegate()}
@@ -503,11 +518,12 @@ func showInteractiveTUI(config *task.Config, project string) {
 	}
 
 	m := model{
-		list:    l,
-		tasks:   tasks,
-		config:  config,
-		project: project,
-		watcher: watcher,
+		list:            l,
+		tasks:           tasks,
+		config:          config,
+		project:         project,
+		watcher:         watcher,
+		projectColWidth: projectColWidth,
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
