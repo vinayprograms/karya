@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -36,6 +37,11 @@ func Load() (*Config, error) {
 			if _, err := toml.DecodeFile(configPath, cfg); err != nil {
 				return nil, fmt.Errorf("failed to parse config file: %w", err)
 			}
+			// Expand environment variables in config values
+			cfg.PRJDIR = expandEnv(cfg.PRJDIR)
+			cfg.ZETDIR = expandEnv(cfg.ZETDIR)
+			cfg.EDITOR = expandEnv(cfg.EDITOR)
+			cfg.KARYA_DIR = expandEnv(cfg.KARYA_DIR)
 		}
 	}
 
@@ -48,6 +54,19 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func expandEnv(s string) string {
+	if s == "" {
+		return s
+	}
+	// Replace $HOME with actual home directory
+	if strings.Contains(s, "$HOME") {
+		home, _ := os.UserHomeDir()
+		s = strings.ReplaceAll(s, "$HOME", home)
+	}
+	// Expand other environment variables
+	return os.ExpandEnv(s)
 }
 
 func (c *Config) Validate() error {
