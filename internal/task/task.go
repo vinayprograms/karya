@@ -37,6 +37,19 @@ func (t *Task) IsActive() bool {
 	return false
 }
 
+// IsInProgress returns true if the task is in progress
+func (t *Task) IsInProgress() bool {
+	if t.config == nil {
+		return false
+	}
+	for _, kw := range t.config.InProgressKeywords {
+		if t.Keyword == kw {
+			return true
+		}
+	}
+	return false
+}
+
 // IsCompleted returns true if the task is completed
 func (t *Task) IsCompleted() bool {
 	if t.config == nil {
@@ -52,9 +65,11 @@ func (t *Task) IsCompleted() bool {
 
 // Config holds configuration
 type Config struct {
-	PRJDIR            string
-	ActiveKeywords    []string
-	CompletedKeywords []string
+	PRJDIR              string
+	ShowCompleted       bool
+	ActiveKeywords      []string
+	InProgressKeywords  []string
+	CompletedKeywords   []string
 }
 
 // NewConfig creates a config from shared config
@@ -69,9 +84,11 @@ func NewConfig() *Config {
 		os.Exit(1)
 	}
 	return &Config{
-		PRJDIR:            cfg.PRJDIR,
-		ActiveKeywords:    cfg.ActiveKeywords,
-		CompletedKeywords: cfg.CompletedKeywords,
+		PRJDIR:             cfg.PRJDIR,
+		ShowCompleted:      cfg.ShowCompleted,
+		ActiveKeywords:     cfg.ActiveKeywords,
+		InProgressKeywords: cfg.InProgressKeywords,
+		CompletedKeywords:  cfg.CompletedKeywords,
 	}
 }
 
@@ -161,6 +178,11 @@ func (c *Config) isValidKeyword(keyword string) bool {
 			return true
 		}
 	}
+	for _, kw := range c.InProgressKeywords {
+		if keyword == kw {
+			return true
+		}
+	}
 	for _, kw := range c.CompletedKeywords {
 		if keyword == kw {
 			return true
@@ -180,8 +202,8 @@ func isValidKeyword(keyword string) bool {
 	return false
 }
 
-// ListTasks lists tasks for a project, filtering by showPending
-func (c *Config) ListTasks(project string, showPending bool) ([]*Task, error) {
+// ListTasks lists tasks for a project, filtering by showCompleted
+func (c *Config) ListTasks(project string, showCompleted bool) ([]*Task, error) {
 	files, err := c.FindFiles(project)
 	if err != nil {
 		return nil, err
@@ -239,10 +261,11 @@ func (c *Config) ListTasks(project string, showPending bool) ([]*Task, error) {
 		allTasks = append(allTasks, tasks...)
 	}
 
-	if showPending {
+	if !showCompleted {
+		// Exclude completed tasks
 		var filtered []*Task
 		for _, t := range allTasks {
-			if t.IsActive() {
+			if !t.IsCompleted() {
 				filtered = append(filtered, t)
 			}
 		}

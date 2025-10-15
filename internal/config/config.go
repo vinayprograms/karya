@@ -10,12 +10,14 @@ import (
 )
 
 type Config struct {
-	PRJDIR            string   `toml:"prjdir"`
-	ZETDIR            string   `toml:"zetdir"`
-	EDITOR            string   `toml:"editor"`
-	KARYA_DIR         string   `toml:"karya_dir"`
-	ActiveKeywords    []string `toml:"active_keywords"`
-	CompletedKeywords []string `toml:"completed_keywords"`
+	PRJDIR             string   `toml:"prjdir"`
+	ZETDIR             string   `toml:"zetdir"`
+	EDITOR             string   `toml:"editor"`
+	KARYA_DIR          string   `toml:"karya_dir"`
+	ShowCompleted      bool     `toml:"show_completed"`
+	ActiveKeywords     []string `toml:"active_keywords"`
+	InProgressKeywords []string `toml:"inprogress_keywords"`
+	CompletedKeywords  []string `toml:"completed_keywords"`
 }
 
 func Load() (*Config, error) {
@@ -25,6 +27,11 @@ func Load() (*Config, error) {
 		ZETDIR:    os.Getenv("ZETDIR"),
 		EDITOR:    os.Getenv("EDITOR"),
 		KARYA_DIR: os.Getenv("KARYA_DIR"),
+	}
+	
+	// Check SHOW_COMPLETED environment variable
+	if showCompleted := os.Getenv("SHOW_COMPLETED"); showCompleted != "" {
+		cfg.ShowCompleted = showCompleted == "true" || showCompleted == "1"
 	}
 
 	// If PRJDIR not set, try loading from config file
@@ -44,6 +51,11 @@ func Load() (*Config, error) {
 			cfg.ZETDIR = expandEnv(cfg.ZETDIR)
 			cfg.EDITOR = expandEnv(cfg.EDITOR)
 			cfg.KARYA_DIR = expandEnv(cfg.KARYA_DIR)
+			
+			// Environment variable overrides config file for ShowCompleted
+			if showCompleted := os.Getenv("SHOW_COMPLETED"); showCompleted != "" {
+				cfg.ShowCompleted = showCompleted == "true" || showCompleted == "1"
+			}
 		}
 	}
 
@@ -59,8 +71,12 @@ func Load() (*Config, error) {
 			"TODO", "TASK", "NOTE", "REMINDER", "EVENT", "MEETING",
 			"CALL", "EMAIL", "MESSAGE", "FOLLOWUP", "REVIEW",
 			"CHECKIN", "CHECKOUT", "RESEARCH", "READING", "WRITING",
-			"DRAFT", "EDITING", "FINALIZE", "SUBMIT", "PRESENTATION",
-			"WAITING", "DEFERRED", "DELEGATED",
+			"DRAFT", "FINALIZE", "SUBMIT", "PRESENTATION",
+		}
+	}
+	if len(cfg.InProgressKeywords) == 0 {
+		cfg.InProgressKeywords = []string{
+			"DOING", "INPROGRESS", "WIP", "WORKING", "STARTED",
 		}
 	}
 	if len(cfg.CompletedKeywords) == 0 {

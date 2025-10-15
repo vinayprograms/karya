@@ -12,13 +12,21 @@ prjdir = "/path/to/your/projects"
 # Optional: Karya directory for inbox (defaults to prjdir)
 # karya_dir = "/path/to/karya"
 
-# Optional: Active task keywords (defaults shown below)
+# Optional: Show completed tasks in TUI (defaults to false)
+# show_completed = true
+
+# Optional: Active/Pending task keywords (defaults shown below)
 # active_keywords = [
 #     "TODO", "TASK", "NOTE", "REMINDER", "EVENT", "MEETING",
 #     "CALL", "EMAIL", "MESSAGE", "FOLLOWUP", "REVIEW",
 #     "CHECKIN", "CHECKOUT", "RESEARCH", "READING", "WRITING",
 #     "DRAFT", "EDITING", "FINALIZE", "SUBMIT", "PRESENTATION",
 #     "WAITING", "DEFERRED", "DELEGATED"
+# ]
+
+# Optional: In-progress task keywords (defaults shown below)
+# inprogress_keywords = [
+#     "DOING", "INPROGRESS", "WIP", "WORKING", "STARTED"
 # ]
 
 # Optional: Completed task keywords (defaults shown below)
