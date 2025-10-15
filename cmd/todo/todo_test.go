@@ -8,6 +8,7 @@ import (
 )
 
 func TestTask_IsActive(t *testing.T) {
+	config := task.NewConfig()
 	tests := []struct {
 		keyword string
 		want    bool
@@ -17,7 +18,13 @@ func TestTask_IsActive(t *testing.T) {
 		{"INVALID", false},
 	}
 	for _, tt := range tests {
-		tk := &task.Task{Keyword: tt.keyword}
+		tk := config.ParseLine(tt.keyword+": test", "proj", "zettel")
+		if tk == nil {
+			if tt.want {
+				t.Errorf("Task.IsActive() = nil, want %v", tt.want)
+			}
+			continue
+		}
 		if got := tk.IsActive(); got != tt.want {
 			t.Errorf("Task.IsActive() = %v, want %v", got, tt.want)
 		}
@@ -25,6 +32,7 @@ func TestTask_IsActive(t *testing.T) {
 }
 
 func TestTask_IsCompleted(t *testing.T) {
+	config := task.NewConfig()
 	tests := []struct {
 		keyword string
 		want    bool
@@ -34,7 +42,13 @@ func TestTask_IsCompleted(t *testing.T) {
 		{"INVALID", false},
 	}
 	for _, tt := range tests {
-		tk := &task.Task{Keyword: tt.keyword}
+		tk := config.ParseLine(tt.keyword+": test", "proj", "zettel")
+		if tk == nil {
+			if tt.want {
+				t.Errorf("Task.IsCompleted() = nil, want %v", tt.want)
+			}
+			continue
+		}
 		if got := tk.IsCompleted(); got != tt.want {
 			t.Errorf("Task.IsCompleted() = %v, want %v", got, tt.want)
 		}
@@ -42,6 +56,7 @@ func TestTask_IsCompleted(t *testing.T) {
 }
 
 func TestParseLine(t *testing.T) {
+	config := task.NewConfig()
 	tests := []struct {
 		line    string
 		project string
@@ -92,13 +107,13 @@ func TestParseLine(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		got := task.ParseLine(tt.line, tt.project, tt.zettel)
+		got := config.ParseLine(tt.line, tt.project, tt.zettel)
 		if (got == nil && tt.want != nil) || (got != nil && tt.want == nil) {
 			t.Errorf("ParseLine(%q, %q, %q) = %v, want %v", tt.line, tt.project, tt.zettel, got, tt.want)
 			continue
 		}
 		if got != nil && tt.want != nil {
-			if *got != *tt.want {
+			if got.Keyword != tt.want.Keyword || got.Title != tt.want.Title || got.Tag != tt.want.Tag || got.Date != tt.want.Date || got.Assignee != tt.want.Assignee || got.Project != tt.want.Project || got.Zettel != tt.want.Zettel {
 				t.Errorf("ParseLine(%q, %q, %q) = %v, want %v", tt.line, tt.project, tt.zettel, got, tt.want)
 			}
 		}
@@ -106,7 +121,7 @@ func TestParseLine(t *testing.T) {
 }
 
 func TestProcessFile(t *testing.T) {
-	// Create temp file
+	config := task.NewConfig()
 	content := `TODO: Write code #urgent @2023-10-01 >> john
 DONE: Completed task
 INVALID: Skip this`
@@ -118,7 +133,7 @@ INVALID: Skip this`
 	tempFile.WriteString(content)
 	tempFile.Close()
 
-	tasks, err := task.ProcessFile(tempFile.Name())
+	tasks, err := config.ProcessFile(tempFile.Name())
 	if err != nil {
 		t.Fatal(err)
 	}

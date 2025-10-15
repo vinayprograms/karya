@@ -31,12 +31,56 @@ var (
 	completedTaskColor = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))  // Light gray for completed task text
 	tagColor           = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("5"))
 	dateColor          = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Background(lipgloss.Color("15"))
+	pastDateColor      = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("1")) // Inverted for past dates
+	todayDateColor     = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("11")).Bold(true) // Yellow background for today
 	assigneeColor      = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("4")).Bold(true)
 )
 
 type taskItem struct {
 	task           *task.Task
 	projectColWidth int
+}
+
+func (i taskItem) renderWithSelection(isSelected bool) string {
+	var parts []string
+
+	parts = append(parts, prjColor.Render(fmt.Sprintf("%-*s", i.projectColWidth, i.task.Project)))
+	parts = append(parts, prjColor.Render(fmt.Sprintf("%-16s", i.task.Zettel)))
+
+	var titleStyle lipgloss.Style
+	if i.task.IsActive() {
+		parts = append(parts, activeColor.Render(fmt.Sprintf("%-12s", i.task.Keyword)))
+		titleStyle = taskColor
+	} else if i.task.IsInProgress() {
+		parts = append(parts, inProgressColor.Render(fmt.Sprintf("%-12s", i.task.Keyword)))
+		titleStyle = taskColor
+	} else {
+		parts = append(parts, completedColor.Render(fmt.Sprintf("%-12s", i.task.Keyword)))
+		titleStyle = completedTaskColor
+	}
+
+	if isSelected {
+		indicator := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("13")).
+			Bold(true).
+			Render("█ ")
+		parts = append(parts, indicator+titleStyle.Render(fmt.Sprintf("%-40s", i.task.Title)))
+	} else {
+		parts = append(parts, "  "+titleStyle.Render(fmt.Sprintf("%-40s", i.task.Title)))
+	}
+
+	if i.task.Tag != "" {
+		parts = append(parts, tagColor.Render(fmt.Sprintf(" %s ", i.task.Tag)))
+	}
+	if i.task.Date != "" {
+		dateStyle := getDateStyle(i.task.Date)
+		parts = append(parts, dateStyle.Render(fmt.Sprintf(" %s ", i.task.Date)))
+	}
+	if i.task.Assignee != "" {
+		parts = append(parts, assigneeColor.Render(fmt.Sprintf(" %s ", i.task.Assignee)))
+	}
+
+	return strings.Join(parts, " ")
 }
 
 func (i taskItem) FilterValue() string {
@@ -69,7 +113,8 @@ func (i taskItem) Title() string {
 		parts = append(parts, tagColor.Render(fmt.Sprintf(" %s ", i.task.Tag)))
 	}
 	if i.task.Date != "" {
-		parts = append(parts, dateColor.Render(fmt.Sprintf(" %s ", i.task.Date)))
+		dateStyle := getDateStyle(i.task.Date)
+		parts = append(parts, dateStyle.Render(fmt.Sprintf(" %s ", i.task.Date)))
 	}
 	if i.task.Assignee != "" {
 		parts = append(parts, assigneeColor.Render(fmt.Sprintf(" %s ", i.task.Assignee)))
@@ -79,6 +124,28 @@ func (i taskItem) Title() string {
 }
 
 func (i taskItem) Description() string { return "" }
+
+func getDateStyle(dateStr string) lipgloss.Style {
+	if dateStr == "" {
+		return dateColor
+	}
+
+	parsedDate, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		return dateColor
+	}
+
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	taskDate := time.Date(parsedDate.Year(), parsedDate.Month(), parsedDate.Day(), 0, 0, 0, 0, time.UTC)
+
+	if taskDate.Before(today) {
+		return pastDateColor
+	} else if taskDate.Equal(today) {
+		return todayDateColor
+	}
+	return dateColor
+}
 
 // Custom delegate for proper selection highlighting
 type taskDelegate struct {
@@ -91,24 +158,8 @@ func (d taskDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 		return
 	}
 
-	// Get the rendered content
-	content := taskItem.Title()
-
-	// Check if this item is selected
 	isSelected := index == m.Index()
-
-	if isSelected {
-		// Add a prominent indicator on the left - using filled block in bright magenta
-		indicator := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("13")). // Bright magenta - very attention grabbing
-			Bold(true).
-			Render("█ ")
-		content = indicator + content
-	} else {
-		// Add spacing to align with selected items
-		content = "  " + content
-	}
-
+	content := taskItem.renderWithSelection(isSelected)
 	fmt.Fprint(w, content)
 }
 
