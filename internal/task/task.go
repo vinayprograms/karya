@@ -133,8 +133,8 @@ func (c *Config) ProcessFile(filePath string) ([]*Task, error) {
 
 // ParseLine parses a task line and returns a Task
 func (c *Config) ParseLine(line, project, zettel string) *Task {
-	// Regex to match: ^[A-Z]+: .+( #[^ ]+)?( @[^ ]+)?( >> [^ ]+)?$
-	re := regexp.MustCompile(`^([A-Z]+):\s*(.+?)(?:\s*#([^ ]+))?(?:\s*@([^ ]+))?(?:\s*>>\s*([^ ]+))?$`)
+	// Regex to match: ^[A-Z]+: .+( #[^ ]+)?( @[^ ]+)?( >> .+)?$
+	re := regexp.MustCompile(`^([A-Z]+):\s*(.+?)(?:\s*#([^ ]+))?(?:\s*@([^ ]+))?(?:\s*>>\s*(.+))?$`)
 	matches := re.FindStringSubmatch(line)
 	if len(matches) == 0 {
 		return nil
@@ -157,7 +157,7 @@ func (c *Config) ParseLine(line, project, zettel string) *Task {
 	}
 	assignee := ""
 	if len(matches) > 5 && matches[5] != "" {
-		assignee = matches[5]
+		assignee = strings.TrimSpace(matches[5])
 	}
 
 	return &Task{
