@@ -1,4 +1,4 @@
-module todo-toolkit
+module karya
 
 go 1.24.0
 
