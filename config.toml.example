@@ -1,0 +1,13 @@
+# Todo Toolkit Configuration
+
+# Required: Root directory for projects
+prjdir = "/path/to/your/projects"
+
+# Optional: Zettelkasten directory (for zet command)
+# zetdir = "/path/to/zettelkasten"
+
+# Optional: Editor (defaults to vim)
+# editor = "nvim"
+
+# Optional: Karya directory for inbox (defaults to prjdir)
+# karya_dir = "/path/to/karya"

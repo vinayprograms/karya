@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"todo-toolkit/internal/config"
 )
 
 // Task represents a parsed task from a line
@@ -47,45 +49,18 @@ type Config struct {
 	PRJDIR string
 }
 
-// NewConfig creates a config from env, loading ~/.gtdrc if needed
+// NewConfig creates a config from shared config
 func NewConfig() *Config {
-	prjdir := os.Getenv("PRJDIR")
-	if prjdir == "" {
-		loadGtdrc()
-		prjdir = os.Getenv("PRJDIR")
-		if prjdir == "" {
-			fmt.Fprintln(os.Stderr, "PRJDIR not set. Please create ~/.gtdrc with 'export PRJDIR=/path/to/projects'")
-			os.Exit(1)
-		}
-	}
-	return &Config{PRJDIR: prjdir}
-}
-
-// loadGtdrc loads config from ~/.gtdrc
-func loadGtdrc() {
-	home, _ := os.UserHomeDir()
-	gtdrc := filepath.Join(home, ".gtdrc")
-	if _, err := os.Stat(gtdrc); os.IsNotExist(err) {
-		return
-	}
-	file, err := os.Open(gtdrc)
+	cfg, err := config.Load()
 	if err != nil {
-		return
+		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+		os.Exit(1)
 	}
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, "export ") {
-			line = strings.TrimPrefix(line, "export ")
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) == 2 {
-				key := strings.TrimSpace(parts[0])
-				value := strings.Trim(strings.TrimSpace(parts[1]), "\"'")
-				os.Setenv(key, value)
-			}
-		}
+	if err := cfg.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
 	}
+	return &Config{PRJDIR: cfg.PRJDIR}
 }
 
 // FindFiles finds README.md files in project directories
