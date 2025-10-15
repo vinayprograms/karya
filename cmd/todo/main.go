@@ -171,6 +171,8 @@ type model struct {
 	quitting        bool
 	watcher         *fsnotify.Watcher
 	projectColWidth int
+	savedFilter     string
+	savedFilterState list.FilterState
 }
 
 func (m model) Init() tea.Cmd {
@@ -231,9 +233,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.String() {
 		case "enter":
-			// Only open editor if not filtering and filter is applied
-			if m.list.FilterState() != list.Filtering && m.list.FilterState() != list.FilterApplied {
+			// Only open editor if not actively typing in filter
+			if m.list.FilterState() != list.Filtering {
 				if i, ok := m.list.SelectedItem().(taskItem); ok {
+					m.savedFilter = m.list.FilterValue()
+					m.savedFilterState = m.list.FilterState()
 					return m, openEditorCmd(m.config, i.task, m.project)
 				}
 			}
@@ -330,7 +334,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.list.SetItems(items)
 		m.list.ResetSelected()
-		m.list.ResetFilter()
+		
+		if m.savedFilter != "" {
+			m.list, _ = m.list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+			for _, r := range m.savedFilter {
+				m.list, _ = m.list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+			}
+			m.list, _ = m.list.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		}
+		
 		return m, nil
 	case tea.WindowSizeMsg:
 		m.list.SetWidth(msg.Width)
@@ -346,7 +358,16 @@ func (m model) View() string {
 	if m.quitting {
 		return ""
 	}
-	return m.list.View()
+	view := m.list.View()
+	if m.list.FilterState() == list.FilterApplied && m.list.FilterValue() != "" {
+		filterInfo := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("11")).
+			Background(lipgloss.Color("0")).
+			Padding(0, 1).
+			Render(fmt.Sprintf("Filter: %s", m.list.FilterValue()))
+		view = filterInfo + "\n" + view
+	}
+	return view
 }
 
 type editorFinishedMsg struct{ err error }
