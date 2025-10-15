@@ -199,7 +199,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		// Handle quit keys before list processes them
-		if msg.String() == "ctrl+c" || msg.String() == "esc" || (msg.String() == "q" && m.list.FilterState() != list.Filtering) {
+		if msg.String() == "ctrl+c" {
+			m.quitting = true
+			if m.watcher != nil {
+				m.watcher.Close()
+			}
+			return m, tea.Quit
+		}
+		
+		// Handle esc: cancel filter if filtering, otherwise quit
+		if msg.String() == "esc" {
+			if m.list.FilterState() == list.Filtering || m.list.FilterState() == list.FilterApplied {
+				m.list.ResetFilter()
+			} else {
+				m.quitting = true
+				if m.watcher != nil {
+					m.watcher.Close()
+				}
+				return m, tea.Quit
+			}
+		}
+		
+		// Handle q: quit only when not filtering
+		if msg.String() == "q" && m.list.FilterState() != list.Filtering {
 			m.quitting = true
 			if m.watcher != nil {
 				m.watcher.Close()
@@ -209,8 +231,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.String() {
 		case "enter":
-			if i, ok := m.list.SelectedItem().(taskItem); ok {
-				return m, openEditorCmd(m.config, i.task, m.project)
+			// Only open editor if not filtering and filter is applied
+			if m.list.FilterState() != list.Filtering && m.list.FilterState() != list.FilterApplied {
+				if i, ok := m.list.SelectedItem().(taskItem); ok {
+					return m, openEditorCmd(m.config, i.task, m.project)
+				}
+			}
+		}
+		
+		// Auto-dismiss filter when backspace/delete makes it empty
+		if m.list.FilterState() == list.Filtering {
+			if msg.String() == "backspace" || msg.String() == "delete" {
+				var cmd tea.Cmd
+				m.list, cmd = m.list.Update(msg)
+				if m.list.FilterValue() == "" {
+					m.list.ResetFilter()
+				}
+				return m, cmd
 			}
 		}
 	case fileChangedMsg:
