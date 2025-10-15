@@ -421,6 +421,25 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+		sort.Slice(tasks, func(i, j int) bool {
+			getPriority := func(t *task.Task) int {
+				if t.IsActive() {
+					return 0
+				} else if t.IsInProgress() {
+					return 1
+				}
+				return 2
+			}
+
+			priorityI := getPriority(tasks[i])
+			priorityJ := getPriority(tasks[j])
+
+			if priorityI != priorityJ {
+				return priorityI < priorityJ
+			}
+
+			return tasks[i].Project < tasks[j].Project
+		})
 		printTasksPlain(tasks)
 	case "projects":
 		summary, err := config.SummarizeProjects()
@@ -589,9 +608,10 @@ func showInteractiveTUI(config *task.Config, project string) {
 }
 
 func printTasksPlain(tasks []*task.Task) {
+	projectColWidth := calculateProjectColWidth(tasks)
 	for _, t := range tasks {
-		fmt.Printf("%-15s %-16s %-12s %-40s",
-			t.Project, t.Zettel, t.Keyword, t.Title)
+		fmt.Printf("%-*s %-16s %-12s %-40s",
+			projectColWidth, t.Project, t.Zettel, t.Keyword, t.Title)
 		if t.Tag != "" {
 			fmt.Printf(" #%s", t.Tag)
 		}
