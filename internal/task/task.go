@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	"karya/internal/config"
 )
@@ -159,14 +160,59 @@ func (c *Config) ListTasks(project string, showPending bool) ([]*Task, error) {
 	if err != nil {
 		return nil, err
 	}
-	var allTasks []*Task
-	for _, file := range files {
-		tasks, err := ProcessFile(file)
-		if err != nil {
-			return nil, err
+
+	// Use concurrent processing for better performance
+	numWorkers := 10 // Adjust based on system
+	if len(files) < numWorkers {
+		numWorkers = len(files)
+	}
+	if numWorkers == 0 {
+		return []*Task{}, nil
+	}
+
+	// Channel for file paths
+	fileChan := make(chan string, len(files))
+	// Channel for results
+	resultChan := make(chan []*Task, len(files))
+	// WaitGroup for workers
+	var wg sync.WaitGroup
+
+	// Start workers
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for file := range fileChan {
+				tasks, err := ProcessFile(file)
+				if err != nil {
+					// Skip files with errors
+					continue
+				}
+				resultChan <- tasks
+			}
+		}()
+	}
+
+	// Send files to workers
+	go func() {
+		for _, file := range files {
+			fileChan <- file
 		}
+		close(fileChan)
+	}()
+
+	// Close result channel when all workers done
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// Collect results
+	var allTasks []*Task
+	for tasks := range resultChan {
 		allTasks = append(allTasks, tasks...)
 	}
+
 	if showPending {
 		var filtered []*Task
 		for _, t := range allTasks {
@@ -185,21 +231,69 @@ func (c *Config) SummarizeProjects() (map[string]int, error) {
 	if err != nil {
 		return nil, err
 	}
-	summary := make(map[string]int)
-	for _, file := range files {
-		tasks, err := ProcessFile(file)
-		if err != nil {
-			return nil, err
-		}
-		parts := strings.Split(file, string(filepath.Separator))
-		project := parts[len(parts)-4]
-		activeCount := 0
-		for _, t := range tasks {
-			if t.IsActive() {
-				activeCount++
-			}
-		}
-		summary[project] += activeCount
+
+	// Use concurrent processing
+	numWorkers := 10
+	if len(files) < numWorkers {
+		numWorkers = len(files)
 	}
+	if numWorkers == 0 {
+		return make(map[string]int), nil
+	}
+
+	type result struct {
+		project string
+		count   int
+	}
+
+	fileChan := make(chan string, len(files))
+	resultChan := make(chan result, len(files))
+	var wg sync.WaitGroup
+
+	// Start workers
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for file := range fileChan {
+				tasks, err := ProcessFile(file)
+				if err != nil {
+					continue
+				}
+				parts := strings.Split(file, string(filepath.Separator))
+				project := parts[len(parts)-4]
+				activeCount := 0
+				for _, t := range tasks {
+					if t.IsActive() {
+						activeCount++
+					}
+				}
+				if activeCount > 0 {
+					resultChan <- result{project: project, count: activeCount}
+				}
+			}
+		}()
+	}
+
+	// Send files to workers
+	go func() {
+		for _, file := range files {
+			fileChan <- file
+		}
+		close(fileChan)
+	}()
+
+	// Close result channel when all workers done
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// Collect results
+	summary := make(map[string]int)
+	for res := range resultChan {
+		summary[res.project] += res.count
+	}
+
 	return summary, nil
 }
