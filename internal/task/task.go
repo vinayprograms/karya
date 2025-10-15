@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 
-	"todo-toolkit/internal/config"
+	"karya/internal/config"
 )
 
 // Task represents a parsed task from a line

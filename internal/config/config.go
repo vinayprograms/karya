@@ -32,7 +32,7 @@ func Load() (*Config, error) {
 			return nil, err
 		}
 
-		configPath := filepath.Join(home, ".config", "todo-toolkit", "config.toml")
+		configPath := filepath.Join(home, ".config", "karya", "config.toml")
 		if _, err := os.Stat(configPath); err == nil {
 			if _, err := toml.DecodeFile(configPath, cfg); err != nil {
 				return nil, fmt.Errorf("failed to parse config file: %w", err)
@@ -71,7 +71,7 @@ func expandEnv(s string) string {
 
 func (c *Config) Validate() error {
 	if c.PRJDIR == "" {
-		return fmt.Errorf("PRJDIR not set. Please create ~/.config/todo-toolkit/config.toml with:\nprjdir = \"/path/to/projects\"")
+		return fmt.Errorf("PRJDIR not set. Please create ~/.config/karya/config.toml with:\nprjdir = \"/path/to/projects\"")
 	}
 	return nil
 }

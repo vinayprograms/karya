@@ -4,7 +4,7 @@ import (
 	"io/ioutil"
 	"os"
 	"testing"
-	"todo-toolkit/internal/task"
+	"karya/internal/task"
 )
 
 func TestTask_IsActive(t *testing.T) {

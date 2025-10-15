@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 
-	"todo-toolkit/internal/zet"
+	"karya/internal/zet"
 )
 
 func main() {

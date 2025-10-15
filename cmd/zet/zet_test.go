@@ -2,7 +2,7 @@ package main
 
 import (
 	"testing"
-	"todo-toolkit/internal/zet"
+	"karya/internal/zet"
 )
 
 func TestCountZettels(t *testing.T) {
