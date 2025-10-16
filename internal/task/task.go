@@ -21,6 +21,7 @@ type Task struct {
 	Assignee string
 	Project  string
 	Zettel   string
+	FilePath string // Original file path where this task was found
 	config   *Config
 }
 
@@ -65,11 +66,12 @@ func (t *Task) IsCompleted() bool {
 
 // Config holds configuration
 type Config struct {
-	PRJDIR              string
-	ShowCompleted       bool
-	ActiveKeywords      []string
-	InProgressKeywords  []string
-	CompletedKeywords   []string
+	PRJDIR             string
+	ShowCompleted      bool
+	Structured         bool
+	ActiveKeywords     []string
+	InProgressKeywords []string
+	CompletedKeywords  []string
 }
 
 // NewConfig creates a config from shared config
@@ -86,20 +88,55 @@ func NewConfig() *Config {
 	return &Config{
 		PRJDIR:             cfg.PRJDIR,
 		ShowCompleted:      cfg.ShowCompleted,
+		Structured:         cfg.Structured,
 		ActiveKeywords:     cfg.ActiveKeywords,
 		InProgressKeywords: cfg.InProgressKeywords,
 		CompletedKeywords:  cfg.CompletedKeywords,
 	}
 }
 
-// FindFiles finds README.md files in project directories
+// FindFiles finds README.md files in project directories (structured mode)
+// or all .md files in the project tree (unstructured mode)
 func (c *Config) FindFiles(project string) ([]string, error) {
-	pattern := filepath.Join(c.PRJDIR, project, "notes", "??????????????", "README.md")
-	if project == "" || project == "*" {
-		pattern = filepath.Join(c.PRJDIR, "*", "notes", "??????????????", "README.md")
+	if c.Structured {
+		// Structured mode: look for specific zettelkasten directory structure
+		pattern := filepath.Join(c.PRJDIR, project, "notes", "??????????????", "README.md")
+		if project == "" || project == "*" {
+			pattern = filepath.Join(c.PRJDIR, "*", "notes", "??????????????", "README.md")
+		}
+		matches, err := filepath.Glob(pattern)
+		return matches, err
+	} else {
+		// Unstructured mode: find all .md files in project directory tree
+		return c.findUnstructuredFiles(project)
 	}
-	matches, err := filepath.Glob(pattern)
-	return matches, err
+}
+
+// findUnstructuredFiles walks the project directory tree to find all .md files
+func (c *Config) findUnstructuredFiles(project string) ([]string, error) {
+	var files []string
+
+	// Determine the root directory to scan
+	rootDir := c.PRJDIR
+	if project != "" && project != "*" {
+		rootDir = filepath.Join(c.PRJDIR, project)
+	}
+
+	err := filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip directories and non-.md files
+		if info.IsDir() || !strings.HasSuffix(strings.ToLower(info.Name()), ".md") {
+			return nil
+		}
+
+		files = append(files, path)
+		return nil
+	})
+
+	return files, err
 }
 
 // ProcessFile processes a README.md file and returns tasks
@@ -111,19 +148,46 @@ func (c *Config) ProcessFile(filePath string) ([]*Task, error) {
 	defer file.Close()
 
 	// Extract project and zettel from path
-	// Path: PRJDIR/project/notes/zet/README.md
-	parts := strings.Split(filePath, string(filepath.Separator))
-	if len(parts) < 4 {
-		return nil, fmt.Errorf("invalid path: %s", filePath)
+	var project, zettel string
+
+	if c.Structured {
+		// Structured mode: Path: PRJDIR/project/notes/zet/README.md
+		parts := strings.Split(filePath, string(filepath.Separator))
+		if len(parts) < 4 {
+			return nil, fmt.Errorf("invalid structured path: %s", filePath)
+		}
+		zettel = parts[len(parts)-2]
+		project = parts[len(parts)-4]
+	} else {
+		// Unstructured mode: derive project and zettel from file path
+		relPath, err := filepath.Rel(c.PRJDIR, filePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get relative path: %w", err)
+		}
+
+		parts := strings.Split(relPath, string(filepath.Separator))
+		if len(parts) > 0 {
+			project = parts[0] // First directory is the project
+		} else {
+			project = "unknown"
+		}
+
+		// Check if this file follows zettelkasten structure: project/notes/zettelID/README.md
+		if len(parts) >= 4 && parts[1] == "notes" && filepath.Base(filePath) == "README.md" {
+			// This is a zettelkasten file, use the directory name as zettel ID
+			zettel = parts[2]
+		} else {
+			// Regular file, use filename without extension as zettel ID
+			filename := filepath.Base(filePath)
+			zettel = strings.TrimSuffix(filename, filepath.Ext(filename))
+		}
 	}
-	zettel := parts[len(parts)-2]
-	project := parts[len(parts)-4]
 
 	var tasks []*Task
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
-		task := c.ParseLine(line, project, zettel)
+		task := c.ParseLine(line, project, zettel, filePath)
 		if task != nil {
 			tasks = append(tasks, task)
 		}
@@ -132,7 +196,7 @@ func (c *Config) ProcessFile(filePath string) ([]*Task, error) {
 }
 
 // ParseLine parses a task line and returns a Task
-func (c *Config) ParseLine(line, project, zettel string) *Task {
+func (c *Config) ParseLine(line, project, zettel, filePath string) *Task {
 	// Regex to match: ^[A-Z]+: .+( #[^ ]+)?( @[^ ]+)?( >> .+)?$
 	re := regexp.MustCompile(`^([A-Z]+):\s*(.+?)(?:\s*#([^ ]+))?(?:\s*@([^ ]+))?(?:\s*>>\s*(.+))?$`)
 	matches := re.FindStringSubmatch(line)
@@ -168,6 +232,7 @@ func (c *Config) ParseLine(line, project, zettel string) *Task {
 		Assignee: assignee,
 		Project:  project,
 		Zettel:   zettel,
+		FilePath: filePath,
 		config:   c,
 	}
 }
@@ -184,17 +249,6 @@ func (c *Config) isValidKeyword(keyword string) bool {
 		}
 	}
 	for _, kw := range c.CompletedKeywords {
-		if keyword == kw {
-			return true
-		}
-	}
-	return false
-}
-
-func isValidKeyword(keyword string) bool {
-	active := []string{"TODO", "TASK", "NOTE", "REMINDER", "EVENT", "MEETING", "CALL", "EMAIL", "MESSAGE", "FOLLOWUP", "REVIEW", "CHECKIN", "CHECKOUT", "RESEARCH", "READING", "WRITING", "DRAFT", "EDITING", "FINALIZE", "SUBMIT", "PRESENTATION", "WAITING", "DEFERRED", "DELEGATED"}
-	completed := []string{"ARCHIVED", "CANCELED", "DELETED", "DONE", "COMPLETED", "CLOSED"}
-	for _, kw := range append(active, completed...) {
 		if keyword == kw {
 			return true
 		}

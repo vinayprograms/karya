@@ -3,7 +3,7 @@
 all: build
 
 # pattern rule to build all commands in cmd/
-bin/%: cmd/%/*
+bin/%: cmd/%/*.go
 	go build -o $@ $<
 
 # use pattern rule to build all commands in cmd/

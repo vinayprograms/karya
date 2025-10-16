@@ -15,6 +15,7 @@ type Config struct {
 	EDITOR             string   `toml:"editor"`
 	KARYA_DIR          string   `toml:"karya_dir"`
 	ShowCompleted      bool     `toml:"show_completed"`
+	Structured         bool     `toml:"structured"`
 	ActiveKeywords     []string `toml:"active_keywords"`
 	InProgressKeywords []string `toml:"inprogress_keywords"`
 	CompletedKeywords  []string `toml:"completed_keywords"`
@@ -28,10 +29,16 @@ func Load() (*Config, error) {
 		EDITOR:    os.Getenv("EDITOR"),
 		KARYA_DIR: os.Getenv("KARYA_DIR"),
 	}
-	
+
 	// Check SHOW_COMPLETED environment variable
 	if showCompleted := os.Getenv("SHOW_COMPLETED"); showCompleted != "" {
 		cfg.ShowCompleted = showCompleted == "true" || showCompleted == "1"
+	}
+
+	// Check STRUCTURED environment variable (defaults to true)
+	cfg.Structured = true // default value
+	if structured := os.Getenv("STRUCTURED"); structured != "" {
+		cfg.Structured = structured == "true" || structured == "1"
 	}
 
 	// If PRJDIR not set, try loading from config file
@@ -51,7 +58,7 @@ func Load() (*Config, error) {
 			cfg.ZETDIR = expandEnv(cfg.ZETDIR)
 			cfg.EDITOR = expandEnv(cfg.EDITOR)
 			cfg.KARYA_DIR = expandEnv(cfg.KARYA_DIR)
-			
+
 			// Environment variable overrides config file for ShowCompleted
 			if showCompleted := os.Getenv("SHOW_COMPLETED"); showCompleted != "" {
 				cfg.ShowCompleted = showCompleted == "true" || showCompleted == "1"

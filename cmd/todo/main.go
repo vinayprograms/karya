@@ -164,15 +164,19 @@ func (d taskDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 }
 
 type model struct {
-	list             list.Model
-	tasks            []*task.Task
-	config           *task.Config
-	project          string
-	quitting         bool
-	watcher          *fsnotify.Watcher
-	projectColWidth  int
-	savedFilter      string
-	savedFilterState list.FilterState
+	list            list.Model
+	tasks           []*task.Task
+	config          *task.Config
+	project         string
+	quitting        bool
+	watcher         *fsnotify.Watcher
+	projectColWidth int
+	savedFilter     string
+	customFilter    string
+	filtering       bool
+	allItems        []list.Item
+	structuredMode  bool
+	loading         bool
 }
 
 func (m model) Init() tea.Cmd {
@@ -180,6 +184,12 @@ func (m model) Init() tea.Cmd {
 }
 
 type fileChangedMsg struct{}
+
+type loadingStartMsg struct{}
+type loadingDoneMsg struct {
+	tasks []*task.Task
+	err   error
+}
 
 func waitForFileChange(watcher *fsnotify.Watcher) tea.Cmd {
 	return func() tea.Msg {
@@ -209,43 +219,95 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
-		// Handle esc: cancel filter if filtering, otherwise quit
-		if msg.String() == "esc" {
-			if m.list.FilterState() == list.Filtering || m.list.FilterState() == list.FilterApplied {
-				m.list.ResetFilter()
-			}
-		}
-
-		// Handle q: quit only when not filtering
-		if msg.String() == "q" && m.list.FilterState() != list.Filtering {
-			m.quitting = true
-			if m.watcher != nil {
-				m.watcher.Close()
-			}
-			return m, tea.Quit
-		}
-
-		switch msg.String() {
-		case "enter", "tab":
-			// Only open editor if not actively typing in filter
-			if m.list.FilterState() != list.Filtering {
-				if i, ok := m.list.SelectedItem().(taskItem); ok {
-					m.savedFilter = m.list.FilterValue()
-					m.savedFilterState = m.list.FilterState()
-					return m, openEditorCmd(m.config, i.task, m.project)
+		// Handle custom filtering
+		if m.filtering {
+			switch msg.String() {
+			case "esc":
+				// Cancel filtering
+				m.filtering = false
+				m.customFilter = ""
+				m.list.SetItems(m.allItems)
+				return m, nil
+			case "enter":
+				// Exit filtering mode but keep filter applied
+				m.filtering = false
+				return m, nil
+			case "backspace":
+				if len(m.customFilter) > 0 {
+					m.customFilter = m.customFilter[:len(m.customFilter)-1]
+					m.applyCustomFilter()
+				} else {
+					// Exit filtering if filter is empty
+					m.filtering = false
+					m.list.SetItems(m.allItems)
+				}
+				return m, nil
+			default:
+				// Add character to filter
+				if len(msg.Runes) > 0 && msg.Runes[0] >= 32 && msg.Runes[0] <= 126 { // Printable ASCII
+					m.customFilter += string(msg.Runes[0])
+					m.applyCustomFilter()
+					return m, nil
 				}
 			}
-		}
-
-		// Auto-dismiss filter when backspace/delete makes it empty
-		if m.list.FilterState() == list.Filtering {
-			if msg.String() == "backspace" || msg.String() == "delete" {
-				var cmd tea.Cmd
-				m.list, cmd = m.list.Update(msg)
-				if m.list.FilterValue() == "" {
-					m.list.ResetFilter()
+		} else {
+			// Handle esc: quit if not filtering
+			if msg.String() == "esc" {
+				if m.customFilter != "" {
+					// Clear filter
+					m.customFilter = ""
+					m.list.SetItems(m.allItems)
+					return m, nil
 				}
-				return m, cmd
+			}
+
+			// Handle q: quit only when not filtering
+			if msg.String() == "q" {
+				m.quitting = true
+				if m.watcher != nil {
+					m.watcher.Close()
+				}
+				return m, tea.Quit
+			}
+
+			// Start filtering (keep existing filter for editing)
+			if msg.String() == "/" {
+				m.filtering = true
+				// Don't reset m.customFilter - keep existing filter for editing
+				return m, nil
+			}
+
+			// Switch to structured mode
+			if msg.String() == "s" {
+				if !m.structuredMode {
+					m.structuredMode = true
+					m.config.Structured = true
+					m.list.Title = "Tasks (Zettelkasten)"
+					return m, reloadTasksCmd(m.config, m.project)
+				}
+				return m, nil
+			}
+
+			// Switch to unstructured mode
+			if msg.String() == "u" {
+				if m.structuredMode {
+					m.structuredMode = false
+					m.config.Structured = false
+					m.list.Title = "Tasks (All)"
+					return m, reloadTasksCmd(m.config, m.project)
+				}
+				return m, nil
+			}
+
+			switch msg.String() {
+			case "enter", "tab":
+				// Only open editor if not actively filtering
+				if !m.filtering {
+					if i, ok := m.list.SelectedItem().(taskItem); ok {
+						m.savedFilter = m.customFilter
+						return m, openEditorCmd(m.config, i.task, m.project)
+					}
+				}
 			}
 		}
 	case fileChangedMsg:
@@ -280,12 +342,59 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			for i, t := range m.tasks {
 				items[i] = taskItem{task: t, projectColWidth: m.projectColWidth}
 			}
-			m.list.SetItems(items)
+			m.allItems = items
+			if m.customFilter != "" {
+				m.applyCustomFilter()
+			} else {
+				m.list.SetItems(items)
+			}
 			m.list.ResetSelected()
-			m.list.ResetFilter()
 		}
 		// Continue watching for changes
 		return m, waitForFileChange(m.watcher)
+	case loadingStartMsg:
+		// Start loading
+		m.loading = true
+		return m, loadTasksCmd(m.config, m.project)
+	case loadingDoneMsg:
+		// Finish loading
+		m.loading = false
+		if msg.err == nil {
+			m.tasks = msg.tasks
+			// Sort tasks: by priority first, then by project name
+			sort.Slice(m.tasks, func(i, j int) bool {
+				getPriority := func(t *task.Task) int {
+					if t.IsActive() {
+						return 0
+					} else if t.IsInProgress() {
+						return 1
+					}
+					return 2
+				}
+
+				priorityI := getPriority(m.tasks[i])
+				priorityJ := getPriority(m.tasks[j])
+
+				// First sort by priority
+				if priorityI != priorityJ {
+					return priorityI < priorityJ
+				}
+
+				// Within same priority, sort by project name
+				return m.tasks[i].Project < m.tasks[j].Project
+			})
+
+			m.projectColWidth = calculateProjectColWidth(m.tasks)
+			items := make([]list.Item, len(m.tasks))
+			for i, t := range m.tasks {
+				items[i] = taskItem{task: t, projectColWidth: m.projectColWidth}
+			}
+			m.allItems = items
+			m.list.SetItems(items)
+			m.applyCustomFilter() // Reapply any active filter
+			m.list.ResetSelected()
+		}
+		return m, nil
 	case editorFinishedMsg:
 		// Log any errors from the editor
 		if msg.err != nil {
@@ -326,16 +435,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for i, t := range m.tasks {
 			items[i] = taskItem{task: t, projectColWidth: m.projectColWidth}
 		}
-		m.list.SetItems(items)
-		m.list.ResetSelected()
+		m.allItems = items
 
+		// Restore previous filter if there was one
 		if m.savedFilter != "" {
-			m.list, _ = m.list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
-			for _, r := range m.savedFilter {
-				m.list, _ = m.list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-			}
-			m.list, _ = m.list.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			m.customFilter = m.savedFilter
+			m.applyCustomFilter()
+		} else {
+			m.list.SetItems(items)
 		}
+		m.list.ResetSelected()
 
 		return m, nil
 	case tea.WindowSizeMsg:
@@ -348,26 +457,74 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *model) applyCustomFilter() {
+	if m.customFilter == "" {
+		m.list.SetItems(m.allItems)
+		return
+	}
+
+	var filteredItems []list.Item
+	filterLower := strings.ToLower(m.customFilter)
+
+	for _, item := range m.allItems {
+		if strings.Contains(strings.ToLower(item.FilterValue()), filterLower) {
+			filteredItems = append(filteredItems, item)
+		}
+	}
+
+	m.list.SetItems(filteredItems)
+}
+
 func (m model) View() string {
 	if m.quitting {
 		return ""
 	}
 	view := m.list.View()
-	if m.list.FilterState() == list.FilterApplied && m.list.FilterValue() != "" {
+
+	// Show filter status if active
+	if m.filtering || m.customFilter != "" {
+		var filterText string
+		if m.filtering {
+			filterText = fmt.Sprintf("Filter: %s▓", m.customFilter) // Show cursor when actively typing
+		} else if m.customFilter != "" {
+			filterText = fmt.Sprintf("Filter: %s", m.customFilter)
+		}
+
 		filterInfo := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("11")).
 			Background(lipgloss.Color("0")).
 			Padding(0, 1).
-			Render(fmt.Sprintf("Filter: %s", m.list.FilterValue()))
+			Render(filterText)
 		view = filterInfo + "\n" + view
 	}
+
 	return view
 }
 
 type editorFinishedMsg struct{ err error }
 
+func reloadTasksCmd(cfg *task.Config, project string) tea.Cmd {
+	return func() tea.Msg {
+		return loadingStartMsg{}
+	}
+}
+
+func loadTasksCmd(cfg *task.Config, project string) tea.Cmd {
+	return func() tea.Msg {
+		tasks, err := cfg.ListTasks(project, cfg.ShowCompleted)
+		return loadingDoneMsg{tasks: tasks, err: err}
+	}
+}
+
 func openEditorCmd(cfg *task.Config, t *task.Task, project string) tea.Cmd {
-	filePath := filepath.Join(cfg.PRJDIR, t.Project, "notes", t.Zettel, "README.md")
+	var filePath string
+	if cfg.Structured {
+		// Structured mode: construct path from project/zettel
+		filePath = filepath.Join(cfg.PRJDIR, t.Project, "notes", t.Zettel, "README.md")
+	} else {
+		// Unstructured mode: use the original file path where task was found
+		filePath = t.FilePath
+	}
 
 	// Find line number by matching keyword and title
 	lineNum, err := findTaskLine(filePath, t.Keyword, t.Title)
@@ -526,11 +683,12 @@ COMMANDS:
     -h, --help, help    Show this help message
 
 INTERACTIVE MODE:
-    Type to filter      Filter tasks by typing
+    /                   Start filtering (exact text match)
+    Type to filter      Filter tasks by typing (when in filter mode)
     j/k or ↑/↓          Navigate tasks
-    Enter               Edit selected task at specific line
-    q                   Quit (when not filtering)
-    Esc                 Exit filter mode or quit
+    Enter               Edit selected task at specific line / Exit filter mode
+    q                   Quit
+    Esc                 Exit filter mode or clear filter
     Ctrl+C              Quit
 
 EXAMPLES:
@@ -626,15 +784,31 @@ func showInteractiveTUI(config *task.Config, project string) {
 	delegate.SetSpacing(0)
 
 	l := list.New(items, delegate, 0, 0)
-	l.Title = "Tasks"
+	if config.Structured {
+		l.Title = "Tasks (Zettelkasten)"
+	} else {
+		l.Title = "Tasks (All)"
+	}
 	l.SetShowStatusBar(false)
-	l.SetFilteringEnabled(true)
+	l.SetFilteringEnabled(false) // Disable built-in filtering
 	l.KeyMap.Quit.SetKeys("ctrl+c")
 	l.AdditionalShortHelpKeys = func() []key.Binding {
 		return []key.Binding{
 			key.NewBinding(
 				key.WithKeys("enter/tab"),
 				key.WithHelp("enter/tab", "edit"),
+			),
+			key.NewBinding(
+				key.WithKeys("/"),
+				key.WithHelp("/", "filter"),
+			),
+			key.NewBinding(
+				key.WithKeys("s"),
+				key.WithHelp("s", "structured"),
+			),
+			key.NewBinding(
+				key.WithKeys("u"),
+				key.WithHelp("u", "unstructured"),
 			),
 		}
 	}
@@ -646,6 +820,8 @@ func showInteractiveTUI(config *task.Config, project string) {
 		project:         project,
 		watcher:         watcher,
 		projectColWidth: projectColWidth,
+		allItems:        items,
+		structuredMode:  config.Structured,
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
