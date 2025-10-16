@@ -226,7 +226,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
-		case "enter":
+		case "enter", "tab":
 			// Only open editor if not actively typing in filter
 			if m.list.FilterState() != list.Filtering {
 				if i, ok := m.list.SelectedItem().(taskItem); ok {
@@ -546,19 +546,19 @@ EXAMPLES:
 ENVIRONMENT VARIABLES:
     EDITOR              Editor to use (supports vim, nvim, emacs, nano, code)
                         Can include arguments, e.g., EDITOR="emacs -nw"
-    
+
     SHOW_COMPLETED      Show completed tasks (true/false, default: false)
                         Can also be set in ~/.config/karya/config.toml
 
 CONFIGURATION:
     Config file: ~/.config/karya/config.toml
-    
+
     Options:
         show_completed = true/false     # Show completed tasks
         active_keywords = [...]          # Customize active task keywords
         inprogress_keywords = [...]      # Customize in-progress keywords
         completed_keywords = [...]       # Customize completed keywords
-    
+
     See config.toml.example for full configuration options.
 `
 	fmt.Print(help)
@@ -633,8 +633,8 @@ func showInteractiveTUI(config *task.Config, project string) {
 	l.AdditionalShortHelpKeys = func() []key.Binding {
 		return []key.Binding{
 			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "edit"),
+				key.WithKeys("enter/tab"),
+				key.WithHelp("enter/tab", "edit"),
 			),
 		}
 	}
