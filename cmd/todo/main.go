@@ -72,9 +72,14 @@ func (i taskItem) renderWithSelection(isSelected bool) string {
 	if i.task.Tag != "" {
 		parts = append(parts, tagColor.Render(fmt.Sprintf(" %s ", i.task.Tag)))
 	}
-	if i.task.Date != "" {
-		dateStyle := getDateStyle(i.task.Date)
-		parts = append(parts, dateStyle.Render(fmt.Sprintf(" %s ", i.task.Date)))
+	// Display date types with prefixes
+	if i.task.ScheduledAt != "" {
+		dateStyle := getDateStyle(i.task.ScheduledAt)
+		parts = append(parts, dateStyle.Render(fmt.Sprintf(" S:%s ", i.task.ScheduledAt)))
+	}
+	if i.task.DueAt != "" {
+		dateStyle := getDateStyle(i.task.DueAt)
+		parts = append(parts, dateStyle.Render(fmt.Sprintf(" D:%s ", i.task.DueAt)))
 	}
 	if i.task.Assignee != "" {
 		parts = append(parts, assigneeColor.Render(fmt.Sprintf(" %s ", i.task.Assignee)))
@@ -84,9 +89,9 @@ func (i taskItem) renderWithSelection(isSelected bool) string {
 }
 
 func (i taskItem) FilterValue() string {
-	return fmt.Sprintf("%s %s %s %s %s %s %s",
+	return fmt.Sprintf("%s %s %s %s %s %s %s %s",
 		i.task.Project, i.task.Zettel, i.task.Keyword, i.task.Title,
-		i.task.Tag, i.task.Date, i.task.Assignee)
+		i.task.Tag, i.task.ScheduledAt, i.task.DueAt, i.task.Assignee)
 }
 
 func (i taskItem) Title() string {
@@ -112,9 +117,14 @@ func (i taskItem) Title() string {
 	if i.task.Tag != "" {
 		parts = append(parts, tagColor.Render(fmt.Sprintf(" %s ", i.task.Tag)))
 	}
-	if i.task.Date != "" {
-		dateStyle := getDateStyle(i.task.Date)
-		parts = append(parts, dateStyle.Render(fmt.Sprintf(" %s ", i.task.Date)))
+	// Display date types with prefixes
+	if i.task.ScheduledAt != "" {
+		dateStyle := getDateStyle(i.task.ScheduledAt)
+		parts = append(parts, dateStyle.Render(fmt.Sprintf(" S:%s ", i.task.ScheduledAt)))
+	}
+	if i.task.DueAt != "" {
+		dateStyle := getDateStyle(i.task.DueAt)
+		parts = append(parts, dateStyle.Render(fmt.Sprintf(" D:%s ", i.task.DueAt)))
 	}
 	if i.task.Assignee != "" {
 		parts = append(parts, assigneeColor.Render(fmt.Sprintf(" %s ", i.task.Assignee)))
@@ -283,7 +293,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.structuredMode = true
 					m.config.Structured = true
 					m.list.Title = "Tasks (Zettelkasten)"
-					return m, reloadTasksCmd(m.config, m.project)
+					return m, reloadTasksCmd()
 				}
 				return m, nil
 			}
@@ -294,7 +304,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.structuredMode = false
 					m.config.Structured = false
 					m.list.Title = "Tasks (All)"
-					return m, reloadTasksCmd(m.config, m.project)
+					return m, reloadTasksCmd()
 				}
 				return m, nil
 			}
@@ -305,7 +315,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if !m.filtering {
 					if i, ok := m.list.SelectedItem().(taskItem); ok {
 						m.savedFilter = m.customFilter
-						return m, openEditorCmd(m.config, i.task, m.project)
+						return m, openEditorCmd(m.config, i.task)
 					}
 				}
 			}
@@ -463,11 +473,24 @@ func (m *model) applyCustomFilter() {
 		return
 	}
 
-	var filteredItems []list.Item
-	filterLower := strings.ToLower(m.customFilter)
+	// Extract tasks from all items
+	var allTasks []*task.Task
+	var itemToTask = make(map[*task.Task]list.Item)
 
 	for _, item := range m.allItems {
-		if strings.Contains(strings.ToLower(item.FilterValue()), filterLower) {
+		if taskItem, ok := item.(taskItem); ok {
+			allTasks = append(allTasks, taskItem.task)
+			itemToTask[taskItem.task] = item
+		}
+	}
+
+	// Apply field-specific filtering
+	filteredTasks := task.FilterTasks(allTasks, m.customFilter)
+
+	// Convert back to list items
+	var filteredItems []list.Item
+	for _, t := range filteredTasks {
+		if item, exists := itemToTask[t]; exists {
 			filteredItems = append(filteredItems, item)
 		}
 	}
@@ -503,7 +526,7 @@ func (m model) View() string {
 
 type editorFinishedMsg struct{ err error }
 
-func reloadTasksCmd(cfg *task.Config, project string) tea.Cmd {
+func reloadTasksCmd() tea.Cmd {
 	return func() tea.Msg {
 		return loadingStartMsg{}
 	}
@@ -516,7 +539,7 @@ func loadTasksCmd(cfg *task.Config, project string) tea.Cmd {
 	}
 }
 
-func openEditorCmd(cfg *task.Config, t *task.Task, project string) tea.Cmd {
+func openEditorCmd(cfg *task.Config, t *task.Task) tea.Cmd {
 	var filePath string
 	if cfg.Structured {
 		// Structured mode: construct path from project/zettel
@@ -683,23 +706,38 @@ COMMANDS:
     -h, --help, help    Show this help message
 
 INTERACTIVE MODE:
-    /                   Start filtering (exact text match)
-    Type to filter      Filter tasks by typing (when in filter mode)
+    Type '/' to filter  Filter tasks list (See FILTERING below)
     j/k or ↑/↓          Navigate tasks
     Enter               Edit selected task at specific line / Exit filter mode
+    s                   Switch to structured mode (zettelkasten format)
+    u                   Switch to unstructured mode (all .md files)
     q                   Quit
     Esc                 Exit filter mode or clear filter
     Ctrl+C              Quit
 
+FILTERING:
+    text                Search for 'text' across all task fields
+    >> assignee         Filter by assignee (e.g., ">> alice")
+    #tag                Filter by tag (e.g., "#urgent")
+    @date               Filter by scheduled date (e.g., "@2025-01-15")
+    @s:date             Filter by scheduled date (e.g., "@s:2025-01-15")
+    @d:date             Filter by due date (e.g., "@d:2025-01-20")
+
 EXAMPLES:
-    todo                        # Show all tasks in interactive TUI
-    todo ls                     # List all tasks (plain text)
-    todo ls myproject           # List tasks for specific project
-    todo projects               # Show project summary table
-    todo pl                     # Show project list (plain text)
-    todo myproject              # Show tasks for myproject in TUI
-    SHOW_COMPLETED=true todo   # Show completed tasks in TUI
-    SHOW_COMPLETED=false todo  # Hide completed tasks (default)
+    todo                           # Show all tasks in interactive TUI
+    todo ls                        # List all tasks (plain text)
+    todo ls myproject              # List tasks for specific project
+    todo projects                  # Show project summary table
+    todo pl                        # Show project list (plain text)
+    todo myproject                 # Show tasks for myproject in TUI
+    SHOW_COMPLETED=true todo       # Show completed tasks in TUI
+    STRUCTURED=false todo          # Use unstructured mode (all .md files)
+    
+    # In interactive mode, press '/' and then type:
+    #   >> alice                   # Show tasks assigned to alice
+    #   #urgent                    # Show tasks with #urgent tag
+    #   @2025-01-15               # Show tasks scheduled for Jan 15, 2025
+    #   @d:2025-01-20             # Show tasks due on Jan 20, 2025
 
 ENVIRONMENT VARIABLES:
     EDITOR              Editor to use (supports vim, nvim, emacs, nano, code)
@@ -708,11 +746,17 @@ ENVIRONMENT VARIABLES:
     SHOW_COMPLETED      Show completed tasks (true/false, default: false)
                         Can also be set in ~/.config/karya/config.toml
 
+    STRUCTURED          Use structured zettelkasten format (true/false, default: true)
+                        - true: Search for project/notes/zettelID/README.md files
+                        - false: Search all .md files in project directory tree
+                        Can also be set in ~/.config/karya/config.toml
+
 CONFIGURATION:
     Config file: ~/.config/karya/config.toml
 
     Options:
         show_completed = true/false     # Show completed tasks
+        structured = true/false         # Use zettelkasten format vs all .md files
         active_keywords = [...]          # Customize active task keywords
         inprogress_keywords = [...]      # Customize in-progress keywords
         completed_keywords = [...]       # Customize completed keywords
@@ -843,8 +887,11 @@ func printTasksPlain(tasks []*task.Task) {
 		if t.Tag != "" {
 			fmt.Printf(" #%s", t.Tag)
 		}
-		if t.Date != "" {
-			fmt.Printf(" @%s", t.Date)
+		if t.ScheduledAt != "" {
+			fmt.Printf(" S:%s", t.ScheduledAt)
+		}
+		if t.DueAt != "" {
+			fmt.Printf(" D:%s", t.DueAt)
 		}
 		if t.Assignee != "" {
 			fmt.Printf(" >> %s", t.Assignee)
@@ -874,28 +921,6 @@ func showProjectsTable(summary map[string]int) {
 		Rows(rows...)
 
 	fmt.Println(t)
-}
-
-func printProjectsTable(summary map[string]int) {
-	var projects []string
-	maxLen := 0
-	for p := range summary {
-		projects = append(projects, p)
-		if len(p) > maxLen {
-			maxLen = len(p)
-		}
-	}
-	sort.Strings(projects)
-
-	// Print header
-	fmt.Printf("\n%-*s Tasks\n", maxLen, "Project")
-	fmt.Printf("%s %s\n", strings.Repeat("-", maxLen), "-----")
-
-	// Print projects
-	for _, p := range projects {
-		fmt.Printf("%-*s %5d\n", maxLen, p, summary[p])
-	}
-	fmt.Println()
 }
 
 func printProjectsList(summary map[string]int) {

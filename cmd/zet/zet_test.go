@@ -2,7 +2,6 @@ package main
 
 import (
 	"testing"
-	"karya/internal/zet"
 )
 
 func TestCountZettels(t *testing.T) {

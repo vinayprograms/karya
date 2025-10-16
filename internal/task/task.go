@@ -14,15 +14,16 @@ import (
 
 // Task represents a parsed task from a line
 type Task struct {
-	Keyword  string
-	Title    string
-	Tag      string
-	Date     string
-	Assignee string
-	Project  string
-	Zettel   string
-	FilePath string // Original file path where this task was found
-	config   *Config
+	Keyword     string
+	Title       string
+	Tag         string
+	ScheduledAt string // @date or @s:date (scheduled date)
+	DueAt       string // @d:date (due date)
+	Assignee    string
+	Project     string
+	Zettel      string
+	FilePath    string // Original file path where this task was found
+	config      *Config
 }
 
 // IsActive returns true if the task is active (not completed)
@@ -197,43 +198,75 @@ func (c *Config) ProcessFile(filePath string) ([]*Task, error) {
 
 // ParseLine parses a task line and returns a Task
 func (c *Config) ParseLine(line, project, zettel, filePath string) *Task {
-	// Regex to match: ^[A-Z]+: .+( #[^ ]+)?( @[^ ]+)?( >> .+)?$
-	re := regexp.MustCompile(`^([A-Z]+):\s*(.+?)(?:\s*#([^ ]+))?(?:\s*@([^ ]+))?(?:\s*>>\s*(.+))?$`)
-	matches := re.FindStringSubmatch(line)
-	if len(matches) == 0 {
+	// First check for basic structure: KEYWORD: title
+	basicRe := regexp.MustCompile(`^([A-Z]+):\s*(.+)$`)
+	basicMatches := basicRe.FindStringSubmatch(line)
+	if len(basicMatches) == 0 {
 		return nil
 	}
 
-	keyword := matches[1]
+	keyword := basicMatches[1]
 	// Check if keyword is valid
 	if !c.isValidKeyword(keyword) {
 		return nil
 	}
 
-	title := matches[2]
-	tag := ""
-	if len(matches) > 3 && matches[3] != "" {
-		tag = matches[3]
+	// Parse the rest of the line for metadata
+	title := basicMatches[2]
+
+	// Extract tag (#tag)
+	var tag string
+	tagRe := regexp.MustCompile(`\s*#([^ ]+)`)
+	if tagMatch := tagRe.FindStringSubmatch(title); len(tagMatch) > 1 {
+		tag = tagMatch[1]
+		title = tagRe.ReplaceAllString(title, "") // Remove from title
 	}
-	date := ""
-	if len(matches) > 4 && matches[4] != "" {
-		date = matches[4]
+
+	// Extract assignee (>> assignee)
+	var assignee string
+	assigneeRe := regexp.MustCompile(`\s*>>\s*(.+?)(?:\s*#|$)`)
+	if assigneeMatch := assigneeRe.FindStringSubmatch(title); len(assigneeMatch) > 1 {
+		assignee = strings.TrimSpace(assigneeMatch[1])
+		title = assigneeRe.ReplaceAllString(title, "") // Remove from title
 	}
-	assignee := ""
-	if len(matches) > 5 && matches[5] != "" {
-		assignee = strings.TrimSpace(matches[5])
+
+	// Extract dates (@date, @s:date, @d:date)
+	var scheduledAt, dueAt string
+
+	// Match @s:date pattern
+	scheduledRe := regexp.MustCompile(`\s*@s:([^ ]+)`)
+	if scheduledMatch := scheduledRe.FindStringSubmatch(title); len(scheduledMatch) > 1 {
+		scheduledAt = scheduledMatch[1]
+		title = scheduledRe.ReplaceAllString(title, "") // Remove from title
+	}
+
+	// Match @d:date pattern
+	dueRe := regexp.MustCompile(`\s*@d:([^ ]+)`)
+	if dueMatch := dueRe.FindStringSubmatch(title); len(dueMatch) > 1 {
+		dueAt = dueMatch[1]
+		title = dueRe.ReplaceAllString(title, "") // Remove from title
+	}
+
+	// Match simple @date pattern (treat as scheduled date if no explicit @s:date)
+	dateRe := regexp.MustCompile(`\s*@([^ :]+)`)
+	if dateMatch := dateRe.FindStringSubmatch(title); len(dateMatch) > 1 {
+		if scheduledAt == "" { // Only use it if no explicit @s:date was found
+			scheduledAt = dateMatch[1]
+		}
+		title = dateRe.ReplaceAllString(title, "") // Always remove from title
 	}
 
 	return &Task{
-		Keyword:  keyword,
-		Title:    strings.TrimSpace(title),
-		Tag:      tag,
-		Date:     date,
-		Assignee: assignee,
-		Project:  project,
-		Zettel:   zettel,
-		FilePath: filePath,
-		config:   c,
+		Keyword:     keyword,
+		Title:       strings.TrimSpace(title),
+		Tag:         tag,
+		ScheduledAt: scheduledAt,
+		DueAt:       dueAt,
+		Assignee:    assignee,
+		Project:     project,
+		Zettel:      zettel,
+		FilePath:    filePath,
+		config:      c,
 	}
 }
 
@@ -264,10 +297,8 @@ func (c *Config) ListTasks(project string, showCompleted bool) ([]*Task, error) 
 	}
 
 	// Use concurrent processing for better performance
-	numWorkers := 10 // Adjust based on system
-	if len(files) < numWorkers {
-		numWorkers = len(files)
-	}
+	// Choose between basic or adaptive worker calculation
+	numWorkers := calculateAdaptiveWorkers(len(files), "file-processing")
 	if numWorkers == 0 {
 		return []*Task{}, nil
 	}
@@ -336,10 +367,7 @@ func (c *Config) SummarizeProjects() (map[string]int, error) {
 	}
 
 	// Use concurrent processing
-	numWorkers := 10
-	if len(files) < numWorkers {
-		numWorkers = len(files)
-	}
+	numWorkers := calculateOptimalWorkers(len(files), "file-processing")
 	if numWorkers == 0 {
 		return make(map[string]int), nil
 	}
@@ -399,4 +427,147 @@ func (c *Config) SummarizeProjects() (map[string]int, error) {
 	}
 
 	return summary, nil
+}
+
+// FilterTasks applies field-specific filtering to a slice of tasks
+func FilterTasks(tasks []*Task, filterString string) []*Task {
+	if filterString == "" {
+		return tasks
+	}
+
+	// Detect filter type and apply appropriate logic
+	switch {
+	case strings.HasPrefix(filterString, ">>"):
+		// Assignee filter: >> assignee
+		assignee := strings.TrimSpace(filterString[2:])
+		return filterByAssignee(tasks, assignee)
+
+	case strings.HasPrefix(filterString, "@s:"):
+		// Scheduled date filter: @s:date
+		date := strings.TrimSpace(filterString[3:])
+		return filterByScheduledDate(tasks, date)
+
+	case strings.HasPrefix(filterString, "@d:"):
+		// Due date filter: @d:date
+		date := strings.TrimSpace(filterString[3:])
+		return filterByDueDate(tasks, date)
+
+	case strings.HasPrefix(filterString, "@"):
+		// Simple date filter: @date
+		date := strings.TrimSpace(filterString[1:])
+		return filterByDate(tasks, date)
+
+	case strings.HasPrefix(filterString, "#"):
+		// Tag filter: #tag
+		tag := strings.TrimSpace(filterString[1:])
+		return filterByTag(tasks, tag)
+
+	default:
+		// Default: search in all fields (original behavior)
+		return filterByAnyField(tasks, filterString)
+	}
+}
+
+// filterByAssignee filters tasks by assignee
+func filterByAssignee(tasks []*Task, assignee string) []*Task {
+	if assignee == "" {
+		return tasks
+	}
+
+	var filtered []*Task
+	assigneeLower := strings.ToLower(assignee)
+
+	for _, task := range tasks {
+		if strings.Contains(strings.ToLower(task.Assignee), assigneeLower) {
+			filtered = append(filtered, task)
+		}
+	}
+	return filtered
+}
+
+// filterByDate filters tasks by the simple date field (now treated as scheduled date)
+func filterByDate(tasks []*Task, date string) []*Task {
+	if date == "" {
+		return tasks
+	}
+
+	var filtered []*Task
+	dateLower := strings.ToLower(date)
+
+	for _, task := range tasks {
+		if strings.Contains(strings.ToLower(task.ScheduledAt), dateLower) {
+			filtered = append(filtered, task)
+		}
+	}
+	return filtered
+} // filterByScheduledDate filters tasks by scheduled date (@s:)
+func filterByScheduledDate(tasks []*Task, date string) []*Task {
+	if date == "" {
+		return tasks
+	}
+
+	var filtered []*Task
+	dateLower := strings.ToLower(date)
+
+	for _, task := range tasks {
+		if strings.Contains(strings.ToLower(task.ScheduledAt), dateLower) {
+			filtered = append(filtered, task)
+		}
+	}
+	return filtered
+}
+
+// filterByDueDate filters tasks by due date (@d:)
+func filterByDueDate(tasks []*Task, date string) []*Task {
+	if date == "" {
+		return tasks
+	}
+
+	var filtered []*Task
+	dateLower := strings.ToLower(date)
+
+	for _, task := range tasks {
+		if strings.Contains(strings.ToLower(task.DueAt), dateLower) {
+			filtered = append(filtered, task)
+		}
+	}
+	return filtered
+}
+
+// filterByTag filters tasks by tag
+func filterByTag(tasks []*Task, tag string) []*Task {
+	if tag == "" {
+		return tasks
+	}
+
+	var filtered []*Task
+	tagLower := strings.ToLower(tag)
+
+	for _, task := range tasks {
+		if strings.Contains(strings.ToLower(task.Tag), tagLower) {
+			filtered = append(filtered, task)
+		}
+	}
+	return filtered
+}
+
+// filterByAnyField filters tasks by searching in all fields (original behavior)
+func filterByAnyField(tasks []*Task, searchTerm string) []*Task {
+	if searchTerm == "" {
+		return tasks
+	}
+
+	var filtered []*Task
+	searchLower := strings.ToLower(searchTerm)
+
+	for _, task := range tasks {
+		searchString := fmt.Sprintf("%s %s %s %s %s %s %s %s",
+			task.Project, task.Zettel, task.Keyword, task.Title,
+			task.Tag, task.ScheduledAt, task.DueAt, task.Assignee)
+
+		if strings.Contains(strings.ToLower(searchString), searchLower) {
+			filtered = append(filtered, task)
+		}
+	}
+	return filtered
 }

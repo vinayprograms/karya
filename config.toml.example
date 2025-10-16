@@ -1,4 +1,5 @@
-# Todo Toolkit Configuration
+# Karya Task Management Configuration
+# Supports structured/unstructured project layouts and field-specific filtering
 
 # Required: Root directory for projects
 prjdir = "/path/to/your/projects"
@@ -14,6 +15,11 @@ prjdir = "/path/to/your/projects"
 
 # Optional: Show completed tasks in TUI (defaults to false)
 # show_completed = true
+
+# Optional: Use structured zettelkasten format (defaults to true)
+# structured = true
+# - true: Search for project/notes/zettelID/README.md files (zettelkasten format)
+# - false: Search all .md files in project directory tree (unstructured)
 
 # Optional: Active/Pending task keywords (defaults shown below)
 # active_keywords = [
@@ -33,3 +39,29 @@ prjdir = "/path/to/your/projects"
 # completed_keywords = [
 #     "ARCHIVED", "CANCELED", "DELETED", "DONE", "COMPLETED", "CLOSED"
 # ]
+
+# ============================================================================
+# ENHANCED FILTERING CAPABILITIES
+# ============================================================================
+# The todo command supports field-specific filtering. In interactive mode,
+# press '/' to enter filter mode and use these patterns:
+#
+# General text search:
+#   authentication     # Search across all task fields
+#
+# Field-specific search:
+#   >> alice          # Filter by assignee (tasks assigned to "alice")
+#   #urgent           # Filter by tag (tasks with "#urgent" tag)
+#   @2025-01-15      # Filter by scheduled date (equivalent to @s:2025-01-15)
+#   @s:2025-01-15    # Filter by explicit scheduled date
+#   @d:2025-01-20    # Filter by due date
+#
+# Task format examples:
+#   TODO: Fix login bug #urgent @s:2025-01-15 @d:2025-01-20 >> alice
+#   PROGRESS: Write docs #documentation @2025-01-10 >> bob
+#   DONE: Setup project #setup @2025-01-01 >> charlie
+#
+# Date fields:
+#   @date        →  Scheduled date (when to start/work on task)
+#   @s:date      →  Explicit scheduled date (same as @date)  
+#   @d:date      →  Due date (when task must be completed)

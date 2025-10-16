@@ -172,7 +172,7 @@ func ListZettels(config *Config, showCount string) error {
 	normal := lipgloss.NewStyle()
 
 	for _, z := range zettels {
-		fmt.Printf("%s%s%s %s\n", magenta.Render(z.ID), normal.Render(""), normal.Render(z.Title))
+		fmt.Printf("%s %s\n", magenta.Render(z.ID), normal.Render(z.Title))
 	}
 
 	if showCount == "-c" {

@@ -1,10 +1,9 @@
 package main
 
 import (
-	"io/ioutil"
+	"karya/internal/task"
 	"os"
 	"testing"
-	"karya/internal/task"
 )
 
 func TestTask_IsActive(t *testing.T) {
@@ -18,7 +17,7 @@ func TestTask_IsActive(t *testing.T) {
 		{"INVALID", false},
 	}
 	for _, tt := range tests {
-		tk := config.ParseLine(tt.keyword+": test", "proj", "zettel")
+		tk := config.ParseLine(tt.keyword+": test", "proj", "zettel", "test.md")
 		if tk == nil {
 			if tt.want {
 				t.Errorf("Task.IsActive() = nil, want %v", tt.want)
@@ -42,7 +41,7 @@ func TestTask_IsCompleted(t *testing.T) {
 		{"INVALID", false},
 	}
 	for _, tt := range tests {
-		tk := config.ParseLine(tt.keyword+": test", "proj", "zettel")
+		tk := config.ParseLine(tt.keyword+": test", "proj", "zettel", "test.md")
 		if tk == nil {
 			if tt.want {
 				t.Errorf("Task.IsCompleted() = nil, want %v", tt.want)
@@ -68,13 +67,13 @@ func TestParseLine(t *testing.T) {
 			project: "proj1",
 			zettel:  "20231001120000",
 			want: &task.Task{
-				Keyword:  "TODO",
-				Title:    "Write documentation",
-				Tag:      "urgent",
-				Date:     "2023-10-01",
-				Assignee: "john",
-				Project:  "proj1",
-				Zettel:   "20231001120000",
+				Keyword:     "TODO",
+				Title:       "Write documentation",
+				Tag:         "urgent",
+				ScheduledAt: "2023-10-01",
+				Assignee:    "john",
+				Project:     "proj1",
+				Zettel:      "20231001120000",
 			},
 		},
 		{
@@ -107,14 +106,14 @@ func TestParseLine(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		got := config.ParseLine(tt.line, tt.project, tt.zettel)
+		got := config.ParseLine(tt.line, tt.project, tt.zettel, "test.md")
 		if (got == nil && tt.want != nil) || (got != nil && tt.want == nil) {
-			t.Errorf("ParseLine(%q, %q, %q) = %v, want %v", tt.line, tt.project, tt.zettel, got, tt.want)
+			t.Errorf("ParseLine(%q, %q, %q, %q) = %v, want %v", tt.line, tt.project, tt.zettel, "test.md", got, tt.want)
 			continue
 		}
 		if got != nil && tt.want != nil {
-			if got.Keyword != tt.want.Keyword || got.Title != tt.want.Title || got.Tag != tt.want.Tag || got.Date != tt.want.Date || got.Assignee != tt.want.Assignee || got.Project != tt.want.Project || got.Zettel != tt.want.Zettel {
-				t.Errorf("ParseLine(%q, %q, %q) = %v, want %v", tt.line, tt.project, tt.zettel, got, tt.want)
+			if got.Keyword != tt.want.Keyword || got.Title != tt.want.Title || got.Tag != tt.want.Tag || got.ScheduledAt != tt.want.ScheduledAt || got.Assignee != tt.want.Assignee || got.Project != tt.want.Project || got.Zettel != tt.want.Zettel {
+				t.Errorf("ParseLine(%q, %q, %q, %q) = %v, want %v", tt.line, tt.project, tt.zettel, "test.md", got, tt.want)
 			}
 		}
 	}
@@ -125,7 +124,7 @@ func TestProcessFile(t *testing.T) {
 	content := `TODO: Write code #urgent @2023-10-01 >> john
 DONE: Completed task
 INVALID: Skip this`
-	tempFile, err := ioutil.TempFile("", "README.md")
+	tempFile, err := os.CreateTemp("", "README.md")
 	if err != nil {
 		t.Fatal(err)
 	}
