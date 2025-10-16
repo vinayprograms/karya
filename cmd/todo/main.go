@@ -31,13 +31,13 @@ var (
 	completedTaskColor = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))  // Light gray for completed task text
 	tagColor           = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("5"))
 	dateColor          = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Background(lipgloss.Color("15"))
-	pastDateColor      = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("1")) // Inverted for past dates
+	pastDateColor      = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("1"))            // Inverted for past dates
 	todayDateColor     = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("11")).Bold(true) // Yellow background for today
 	assigneeColor      = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("4")).Bold(true)
 )
 
 type taskItem struct {
-	task           *task.Task
+	task            *task.Task
 	projectColWidth int
 }
 
@@ -164,14 +164,14 @@ func (d taskDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 }
 
 type model struct {
-	list            list.Model
-	tasks           []*task.Task
-	config          *task.Config
-	project         string
-	quitting        bool
-	watcher         *fsnotify.Watcher
-	projectColWidth int
-	savedFilter     string
+	list             list.Model
+	tasks            []*task.Task
+	config           *task.Config
+	project          string
+	quitting         bool
+	watcher          *fsnotify.Watcher
+	projectColWidth  int
+	savedFilter      string
 	savedFilterState list.FilterState
 }
 
@@ -208,20 +208,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 		}
-		
+
 		// Handle esc: cancel filter if filtering, otherwise quit
 		if msg.String() == "esc" {
 			if m.list.FilterState() == list.Filtering || m.list.FilterState() == list.FilterApplied {
 				m.list.ResetFilter()
-			} else {
-				m.quitting = true
-				if m.watcher != nil {
-					m.watcher.Close()
-				}
-				return m, tea.Quit
 			}
 		}
-		
+
 		// Handle q: quit only when not filtering
 		if msg.String() == "q" && m.list.FilterState() != list.Filtering {
 			m.quitting = true
@@ -242,7 +236,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		
+
 		// Auto-dismiss filter when backspace/delete makes it empty
 		if m.list.FilterState() == list.Filtering {
 			if msg.String() == "backspace" || msg.String() == "delete" {
@@ -334,7 +328,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.list.SetItems(items)
 		m.list.ResetSelected()
-		
+
 		if m.savedFilter != "" {
 			m.list, _ = m.list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
 			for _, r := range m.savedFilter {
@@ -342,7 +336,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.list, _ = m.list.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		}
-		
+
 		return m, nil
 	case tea.WindowSizeMsg:
 		m.list.SetWidth(msg.Width)
@@ -635,7 +629,7 @@ func showInteractiveTUI(config *task.Config, project string) {
 	l.Title = "Tasks"
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(true)
-	l.KeyMap.Quit.SetKeys("esc", "ctrl+c")
+	l.KeyMap.Quit.SetKeys("ctrl+c")
 	l.AdditionalShortHelpKeys = func() []key.Binding {
 		return []key.Binding{
 			key.NewBinding(
