@@ -1,7 +1,7 @@
 package main
 
 import (
-	"karya/internal/task"
+	"github.com/vinayprograms/karya/internal/task"
 	"os"
 	"testing"
 )

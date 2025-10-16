@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"karya/internal/config"
+	"github.com/vinayprograms/karya/internal/config"
 )
 
 // Task represents a parsed task from a line

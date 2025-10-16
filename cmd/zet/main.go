@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 
-	"karya/internal/zet"
+	"github.com/vinayprograms/karya/internal/zet"
 )
 
 func main() {

@@ -22,12 +22,44 @@ A fast, concurrent task and note management toolkit written in Go. Karya helps y
 ### Build from Source
 
 ```bash
-git clone https://github.com/yourusername/karya.git
+git clone https://github.com/vinayprograms/karya.git
 cd karya
 make build
 ```
 
 Binaries will be available in the `bin/` directory.
+
+### Install with `go install`
+
+You can install individual commands directly using `go install`:
+
+```bash
+# Install specific command
+go install github.com/vinayprograms/karya/cmd/todo@latest
+go install github.com/vinayprograms/karya/cmd/zet@latest
+go install github.com/vinayprograms/karya/cmd/note@latest
+
+# Or install all commands at once
+go install github.com/vinayprograms/karya/cmd/...@latest
+```
+
+Binaries will be installed to `$GOPATH/bin` (typically `$HOME/go/bin`).
+
+**For Private Repository:** Configure Git and Go for private repository access (one-time setup):
+
+```bash
+# Tell Git to use SSH for GitHub (uses your existing ~/.ssh/config)
+git config --global url."git@github.com:".insteadOf "https://github.com/"
+
+# Tell Go to skip checksum verification for private modules
+export GOPRIVATE=github.com/vinayprograms/karya
+# Add this to your ~/.bashrc or ~/.zshrc to make it permanent:
+echo 'export GOPRIVATE=github.com/vinayprograms/karya' >> ~/.bashrc  # or ~/.zshrc
+```
+
+This is required because `go install` uses HTTPS by default and tries to verify modules through the public checksum database. After running these commands, all `go` commands will automatically use SSH (and your existing SSH keys) for GitHub authentication and skip public verification.
+
+Once the repository is made public, this configuration is no longer needed (but won't cause any issues if left in place).
 
 ### Install to System
 
@@ -70,34 +102,89 @@ export KARYA_DIR="$PRJDIR"
 
 ### `todo` - Task Management
 
-Manage tasks across projects with support for tags, dates, and assignees.
+Manage tasks across projects with support for tags, dates, and assignees. Features powerful field-specific filtering and an interactive TUI.
 
 ```bash
-# Show pending tasks (default)
+# Interactive TUI mode (default)
 todo
 
-# List all tasks (including completed)
+# List all tasks in plain text
 todo ls
 
 # List tasks for a specific project
+todo ls myproject
+
+# Show interactive TUI for specific project
 todo myproject
 
-# Show project summary
+# Show project summary table
 todo projects
 
-# Show project list with counts
-todo projlist
+# Show project list (plain text)
+todo pl
+```
+
+**Interactive Mode Keys:**
+- `j/k` or `↑/↓` - Navigate tasks
+- `/` - Start filtering
+- `Enter` - Edit selected task / Exit filter mode
+- `s` - Switch to structured mode (zettelkasten)
+- `u` - Switch to unstructured mode (all .md files)
+- `Esc` - Exit filter mode or clear filter
+- `q` - Quit
+- `Ctrl+C` - Quit
+
+**Field-Specific Filtering:**
+
+Press `/` in interactive mode to filter tasks by specific fields:
+
+- `text` - Search across all fields
+- `>> assignee` - Filter by assignee (e.g., `>> alice`)
+- `#tag` - Filter by tag (e.g., `#urgent`)
+- `@date` - Filter by scheduled date (e.g., `@2025-01-15`)
+- `@s:date` - Explicitly filter by scheduled date (e.g., `@s:2025-01-15`)
+- `@d:date` - Filter by due date (e.g., `@d:2025-01-20`)
+
+**Examples:**
+```bash
+# In interactive mode, press '/' then type:
+>> john          # Show tasks assigned to john
+#urgent          # Show tasks tagged as urgent
+@2025-01-15      # Show tasks scheduled for Jan 15
+@d:2025-01-20    # Show tasks due on Jan 20
 ```
 
 **Task Format in Markdown:**
 ```markdown
-TODO: Implement feature X #urgent @2024-01-15 >> john
+TODO: Implement feature X #urgent @2025-01-15 >> john
+TODO: Review PR @s:2025-01-16 @d:2025-01-18 >> alice
 DONE: Fix bug Y
-TASK: Review PR #123
+TASK: Meeting notes #meeting @2025-01-20
 ```
+
+**Date Prefixes in UI:**
+- `S:` - Scheduled date (when work should start)
+- `D:` - Due date (when work must be completed)
+
+**Date Color Coding:**
+- Past dates: Red (inverted)
+- Today: Yellow (bold)
+- Future dates: Standard
+
+**Environment Variables:**
+```bash
+EDITOR="nvim"              # Editor to use (supports vim, nvim, emacs, nano, code)
+SHOW_COMPLETED=true        # Show completed tasks (default: false)
+STRUCTURED=true            # Use zettelkasten structure (default: true)
+```
+
+**Structured vs Unstructured Mode:**
+- **Structured** (`STRUCTURED=true`): Scans `project/notes/zettelID/README.md` files
+- **Unstructured** (`STRUCTURED=false`): Scans all `.md` files in project directory tree
 
 **Supported Keywords:**
 - Active: TODO, TASK, NOTE, REMINDER, EVENT, MEETING, CALL, EMAIL, MESSAGE, FOLLOWUP, REVIEW, CHECKIN, CHECKOUT, RESEARCH, READING, WRITING, DRAFT, EDITING, FINALIZE, SUBMIT, PRESENTATION, WAITING, DEFERRED, DELEGATED
+- In-Progress: DOING, INPROGRESS, STARTED, WORKING, WIP
 - Completed: ARCHIVED, CANCELED, DELETED, DONE, COMPLETED, CLOSED
 
 ### `zet` - Zettelkasten Notes
@@ -324,12 +411,16 @@ $ZETDIR/
 
 ## Performance
 
-Karya uses concurrent file processing with worker pools:
+Karya uses concurrent file processing with adaptive worker pools:
 
-- **10 concurrent workers** by default
+- **Dynamic worker calculation** - Automatically determines optimal worker count based on:
+  - Number of CPU cores available
+  - Total number of files to process
+  - System resources
 - Efficiently handles **2000+ markdown files**
 - Scales across **22+ directory levels**
 - Non-blocking I/O with goroutines and channels
+- Adaptive performance for both small and large workloads
 
 ## Development
 
@@ -374,13 +465,7 @@ This project follows Go best practices:
 
 ### Concurrency Model
 
-The task processing system uses a worker pool pattern:
-
-1. **File Discovery**: `filepath.Glob` finds all matching files
-2. **Worker Pool**: 10 goroutines process files concurrently
-3. **Channel Communication**: Files sent via channels to workers
-4. **Result Aggregation**: Results collected from workers via channels
-5. **Synchronization**: `sync.WaitGroup` ensures all workers complete
+The task processing system uses an adaptive worker pool calculation to maximize the speed of collecting tasks from across the directory tree. The system starts with file discovery to find all matching files. It then performs dynamic worker allocation by calculating the optimal worker count based on available CPU cores, the total file count to process, and resource constraints (with a minimum of 1 and maximum equal to CPU count). The worker pool consists of goroutines that process files concurrently, using buffered channels for communication between the main process and workers. Results are aggregated from workers via channels, while ensuring that all workers complete before proceeding. This adaptive approach provides optimal performance for both small projects (few files) and large workspaces (thousands of files).
 
 ### Libraries Used
 
@@ -390,32 +475,6 @@ The task processing system uses a worker pool pattern:
 - **[charmbracelet/bubbles](https://github.com/charmbracelet/bubbles)**: TUI components
 - **[charmbracelet/glamour](https://github.com/charmbracelet/glamour)**: Markdown rendering
 - **[charmbracelet/lipgloss](https://github.com/charmbracelet/lipgloss)**: Terminal styling
-
-## Migration from Bash Scripts
-
-If you're migrating from the original bash scripts in `.prior-art/`:
-
-1. **Config Migration**: Convert `~/.gtdrc` to `~/.config/karya/config.toml`
-2. **Same Directory Structure**: No changes needed to your project directories
-3. **Compatible Task Format**: All task keywords and formats are preserved
-4. **Faster Execution**: Go implementation is significantly faster
-5. **No External Dependencies**: No need for `fzf`, `bat`, `grep`, etc.
-
-### Example Migration
-
-**Old `~/.gtdrc`:**
-```bash
-export PRJDIR="$HOME/Documents/projects"
-export ZETDIR="$HOME/Documents/zet"
-export EDITOR="vim"
-```
-
-**New `~/.config/karya/config.toml`:**
-```toml
-prjdir = "$HOME/Documents/projects"
-zetdir = "$HOME/Documents/zet"
-editor = "vim"
-```
 
 ## Contributing
 
@@ -459,7 +518,6 @@ git push origin feature/my-feature
 
 ## Acknowledgments
 
-- Original bash scripts that inspired this project
 - [Charm](https://charm.sh/) for excellent TUI libraries
 - The Go community for best practices and patterns
 

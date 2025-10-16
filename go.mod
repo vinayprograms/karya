@@ -1,4 +1,4 @@
-module karya
+module github.com/vinayprograms/karya
 
 go 1.24.0
 

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"karya/internal/task"
+	"github.com/vinayprograms/karya/internal/task"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
