@@ -73,30 +73,32 @@ export PATH="$PATH:$(pwd)/bin"
 
 ## Configuration
 
-Create a configuration file at `~/.config/karya/config.toml`:
+Karya uses a TOML configuration file located at `~/.config/karya/config.toml`.
+
+**Quick Start:**
 
 ```toml
-# Required: Root directory for projects
+# Minimum required configuration
 prjdir = "$HOME/Documents/projects"
 
-# Optional: Zettelkasten directory (for zet command)
+# Optional settings
 zetdir = "$HOME/Documents/zet"
-
-# Optional: Editor (defaults to vim)
 editor = "nvim"
-
-# Optional: Karya directory for inbox (defaults to prjdir)
-karya_dir = "$HOME/Documents/karya"
+show_completed = false
+structured = true
 ```
 
-You can also use environment variables which take precedence over the config file:
+**Environment Variables:**
 
-```bash
-export PRJDIR="$HOME/Documents/projects"
-export ZETDIR="$HOME/Documents/zet"
-export EDITOR="nvim"
-export KARYA_DIR="$PRJDIR"
-```
+Environment variables take precedence over the config file.
+
+- `PRJDIR` - Project root directory (required)
+- `ZETDIR` - Zettelkasten directory
+- `EDITOR` - Text editor (default: vim)
+- `SHOW_COMPLETED` - Show completed tasks (true/false)
+- `STRUCTURED` - Use zettelkasten structure (true/false)
+
+**For full configuration options**, including custom keywords and advanced settings, see `config.toml.example` in the repository.
 
 ## Commands
 
