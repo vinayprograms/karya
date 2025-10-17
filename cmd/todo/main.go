@@ -707,98 +707,24 @@ func updateWatcher(watcher *fsnotify.Watcher, config *task.Config, project strin
 func getWatchDirectories(config *task.Config, project string) []string {
 	var dirs []string
 
-	if config.Structured {
-		// Structured mode: watch notes directories in each project
-		if project == "" || project == "*" {
-			// Watch the root PRJDIR to detect new project creation
-			dirs = append(dirs, config.PRJDIR)
-
-			// Watch all existing project directories to detect new subdirectories
-			projectPattern := filepath.Join(config.PRJDIR, "*")
-			projectMatches, err := filepath.Glob(projectPattern)
-			if err == nil {
-				for _, match := range projectMatches {
-					info, err := os.Stat(match)
-					if err == nil && info.IsDir() {
-						dirs = append(dirs, match)
-					}
-				}
-			}
-
-			// Watch all projects' notes directories
-			pattern := filepath.Join(config.PRJDIR, "*", "notes")
-			matches, err := filepath.Glob(pattern)
-			if err == nil {
-				dirs = append(dirs, matches...)
-			}
-
-			// Also watch each zettel directory within notes
-			zettelPattern := filepath.Join(config.PRJDIR, "*", "notes", "*")
-			zettelMatches, err := filepath.Glob(zettelPattern)
-			if err == nil {
-				for _, match := range zettelMatches {
-					info, err := os.Stat(match)
-					if err == nil && info.IsDir() {
-						dirs = append(dirs, match)
-					}
-				}
-			}
-		} else {
-			// Watch specific project root directory to detect new subdirectories
-			projectDir := filepath.Join(config.PRJDIR, project)
-			dirs = append(dirs, projectDir)
-
-			// Watch specific project's notes directory
-			notesDir := filepath.Join(config.PRJDIR, project, "notes")
-			dirs = append(dirs, notesDir)
-
-			// Watch each zettel directory within this project's notes
-			zettelPattern := filepath.Join(config.PRJDIR, project, "notes", "*")
-			matches, err := filepath.Glob(zettelPattern)
-			if err == nil {
-				for _, match := range matches {
-					info, err := os.Stat(match)
-					if err == nil && info.IsDir() {
-						dirs = append(dirs, match)
-					}
-				}
-			}
-		}
+	// Determine the root directory to watch
+	var rootDir string
+	if project == "" || project == "*" {
+		// Watch everything under PRJDIR
+		rootDir = config.PRJDIR
 	} else {
-		// Unstructured mode: watch the project directory tree
-		if project == "" || project == "*" {
-			// Watch the root PRJDIR to detect new project creation
-			dirs = append(dirs, config.PRJDIR)
-
-			// Watch all project directories and their subdirectories
-			pattern := filepath.Join(config.PRJDIR, "*")
-			matches, err := filepath.Glob(pattern)
-			if err == nil {
-				for _, match := range matches {
-					info, err := os.Stat(match)
-					if err == nil && info.IsDir() {
-						dirs = append(dirs, match)
-						// Also walk subdirectories
-						filepath.Walk(match, func(path string, info os.FileInfo, err error) error {
-							if err == nil && info.IsDir() {
-								dirs = append(dirs, path)
-							}
-							return nil
-						})
-					}
-				}
-			}
-		} else {
-			// Watch specific project directory tree
-			projectDir := filepath.Join(config.PRJDIR, project)
-			filepath.Walk(projectDir, func(path string, info os.FileInfo, err error) error {
-				if err == nil && info.IsDir() {
-					dirs = append(dirs, path)
-				}
-				return nil
-			})
-		}
+		// Watch specific project directory tree
+		rootDir = filepath.Join(config.PRJDIR, project)
 	}
+
+	// Recursively walk and watch all directories under the root
+	// This handles any directory structure: flat, nested, or hierarchical groupings
+	filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
+		if err == nil && info.IsDir() {
+			dirs = append(dirs, path)
+		}
+		return nil
+	})
 
 	return dirs
 }
