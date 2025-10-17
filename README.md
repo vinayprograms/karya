@@ -140,14 +140,22 @@ The monitoring works in both structured and unstructured modes
 
 **Interactive Mode Keys:**
 
-- `j/k` or `↑/↓` - Navigate tasks
+**Navigation:**
+
+- `j/k` or `↑/↓` - Navigate tasks (vim-style)
+- `g` / `G` - Jump to top / bottom
+- `Ctrl+d` / `Ctrl+f` / `PgDn` - Page down (vim or emacs style)
+- `Ctrl+u` / `Ctrl+b` / `PgUp` - Page up (vim or emacs style)
+
+**Actions:**
+
 - `/` - Start filtering
 - `Enter` - Edit selected task / Exit filter mode
 - `s` - Switch to structured mode (zettelkasten)
 - `u` - Switch to unstructured mode (all .md files)
 - `Esc` - Exit filter mode or clear filter
 - `q` - Quit
-- `Ctrl+C` - Quit
+- `Ctrl+c` - Quit
 
 **Field-Specific Filtering:**
 

@@ -812,8 +812,15 @@ INTERACTIVE MODE:
     when new projects are created, or when new files are added to existing projects.
     No manual refresh needed!
 
+    NAVIGATION:
+    j/k or ↑/↓          Navigate tasks (vim-style)
+    g / G               Jump to top / bottom
+    Ctrl+d / Ctrl+u     Page down / up (vim-style)
+    Ctrl+f / Ctrl+b     Page down / up (emacs-style)
+    PgDn / PgUp         Page down / up
+
+    ACTIONS:
     Type '/' to filter  Filter tasks list (See FILTERING below)
-    j/k or ↑/↓          Navigate tasks
     Enter               Edit selected task at specific line / Exit filter mode
     s                   Switch to structured mode (zettelkasten format)
     u                   Switch to unstructured mode (all .md files)
@@ -925,6 +932,11 @@ func showInteractiveTUI(config *task.Config, project string) {
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false) // Disable built-in filtering
 	l.KeyMap.Quit.SetKeys("ctrl+c")
+
+	// Match vim-style keybindings
+	l.KeyMap.NextPage.SetKeys("pgdown", "ctrl+f", "ctrl+d")
+	l.KeyMap.PrevPage.SetKeys("pgup", "ctrl+b", "ctrl+u")
+
 	l.AdditionalShortHelpKeys = func() []key.Binding {
 		return []key.Binding{
 			key.NewBinding(
