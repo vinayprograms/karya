@@ -171,7 +171,26 @@ func getDateStyle(dateStr string) lipgloss.Style {
 		return colors.dateColor
 	}
 
-	parsedDate, err := time.Parse("2006-01-02", dateStr)
+	// Try multiple date formats
+	dateFormats := []string{
+		"2006-01-02", // YYYY-MM-DD (ISO 8601)
+		"02-01-2006", // DD-MM-YYYY (British/Asian)
+		"01-02-2006", // MM-DD-YYYY (American)
+		"2006/01/02", // YYYY/MM/DD
+		"02/01/2006", // DD/MM/YYYY
+		"01/02/2006", // MM/DD/YYYY
+	}
+
+	var parsedDate time.Time
+	var err error
+	for _, format := range dateFormats {
+		parsedDate, err = time.Parse(format, dateStr)
+		if err == nil {
+			break
+		}
+	}
+
+	// If all formats fail, return default color
 	if err != nil {
 		return colors.dateColor
 	}
