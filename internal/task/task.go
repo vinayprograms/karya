@@ -73,6 +73,25 @@ type Config struct {
 	ActiveKeywords     []string
 	InProgressKeywords []string
 	CompletedKeywords  []string
+	ColorMode          string
+	Colors             struct {
+		ProjectColor       string
+		ActiveColor        string
+		InProgressColor    string
+		CompletedColor     string
+		TaskColor          string
+		CompletedTaskColor string
+		TagColor           string
+		TagBgColor         string
+		DateColor          string
+		DateBgColor        string
+		PastDateColor      string
+		PastDateBgColor    string
+		TodayDateColor     string
+		TodayDateBgColor   string
+		AssigneeColor      string
+		AssigneeBgColor    string
+	}
 }
 
 // NewConfig creates a config from shared config
@@ -86,14 +105,33 @@ func NewConfig() *Config {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
-	return &Config{
+	taskCfg := &Config{
 		PRJDIR:             cfg.PRJDIR,
 		ShowCompleted:      cfg.ShowCompleted,
 		Structured:         cfg.Structured,
 		ActiveKeywords:     cfg.ActiveKeywords,
 		InProgressKeywords: cfg.InProgressKeywords,
 		CompletedKeywords:  cfg.CompletedKeywords,
+		ColorMode:          cfg.ColorMode,
 	}
+	// Copy colors from config.ColorScheme
+	taskCfg.Colors.ProjectColor = cfg.Colors.ProjectColor
+	taskCfg.Colors.ActiveColor = cfg.Colors.ActiveColor
+	taskCfg.Colors.InProgressColor = cfg.Colors.InProgressColor
+	taskCfg.Colors.CompletedColor = cfg.Colors.CompletedColor
+	taskCfg.Colors.TaskColor = cfg.Colors.TaskColor
+	taskCfg.Colors.CompletedTaskColor = cfg.Colors.CompletedTaskColor
+	taskCfg.Colors.TagColor = cfg.Colors.TagColor
+	taskCfg.Colors.TagBgColor = cfg.Colors.TagBgColor
+	taskCfg.Colors.DateColor = cfg.Colors.DateColor
+	taskCfg.Colors.DateBgColor = cfg.Colors.DateBgColor
+	taskCfg.Colors.PastDateColor = cfg.Colors.PastDateColor
+	taskCfg.Colors.PastDateBgColor = cfg.Colors.PastDateBgColor
+	taskCfg.Colors.TodayDateColor = cfg.Colors.TodayDateColor
+	taskCfg.Colors.TodayDateBgColor = cfg.Colors.TodayDateBgColor
+	taskCfg.Colors.AssigneeColor = cfg.Colors.AssigneeColor
+	taskCfg.Colors.AssigneeBgColor = cfg.Colors.AssigneeBgColor
+	return taskCfg
 }
 
 // FindFiles finds README.md files in project directories (structured mode)

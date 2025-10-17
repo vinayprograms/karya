@@ -9,16 +9,82 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+// colorNameMap maps user-friendly color names to ANSI 16-color values
+var colorNameMap = map[string]string{
+	// Standard colors (0-7)
+	"black":   "0",
+	"red":     "1",
+	"green":   "2",
+	"yellow":  "3",
+	"blue":    "4",
+	"magenta": "5",
+	"cyan":    "6",
+	"white":   "7",
+	// Bright colors (8-15)
+	"bright-black":   "8",
+	"gray":           "8", // alias for bright-black
+	"bright-red":     "9",
+	"bright-green":   "10",
+	"bright-yellow":  "11",
+	"bright-blue":    "12",
+	"bright-magenta": "13",
+	"bright-cyan":    "14",
+	"bright-white":   "15",
+}
+
+// resolveColorValue converts color names to ANSI 16-color numbers, or passes through other formats
+// Accepts:
+//   - Color names (red, bright-blue, etc.) → converted to ANSI numbers (0-15)
+//   - ANSI numbers (0-15) → returned as-is
+//   - Hex colors (#RRGGBB) → passed through to lipgloss (supports full RGB range)
+//   - 256-color codes → passed through to lipgloss
+func resolveColorValue(colorInput string) string {
+	if colorInput == "" {
+		return colorInput
+	}
+
+	// Try as color name first - only names get converted to ANSI
+	if ansiValue, exists := colorNameMap[strings.ToLower(colorInput)]; exists {
+		return ansiValue
+	}
+
+	// Everything else (hex, ANSI numbers, 256-color codes) passed through unchanged
+	// lipgloss handles validation and rendering
+	return colorInput
+}
+
+type ColorScheme struct {
+	// 16-color palette values (0-15)
+	ProjectColor       string `toml:"project"`
+	ActiveColor        string `toml:"active"`
+	InProgressColor    string `toml:"inprogress"`
+	CompletedColor     string `toml:"completed"`
+	TaskColor          string `toml:"description"`
+	CompletedTaskColor string `toml:"completed-description"`
+	TagColor           string `toml:"tag"`
+	TagBgColor         string `toml:"tag-bg"`
+	DateColor          string `toml:"date"`
+	DateBgColor        string `toml:"date-bg"`
+	PastDateColor      string `toml:"past-date"`
+	PastDateBgColor    string `toml:"past-bg"`
+	TodayDateColor     string `toml:"today-date"`
+	TodayDateBgColor   string `toml:"today-bg"`
+	AssigneeColor      string `toml:"assignee"`
+	AssigneeBgColor    string `toml:"assignee-bg"`
+}
+
 type Config struct {
-	PRJDIR             string   `toml:"prjdir"`
-	ZETDIR             string   `toml:"zetdir"`
-	EDITOR             string   `toml:"editor"`
-	KARYA_DIR          string   `toml:"karya_dir"`
-	ShowCompleted      bool     `toml:"show_completed"`
-	Structured         bool     `toml:"structured"`
-	ActiveKeywords     []string `toml:"active_keywords"`
-	InProgressKeywords []string `toml:"inprogress_keywords"`
-	CompletedKeywords  []string `toml:"completed_keywords"`
+	PRJDIR             string      `toml:"prjdir"`
+	ZETDIR             string      `toml:"zetdir"`
+	EDITOR             string      `toml:"editor"`
+	KARYA_DIR          string      `toml:"karya_dir"`
+	ShowCompleted      bool        `toml:"show_completed"`
+	Structured         bool        `toml:"structured"`
+	ColorMode          string      `toml:"color_mode"` // "light", "dark", or empty for auto-detect
+	Colors             ColorScheme `toml:"colors"`
+	ActiveKeywords     []string    `toml:"active_keywords"`
+	InProgressKeywords []string    `toml:"inprogress_keywords"`
+	CompletedKeywords  []string    `toml:"completed_keywords"`
 }
 
 func Load() (*Config, error) {
@@ -92,6 +158,9 @@ func Load() (*Config, error) {
 		}
 	}
 
+	// Initialize colors with defaults based on mode
+	cfg.initializeColors()
+
 	return cfg, nil
 }
 
@@ -113,4 +182,136 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("PRJDIR not set. Please create ~/.config/karya/config.toml with:\nprjdir = \"/path/to/projects\"")
 	}
 	return nil
+}
+
+// initializeColors sets up default colors based on color mode
+// Colors can be overridden in the config file [colors] section
+func (c *Config) initializeColors() {
+	// Determine color mode: explicit config > environment > empty (auto-detect)
+	colorMode := c.ColorMode
+	if colorMode == "" {
+		if envMode := os.Getenv("KARYA_COLOR_MODE"); envMode != "" {
+			colorMode = envMode
+		}
+	}
+
+	// Light mode colors (better for light terminal themes)
+	lightMode := ColorScheme{
+		ProjectColor:       "4",  // Blue
+		ActiveColor:        "5",  // Magenta
+		InProgressColor:    "4",  // Blue (progress)
+		CompletedColor:     "8",  // Bright black (faded)
+		TaskColor:          "0",  // Black
+		CompletedTaskColor: "8",  // Bright black (faded)
+		TagColor:           "0",  // Black text
+		TagBgColor:         "7",  // Light gray background
+		DateColor:          "4",  // Blue
+		DateBgColor:        "7",  // Light gray background (visible with blue text)
+		PastDateColor:      "15", // White text
+		PastDateBgColor:    "1",  // Red (urgent) background
+		TodayDateColor:     "0",  // Black text
+		TodayDateBgColor:   "3",  // Yellow background
+		AssigneeColor:      "0",  // Black text
+		AssigneeBgColor:    "7",  // Light gray background
+	}
+
+	// Dark mode colors (better for dark terminal themes)
+	darkMode := ColorScheme{
+		ProjectColor:       "2",  // Green
+		ActiveColor:        "3",  // Yellow
+		InProgressColor:    "6",  // Cyan
+		CompletedColor:     "8",  // Bright black (faded)
+		TaskColor:          "15", // White
+		CompletedTaskColor: "8",  // Bright black (faded)
+		TagColor:           "15", // White text
+		TagBgColor:         "0",  // Black background
+		DateColor:          "0",  // Black text
+		DateBgColor:        "12", // Light blue background
+		PastDateColor:      "0",  // Black text
+		PastDateBgColor:    "1",  // Red background
+		TodayDateColor:     "0",  // Black text
+		TodayDateBgColor:   "11", // Yellow background
+		AssigneeColor:      "15", // White text
+		AssigneeBgColor:    "8",  // Light gray background
+	}
+
+	// Select default mode based on colorMode
+	var defaults ColorScheme
+	switch strings.ToLower(colorMode) {
+	case "light":
+		defaults = lightMode
+	case "dark":
+		defaults = darkMode
+	default:
+		// Auto-detect: use dark mode as default (most common)
+		defaults = darkMode
+	}
+
+	// Apply defaults only if colors are not explicitly set
+	if c.Colors.ProjectColor == "" {
+		c.Colors.ProjectColor = defaults.ProjectColor
+	}
+	if c.Colors.ActiveColor == "" {
+		c.Colors.ActiveColor = defaults.ActiveColor
+	}
+	if c.Colors.InProgressColor == "" {
+		c.Colors.InProgressColor = defaults.InProgressColor
+	}
+	if c.Colors.CompletedColor == "" {
+		c.Colors.CompletedColor = defaults.CompletedColor
+	}
+	if c.Colors.TaskColor == "" {
+		c.Colors.TaskColor = defaults.TaskColor
+	}
+	if c.Colors.CompletedTaskColor == "" {
+		c.Colors.CompletedTaskColor = defaults.CompletedTaskColor
+	}
+	if c.Colors.TagColor == "" {
+		c.Colors.TagColor = defaults.TagColor
+	}
+	if c.Colors.TagBgColor == "" {
+		c.Colors.TagBgColor = defaults.TagBgColor
+	}
+	if c.Colors.DateColor == "" {
+		c.Colors.DateColor = defaults.DateColor
+	}
+	if c.Colors.DateBgColor == "" {
+		c.Colors.DateBgColor = defaults.DateBgColor
+	}
+	if c.Colors.PastDateColor == "" {
+		c.Colors.PastDateColor = defaults.PastDateColor
+	}
+	if c.Colors.PastDateBgColor == "" {
+		c.Colors.PastDateBgColor = defaults.PastDateBgColor
+	}
+	if c.Colors.TodayDateColor == "" {
+		c.Colors.TodayDateColor = defaults.TodayDateColor
+	}
+	if c.Colors.TodayDateBgColor == "" {
+		c.Colors.TodayDateBgColor = defaults.TodayDateBgColor
+	}
+	if c.Colors.AssigneeColor == "" {
+		c.Colors.AssigneeColor = defaults.AssigneeColor
+	}
+	if c.Colors.AssigneeBgColor == "" {
+		c.Colors.AssigneeBgColor = defaults.AssigneeBgColor
+	}
+
+	// Resolve all color names to ANSI values
+	c.Colors.ProjectColor = resolveColorValue(c.Colors.ProjectColor)
+	c.Colors.ActiveColor = resolveColorValue(c.Colors.ActiveColor)
+	c.Colors.InProgressColor = resolveColorValue(c.Colors.InProgressColor)
+	c.Colors.CompletedColor = resolveColorValue(c.Colors.CompletedColor)
+	c.Colors.TaskColor = resolveColorValue(c.Colors.TaskColor)
+	c.Colors.CompletedTaskColor = resolveColorValue(c.Colors.CompletedTaskColor)
+	c.Colors.TagColor = resolveColorValue(c.Colors.TagColor)
+	c.Colors.TagBgColor = resolveColorValue(c.Colors.TagBgColor)
+	c.Colors.DateColor = resolveColorValue(c.Colors.DateColor)
+	c.Colors.DateBgColor = resolveColorValue(c.Colors.DateBgColor)
+	c.Colors.PastDateColor = resolveColorValue(c.Colors.PastDateColor)
+	c.Colors.PastDateBgColor = resolveColorValue(c.Colors.PastDateBgColor)
+	c.Colors.TodayDateColor = resolveColorValue(c.Colors.TodayDateColor)
+	c.Colors.TodayDateBgColor = resolveColorValue(c.Colors.TodayDateBgColor)
+	c.Colors.AssigneeColor = resolveColorValue(c.Colors.AssigneeColor)
+	c.Colors.AssigneeBgColor = resolveColorValue(c.Colors.AssigneeBgColor)
 }

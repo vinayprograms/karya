@@ -22,19 +22,40 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-var (
-	prjColor           = lipgloss.NewStyle().Foreground(lipgloss.Color("14")) // Cyan for project
-	activeColor        = lipgloss.NewStyle().Foreground(lipgloss.Color("13")) // Magenta for pending
-	inProgressColor    = lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // Yellow for in-progress
-	completedColor     = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))  // Dark gray for completed keyword
-	taskColor          = lipgloss.NewStyle().Foreground(lipgloss.Color("15")) // White for active task text
-	completedTaskColor = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))  // Light gray for completed task text
-	tagColor           = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("5"))
-	dateColor          = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Background(lipgloss.Color("15"))
-	pastDateColor      = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("1"))            // Inverted for past dates
-	todayDateColor     = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("11")).Bold(true) // Yellow background for today
-	assigneeColor      = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("4")).Bold(true)
-)
+// ColorScheme holds the lipgloss color styles for rendering
+type ColorScheme struct {
+	prjColor           lipgloss.Style
+	activeColor        lipgloss.Style
+	inProgressColor    lipgloss.Style
+	completedColor     lipgloss.Style
+	taskColor          lipgloss.Style
+	completedTaskColor lipgloss.Style
+	tagColor           lipgloss.Style
+	dateColor          lipgloss.Style
+	pastDateColor      lipgloss.Style
+	todayDateColor     lipgloss.Style
+	assigneeColor      lipgloss.Style
+}
+
+// Global color scheme (will be initialized from config)
+var colors ColorScheme
+
+// InitializeColors initializes the color scheme from task config
+func InitializeColors(cfg *task.Config) {
+	colors = ColorScheme{
+		prjColor:           lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
+		activeColor:        lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ActiveColor)),
+		inProgressColor:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.InProgressColor)),
+		completedColor:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CompletedColor)),
+		taskColor:          lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TaskColor)),
+		completedTaskColor: lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CompletedTaskColor)),
+		tagColor:           lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TagColor)).Background(lipgloss.Color(cfg.Colors.TagBgColor)),
+		dateColor:          lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.DateColor)).Background(lipgloss.Color(cfg.Colors.DateBgColor)),
+		pastDateColor:      lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.PastDateColor)).Background(lipgloss.Color(cfg.Colors.PastDateBgColor)),
+		todayDateColor:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TodayDateColor)).Background(lipgloss.Color(cfg.Colors.TodayDateBgColor)).Bold(true),
+		assigneeColor:      lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.AssigneeColor)).Background(lipgloss.Color(cfg.Colors.AssigneeBgColor)).Bold(true),
+	}
+}
 
 type taskItem struct {
 	task            *task.Task
@@ -44,19 +65,19 @@ type taskItem struct {
 func (i taskItem) renderWithSelection(isSelected bool) string {
 	var parts []string
 
-	parts = append(parts, prjColor.Render(fmt.Sprintf("%-*s", i.projectColWidth, i.task.Project)))
-	parts = append(parts, prjColor.Render(fmt.Sprintf("%-16s", i.task.Zettel)))
+	parts = append(parts, colors.prjColor.Render(fmt.Sprintf("%-*s", i.projectColWidth, i.task.Project)))
+	parts = append(parts, colors.prjColor.Render(fmt.Sprintf("%-16s", i.task.Zettel)))
 
 	var titleStyle lipgloss.Style
 	if i.task.IsActive() {
-		parts = append(parts, activeColor.Render(fmt.Sprintf("%-12s", i.task.Keyword)))
-		titleStyle = taskColor
+		parts = append(parts, colors.activeColor.Render(fmt.Sprintf("%-12s", i.task.Keyword)))
+		titleStyle = colors.taskColor
 	} else if i.task.IsInProgress() {
-		parts = append(parts, inProgressColor.Render(fmt.Sprintf("%-12s", i.task.Keyword)))
-		titleStyle = taskColor
+		parts = append(parts, colors.inProgressColor.Render(fmt.Sprintf("%-12s", i.task.Keyword)))
+		titleStyle = colors.taskColor
 	} else {
-		parts = append(parts, completedColor.Render(fmt.Sprintf("%-12s", i.task.Keyword)))
-		titleStyle = completedTaskColor
+		parts = append(parts, colors.completedColor.Render(fmt.Sprintf("%-12s", i.task.Keyword)))
+		titleStyle = colors.completedTaskColor
 	}
 
 	if isSelected {
@@ -70,7 +91,7 @@ func (i taskItem) renderWithSelection(isSelected bool) string {
 	}
 
 	if i.task.Tag != "" {
-		parts = append(parts, tagColor.Render(fmt.Sprintf(" %s ", i.task.Tag)))
+		parts = append(parts, colors.tagColor.Render(fmt.Sprintf(" %s ", i.task.Tag)))
 	}
 	// Display date types with prefixes
 	if i.task.ScheduledAt != "" {
@@ -82,7 +103,7 @@ func (i taskItem) renderWithSelection(isSelected bool) string {
 		parts = append(parts, dateStyle.Render(fmt.Sprintf(" D:%s ", i.task.DueAt)))
 	}
 	if i.task.Assignee != "" {
-		parts = append(parts, assigneeColor.Render(fmt.Sprintf(" %s ", i.task.Assignee)))
+		parts = append(parts, colors.assigneeColor.Render(fmt.Sprintf(" %s ", i.task.Assignee)))
 	}
 
 	return strings.Join(parts, " ")
@@ -97,25 +118,25 @@ func (i taskItem) FilterValue() string {
 func (i taskItem) Title() string {
 	var parts []string
 
-	parts = append(parts, prjColor.Render(fmt.Sprintf("%-*s", i.projectColWidth, i.task.Project)))
-	parts = append(parts, prjColor.Render(fmt.Sprintf("%-16s", i.task.Zettel)))
+	parts = append(parts, colors.prjColor.Render(fmt.Sprintf("%-*s", i.projectColWidth, i.task.Project)))
+	parts = append(parts, colors.prjColor.Render(fmt.Sprintf("%-16s", i.task.Zettel)))
 
 	var titleStyle lipgloss.Style
 	if i.task.IsActive() {
-		parts = append(parts, activeColor.Render(fmt.Sprintf("%-12s", i.task.Keyword)))
-		titleStyle = taskColor
+		parts = append(parts, colors.activeColor.Render(fmt.Sprintf("%-12s", i.task.Keyword)))
+		titleStyle = colors.taskColor
 	} else if i.task.IsInProgress() {
-		parts = append(parts, inProgressColor.Render(fmt.Sprintf("%-12s", i.task.Keyword)))
-		titleStyle = taskColor
+		parts = append(parts, colors.inProgressColor.Render(fmt.Sprintf("%-12s", i.task.Keyword)))
+		titleStyle = colors.taskColor
 	} else {
-		parts = append(parts, completedColor.Render(fmt.Sprintf("%-12s", i.task.Keyword)))
-		titleStyle = completedTaskColor
+		parts = append(parts, colors.completedColor.Render(fmt.Sprintf("%-12s", i.task.Keyword)))
+		titleStyle = colors.completedTaskColor
 	}
 
 	parts = append(parts, titleStyle.Render(fmt.Sprintf("%-40s", i.task.Title)))
 
 	if i.task.Tag != "" {
-		parts = append(parts, tagColor.Render(fmt.Sprintf(" %s ", i.task.Tag)))
+		parts = append(parts, colors.tagColor.Render(fmt.Sprintf(" %s ", i.task.Tag)))
 	}
 	// Display date types with prefixes
 	if i.task.ScheduledAt != "" {
@@ -127,7 +148,7 @@ func (i taskItem) Title() string {
 		parts = append(parts, dateStyle.Render(fmt.Sprintf(" D:%s ", i.task.DueAt)))
 	}
 	if i.task.Assignee != "" {
-		parts = append(parts, assigneeColor.Render(fmt.Sprintf(" %s ", i.task.Assignee)))
+		parts = append(parts, colors.assigneeColor.Render(fmt.Sprintf(" %s ", i.task.Assignee)))
 	}
 
 	return strings.Join(parts, " ")
@@ -137,12 +158,12 @@ func (i taskItem) Description() string { return "" }
 
 func getDateStyle(dateStr string) lipgloss.Style {
 	if dateStr == "" {
-		return dateColor
+		return colors.dateColor
 	}
 
 	parsedDate, err := time.Parse("2006-01-02", dateStr)
 	if err != nil {
-		return dateColor
+		return colors.dateColor
 	}
 
 	now := time.Now()
@@ -150,11 +171,11 @@ func getDateStyle(dateStr string) lipgloss.Style {
 	taskDate := time.Date(parsedDate.Year(), parsedDate.Month(), parsedDate.Day(), 0, 0, 0, 0, time.UTC)
 
 	if taskDate.Before(today) {
-		return pastDateColor
+		return colors.pastDateColor
 	} else if taskDate.Equal(today) {
-		return todayDateColor
+		return colors.todayDateColor
 	}
-	return dateColor
+	return colors.dateColor
 }
 
 // Custom delegate for proper selection highlighting
@@ -633,6 +654,9 @@ func calculateProjectColWidth(tasks []*task.Task) int {
 
 func main() {
 	config := task.NewConfig()
+
+	// Initialize colors from config
+	InitializeColors(config)
 
 	if len(os.Args) == 1 {
 		// Interactive TUI mode

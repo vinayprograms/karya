@@ -41,6 +41,48 @@ prjdir = "/path/to/your/projects"
 # ]
 
 # ============================================================================
+# COLOR CONFIGURATION (Terminal UI colors for todo command)
+# ============================================================================
+# You can specify colors using three different methods:
+#   1. Color names (ANSI 16-color palette) - recommended for readability
+#   2. ANSI numbers (0-15) - for exact ANSI 16-color control
+#   3. Hex colors (#RRGGBB) - for full RGB color range (terminal permitting)
+#
+
+#
+# Color mode for terminal: "light" or "dark". Empty/unset defaults to dark
+# Can also be set via environment variable: KARYA_COLOR_MODE=light|dark
+#
+# color_mode = "dark"
+#
+# Individual color overrides (use color names, ANSI numbers 0-15, or hex colors):
+# Supported Color Names (ANSI 16-Color Palette):
+#   Basic:   black, red, green, yellow, blue, magenta, cyan, white
+#   Bright:  bright-red, bright-green, bright-yellow, bright-blue,
+#            bright-magenta, bright-cyan, bright-black, bright-white
+# Reference: https://en.wikipedia.org/wiki/ANSI_escape_code#8-bit
+# 
+# Hex colors are also supported.
+#
+# [colors]
+# project           = "green"                 # Color name example
+# active            = "yellow"                # Color name example
+# inprogress        = "6"                     # ANSI number example (cyan)
+# completed         = "gray"                  # Alias for bright-black
+# description       = "#E8F4F8"               # Hex colors are supported
+# completed-description = "gray"              # Completed task text (faded)
+# tag               = "bright-white"         # Tag badge text
+# tag-bg            = "black"                 # Tag badge background
+# date              = "yellow"                # Scheduled date color
+# date-bg           = "black"                 # Scheduled date background
+# past-date         = "red"                   # Past/overdue date (warning)
+# past-bg           = "black"                 # Past date background
+# today-date        = "black"                 # Today's date text
+# today-bg          = "yellow"                # Today's date background (highlight)
+# assignee          = "bright-white"         # Assignee badge text
+# assignee-bg       = "black"                 # Assignee badge background
+
+# ============================================================================
 # ENHANCED FILTERING CAPABILITIES
 # ============================================================================
 # The todo command supports field-specific filtering. In interactive mode,
