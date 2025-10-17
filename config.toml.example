@@ -26,13 +26,13 @@ prjdir = "/path/to/your/projects"
 #     "TODO", "TASK", "NOTE", "REMINDER", "EVENT", "MEETING",
 #     "CALL", "EMAIL", "MESSAGE", "FOLLOWUP", "REVIEW",
 #     "CHECKIN", "CHECKOUT", "RESEARCH", "READING", "WRITING",
-#     "DRAFT", "EDITING", "FINALIZE", "SUBMIT", "PRESENTATION",
-#     "WAITING", "DEFERRED", "DELEGATED"
+#     "DRAFT", "FINALIZE", "SUBMIT", "PRESENTATION"
 # ]
 
 # Optional: In-progress task keywords (defaults shown below)
 # inprogress_keywords = [
-#     "DOING", "INPROGRESS", "WIP", "WORKING", "STARTED"
+#     "DOING", "EDITING", "INPROGRESS", "WIP", "WORKING", "STARTED",
+#     "WAITING", "DEFERRED", "DELEGATED"
 # ]
 
 # Optional: Completed task keywords (defaults shown below)

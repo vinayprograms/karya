@@ -107,13 +107,9 @@ func Load() (*Config, error) {
 		cfg.Structured = structured == "true" || structured == "1"
 	}
 
-	// If PRJDIR not set, try loading from config file
-	if cfg.PRJDIR == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, err
-		}
-
+	// Always try loading from config file (environment variables can override)
+	home, err := os.UserHomeDir()
+	if err == nil {
 		configPath := filepath.Join(home, ".config", "karya", "config.toml")
 		if _, err := os.Stat(configPath); err == nil {
 			if _, err := toml.DecodeFile(configPath, cfg); err != nil {
@@ -124,12 +120,27 @@ func Load() (*Config, error) {
 			cfg.ZETDIR = expandEnv(cfg.ZETDIR)
 			cfg.EDITOR = expandEnv(cfg.EDITOR)
 			cfg.KARYA_DIR = expandEnv(cfg.KARYA_DIR)
-
-			// Environment variable overrides config file for ShowCompleted
-			if showCompleted := os.Getenv("SHOW_COMPLETED"); showCompleted != "" {
-				cfg.ShowCompleted = showCompleted == "true" || showCompleted == "1"
-			}
 		}
+	}
+
+	// Environment variables override config file (applied AFTER config file load)
+	if prjdir := os.Getenv("PRJDIR"); prjdir != "" {
+		cfg.PRJDIR = prjdir
+	}
+	if zetdir := os.Getenv("ZETDIR"); zetdir != "" {
+		cfg.ZETDIR = zetdir
+	}
+	if editor := os.Getenv("EDITOR"); editor != "" {
+		cfg.EDITOR = editor
+	}
+	if karyaDir := os.Getenv("KARYA_DIR"); karyaDir != "" {
+		cfg.KARYA_DIR = karyaDir
+	}
+	if showCompleted := os.Getenv("SHOW_COMPLETED"); showCompleted != "" {
+		cfg.ShowCompleted = showCompleted == "true" || showCompleted == "1"
+	}
+	if structured := os.Getenv("STRUCTURED"); structured != "" {
+		cfg.Structured = structured == "true" || structured == "1"
 	}
 
 	// Set defaults
