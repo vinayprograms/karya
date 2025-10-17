@@ -710,7 +710,22 @@ func getWatchDirectories(config *task.Config, project string) []string {
 	if config.Structured {
 		// Structured mode: watch notes directories in each project
 		if project == "" || project == "*" {
-			// Watch all projects
+			// Watch the root PRJDIR to detect new project creation
+			dirs = append(dirs, config.PRJDIR)
+
+			// Watch all existing project directories to detect new subdirectories
+			projectPattern := filepath.Join(config.PRJDIR, "*")
+			projectMatches, err := filepath.Glob(projectPattern)
+			if err == nil {
+				for _, match := range projectMatches {
+					info, err := os.Stat(match)
+					if err == nil && info.IsDir() {
+						dirs = append(dirs, match)
+					}
+				}
+			}
+
+			// Watch all projects' notes directories
 			pattern := filepath.Join(config.PRJDIR, "*", "notes")
 			matches, err := filepath.Glob(pattern)
 			if err == nil {
@@ -729,7 +744,11 @@ func getWatchDirectories(config *task.Config, project string) []string {
 				}
 			}
 		} else {
-			// Watch specific project
+			// Watch specific project root directory to detect new subdirectories
+			projectDir := filepath.Join(config.PRJDIR, project)
+			dirs = append(dirs, projectDir)
+
+			// Watch specific project's notes directory
 			notesDir := filepath.Join(config.PRJDIR, project, "notes")
 			dirs = append(dirs, notesDir)
 
@@ -748,7 +767,10 @@ func getWatchDirectories(config *task.Config, project string) []string {
 	} else {
 		// Unstructured mode: watch the project directory tree
 		if project == "" || project == "*" {
-			// Watch all project directories
+			// Watch the root PRJDIR to detect new project creation
+			dirs = append(dirs, config.PRJDIR)
+
+			// Watch all project directories and their subdirectories
 			pattern := filepath.Join(config.PRJDIR, "*")
 			matches, err := filepath.Glob(pattern)
 			if err == nil {
