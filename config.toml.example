@@ -21,6 +21,10 @@ prjdir = "/path/to/your/projects"
 # - true: Search for project/notes/zettelID/README.md files (zettelkasten format)
 # - false: Search all .md files in project directory tree (unstructured)
 
+# Optional: Show additional details like Zettel ID column in table view (defaults to false)
+# verbose = true
+# Note: -v/--verbose command-line flag takes precedence over this setting
+
 # ============================================================================
 # KEYWORDS CONFIGURATION
 # ============================================================================

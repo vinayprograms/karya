@@ -70,6 +70,7 @@ type Config struct {
 	PRJDIR             string
 	ShowCompleted      bool
 	Structured         bool
+	Verbose            bool
 	ActiveKeywords     []string
 	InProgressKeywords []string
 	CompletedKeywords  []string
@@ -109,6 +110,7 @@ func NewConfig() *Config {
 		PRJDIR:             cfg.PRJDIR,
 		ShowCompleted:      cfg.ShowCompleted,
 		Structured:         cfg.Structured,
+		Verbose:            cfg.Verbose,
 		ActiveKeywords:     cfg.ActiveKeywords,
 		InProgressKeywords: cfg.InProgressKeywords,
 		CompletedKeywords:  cfg.CompletedKeywords,

@@ -60,23 +60,29 @@ func InitializeColors(cfg *task.Config) {
 type taskItem struct {
 	task            *task.Task
 	projectColWidth int
+	keywordColWidth int
+	verbose         bool
 }
 
 func (i taskItem) renderWithSelection(isSelected bool) string {
 	var parts []string
 
 	parts = append(parts, colors.prjColor.Render(fmt.Sprintf("%-*s", i.projectColWidth, i.task.Project)))
-	parts = append(parts, colors.prjColor.Render(fmt.Sprintf("%-16s", i.task.Zettel)))
+
+	// Only show Zettel column in verbose mode
+	if i.verbose {
+		parts = append(parts, colors.prjColor.Render(fmt.Sprintf("%-16s", i.task.Zettel)))
+	}
 
 	var titleStyle lipgloss.Style
 	if i.task.IsActive() {
-		parts = append(parts, colors.activeColor.Render(fmt.Sprintf("%-12s", i.task.Keyword)))
+		parts = append(parts, colors.activeColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
 		titleStyle = colors.taskColor
 	} else if i.task.IsInProgress() {
-		parts = append(parts, colors.inProgressColor.Render(fmt.Sprintf("%-12s", i.task.Keyword)))
+		parts = append(parts, colors.inProgressColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
 		titleStyle = colors.taskColor
 	} else {
-		parts = append(parts, colors.completedColor.Render(fmt.Sprintf("%-12s", i.task.Keyword)))
+		parts = append(parts, colors.completedColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
 		titleStyle = colors.completedTaskColor
 	}
 
@@ -119,17 +125,21 @@ func (i taskItem) Title() string {
 	var parts []string
 
 	parts = append(parts, colors.prjColor.Render(fmt.Sprintf("%-*s", i.projectColWidth, i.task.Project)))
-	parts = append(parts, colors.prjColor.Render(fmt.Sprintf("%-16s", i.task.Zettel)))
+
+	// Only show Zettel column in verbose mode
+	if i.verbose {
+		parts = append(parts, colors.prjColor.Render(fmt.Sprintf("%-16s", i.task.Zettel)))
+	}
 
 	var titleStyle lipgloss.Style
 	if i.task.IsActive() {
-		parts = append(parts, colors.activeColor.Render(fmt.Sprintf("%-12s", i.task.Keyword)))
+		parts = append(parts, colors.activeColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
 		titleStyle = colors.taskColor
 	} else if i.task.IsInProgress() {
-		parts = append(parts, colors.inProgressColor.Render(fmt.Sprintf("%-12s", i.task.Keyword)))
+		parts = append(parts, colors.inProgressColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
 		titleStyle = colors.taskColor
 	} else {
-		parts = append(parts, colors.completedColor.Render(fmt.Sprintf("%-12s", i.task.Keyword)))
+		parts = append(parts, colors.completedColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
 		titleStyle = colors.completedTaskColor
 	}
 
@@ -202,6 +212,7 @@ type model struct {
 	quitting        bool
 	watcher         *fsnotify.Watcher
 	projectColWidth int
+	keywordColWidth int
 	savedFilter     string
 	customFilter    string
 	filtering       bool
@@ -387,9 +398,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.tasks[i].Project < m.tasks[j].Project
 			})
 			m.projectColWidth = calculateProjectColWidth(m.tasks)
+			m.keywordColWidth = calculateKeywordColWidth(m.tasks)
 			items := make([]list.Item, len(m.tasks))
 			for i, t := range m.tasks {
-				items[i] = taskItem{task: t, projectColWidth: m.projectColWidth}
+				items[i] = taskItem{task: t, projectColWidth: m.projectColWidth, keywordColWidth: m.keywordColWidth, verbose: m.config.Verbose}
 			}
 			m.allItems = items
 			if m.customFilter != "" {
@@ -437,9 +449,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 
 			m.projectColWidth = calculateProjectColWidth(m.tasks)
+			m.keywordColWidth = calculateKeywordColWidth(m.tasks)
 			items := make([]list.Item, len(m.tasks))
 			for i, t := range m.tasks {
-				items[i] = taskItem{task: t, projectColWidth: m.projectColWidth}
+				items[i] = taskItem{task: t, projectColWidth: m.projectColWidth, keywordColWidth: m.keywordColWidth, verbose: m.config.Verbose}
 			}
 			m.allItems = items
 			m.list.SetItems(items)
@@ -483,9 +496,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 
 		m.projectColWidth = calculateProjectColWidth(m.tasks)
+		m.keywordColWidth = calculateKeywordColWidth(m.tasks)
 		items := make([]list.Item, len(m.tasks))
 		for i, t := range m.tasks {
-			items[i] = taskItem{task: t, projectColWidth: m.projectColWidth}
+			items[i] = taskItem{task: t, projectColWidth: m.projectColWidth, keywordColWidth: m.keywordColWidth, verbose: m.config.Verbose}
 		}
 		m.allItems = items
 
@@ -673,6 +687,16 @@ func calculateProjectColWidth(tasks []*task.Task) int {
 	return maxLen
 }
 
+func calculateKeywordColWidth(tasks []*task.Task) int {
+	maxLen := 4 // Minimum width for short keywords like "TODO"
+	for _, t := range tasks {
+		if len(t.Keyword) > maxLen {
+			maxLen = len(t.Keyword)
+		}
+	}
+	return maxLen
+}
+
 // setupWatcher creates a new watcher and watches all relevant directories
 func setupWatcher(config *task.Config, project string) (*fsnotify.Watcher, error) {
 	watcher, err := fsnotify.NewWatcher()
@@ -735,20 +759,32 @@ func main() {
 	// Initialize colors from config
 	InitializeColors(config)
 
-	if len(os.Args) == 1 {
+	// Parse flags
+	args := os.Args[1:]
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "-v" || arg == "--verbose" {
+			config.Verbose = true
+			// Remove this flag from args
+			args = append(args[:i], args[i+1:]...)
+			i--
+		}
+	}
+
+	if len(args) == 0 {
 		// Interactive TUI mode
 		showInteractiveTUI(config, "")
 		return
 	}
 
-	subcommand := os.Args[1]
+	subcommand := args[0]
 	switch subcommand {
 	case "-h", "--help", "help":
 		printHelp()
 	case "ls", "list":
 		project := ""
-		if len(os.Args) > 2 {
-			project = os.Args[2]
+		if len(args) > 1 {
+			project = args[1]
 		}
 		tasks, err := config.ListTasks(project, config.ShowCompleted)
 		if err != nil {
@@ -773,7 +809,7 @@ func main() {
 
 			return tasks[i].Project < tasks[j].Project
 		})
-		printTasksPlain(tasks)
+		printTasksPlain(config, tasks)
 	case "projects":
 		summary, err := config.SummarizeProjects()
 		if err != nil {
@@ -796,7 +832,10 @@ func printHelp() {
 	help := `todo - Interactive task manager using markdown files
 
 USAGE:
-    todo [COMMAND] [OPTIONS]
+    todo [OPTIONS] [COMMAND]
+
+OPTIONS:
+    -v, --verbose       Show additional details like Zettel ID column
 
 COMMANDS:
     (no command)        Show interactive TUI with all tasks
@@ -838,11 +877,12 @@ FILTERING:
 
 EXAMPLES:
     todo                           # Show all tasks in interactive TUI
-    todo ls                        # List all tasks (plain text)
+    todo -v                        # Show all tasks with Zettel ID column
+    todo --verbose ls              # List all tasks in verbose mode
     todo ls myproject              # List tasks for specific project
+    todo -v myproject              # Show tasks for myproject with details
     todo projects                  # Show project summary table
     todo pl                        # Show project list (plain text)
-    todo myproject                 # Show tasks for myproject in TUI
     SHOW_COMPLETED=true todo       # Show completed tasks in TUI
     STRUCTURED=false todo          # Use unstructured mode (all .md files)
     
@@ -864,8 +904,13 @@ ENVIRONMENT VARIABLES:
                         - false: Search all .md files in project directory tree
                         Can also be set in ~/.config/karya/config.toml
 
+    VERBOSE             Show additional details like Zettel ID column (true/false, default: false)
+                        Can also be set in ~/.config/karya/config.toml
+                        Note: -v/--verbose flag takes precedence over this variable
+
 CONFIGURATION:
     See config file: ~/.config/karya/config.toml.example for full configuration options.
+    Command-line flags take precedence over environment variables and config file settings.
 `
 	fmt.Print(help)
 }
@@ -913,9 +958,10 @@ func showInteractiveTUI(config *task.Config, project string) {
 	})
 
 	projectColWidth := calculateProjectColWidth(tasks)
+	keywordColWidth := calculateKeywordColWidth(tasks)
 	items := make([]list.Item, len(tasks))
 	for i, t := range tasks {
-		items[i] = taskItem{task: t, projectColWidth: projectColWidth}
+		items[i] = taskItem{task: t, projectColWidth: projectColWidth, keywordColWidth: keywordColWidth, verbose: config.Verbose}
 	}
 
 	delegate := taskDelegate{DefaultDelegate: list.NewDefaultDelegate()}
@@ -958,6 +1004,59 @@ func showInteractiveTUI(config *task.Config, project string) {
 		}
 	}
 
+	l.AdditionalFullHelpKeys = func() []key.Binding {
+		return []key.Binding{
+			key.NewBinding(
+				key.WithKeys("enter", "tab"),
+				key.WithHelp("enter/tab", "edit selected task"),
+			),
+			key.NewBinding(
+				key.WithKeys("/"),
+				key.WithHelp("/", "start filtering"),
+			),
+			key.NewBinding(
+				key.WithKeys("esc"),
+				key.WithHelp("esc", "exit filter/clear filter"),
+			),
+			key.NewBinding(
+				key.WithKeys("s"),
+				key.WithHelp("s", "switch to structured mode (zettelkasten)"),
+			),
+			key.NewBinding(
+				key.WithKeys("u"),
+				key.WithHelp("u", "switch to unstructured mode (all .md files)"),
+			),
+			key.NewBinding(
+				key.WithKeys("g"),
+				key.WithHelp("g", "jump to top"),
+			),
+			key.NewBinding(
+				key.WithKeys("G"),
+				key.WithHelp("G", "jump to bottom"),
+			),
+			key.NewBinding(
+				key.WithKeys("ctrl+d"),
+				key.WithHelp("ctrl+d", "page down (vim-style)"),
+			),
+			key.NewBinding(
+				key.WithKeys("ctrl+u"),
+				key.WithHelp("ctrl+u", "page up (vim-style)"),
+			),
+			key.NewBinding(
+				key.WithKeys("ctrl+f"),
+				key.WithHelp("ctrl+f", "page down (emacs-style)"),
+			),
+			key.NewBinding(
+				key.WithKeys("ctrl+b"),
+				key.WithHelp("ctrl+b", "page up (emacs-style)"),
+			),
+			key.NewBinding(
+				key.WithKeys("q"),
+				key.WithHelp("q", "quit"),
+			),
+		}
+	}
+
 	m := model{
 		list:            l,
 		tasks:           tasks,
@@ -965,6 +1064,7 @@ func showInteractiveTUI(config *task.Config, project string) {
 		project:         project,
 		watcher:         watcher,
 		projectColWidth: projectColWidth,
+		keywordColWidth: keywordColWidth,
 		allItems:        items,
 		structuredMode:  config.Structured,
 	}
@@ -980,11 +1080,16 @@ func showInteractiveTUI(config *task.Config, project string) {
 	}
 }
 
-func printTasksPlain(tasks []*task.Task) {
+func printTasksPlain(config *task.Config, tasks []*task.Task) {
 	projectColWidth := calculateProjectColWidth(tasks)
 	for _, t := range tasks {
-		fmt.Printf("%-*s %-16s %-12s %-40s",
-			projectColWidth, t.Project, t.Zettel, t.Keyword, t.Title)
+		if config.Verbose {
+			fmt.Printf("%-*s %-16s %-12s %-40s",
+				projectColWidth, t.Project, t.Zettel, t.Keyword, t.Title)
+		} else {
+			fmt.Printf("%-*s %-12s %-40s",
+				projectColWidth, t.Project, t.Keyword, t.Title)
+		}
 		if t.Tag != "" {
 			fmt.Printf(" #%s", t.Tag)
 		}

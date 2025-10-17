@@ -98,6 +98,9 @@ Environment variables take precedence over the config file.
 - `EDITOR` - Text editor (default: vim)
 - `SHOW_COMPLETED` - Show completed tasks (true/false)
 - `STRUCTURED` - Use zettelkasten structure (true/false)
+- `VERBOSE` - Show additional details like Zettel ID (true/false)
+
+**Note:** Command-line flags take precedence over environment variables and config file settings.
 
 **For full configuration options**, including custom keywords and advanced settings, see `config.toml.example` in the repository.
 
@@ -111,14 +114,21 @@ Manage tasks across projects with support for tags, dates, and assignees. Featur
 # Interactive TUI mode (default)
 todo
 
+# Show verbose output with Zettel ID column
+todo -v
+todo --verbose
+
 # List all tasks in plain text
 todo ls
+
+# List tasks with verbose output
+todo -v ls
 
 # List tasks for a specific project
 todo ls myproject
 
-# Show interactive TUI for specific project
-todo myproject
+# Show interactive TUI for specific project with verbose output
+todo -v myproject
 
 # Show project summary table
 todo projects
@@ -204,7 +214,13 @@ TASK: Meeting notes #meeting @2025-01-20
 EDITOR="nvim"              # Editor to use (supports vim, nvim, emacs, nano, code)
 SHOW_COMPLETED=true        # Show completed tasks (default: false)
 STRUCTURED=true            # Use zettelkasten structure (default: true)
+VERBOSE=true               # Show additional details like Zettel ID (default: false)
+                           # Note: -v/--verbose flag takes precedence
 ```
+
+**Command-Line Options:**
+
+- `-v, --verbose` - Show additional details like Zettel ID column
 
 **Structured vs Unstructured Mode:**
 

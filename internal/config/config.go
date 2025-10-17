@@ -86,6 +86,7 @@ type Config struct {
 	KARYA_DIR     string      `toml:"karya_dir"`
 	ShowCompleted bool        `toml:"show_completed"`
 	Structured    bool        `toml:"structured"`
+	Verbose       bool        `toml:"verbose"`    // Show additional details like Zettel ID in table view
 	ColorMode     string      `toml:"color_mode"` // "light", "dark", or empty for auto-detect
 	Colors        ColorScheme `toml:"colors"`
 	Keywords      Keywords    `toml:"keywords"`
@@ -113,6 +114,11 @@ func Load() (*Config, error) {
 	cfg.Structured = true // default value
 	if structured := os.Getenv("STRUCTURED"); structured != "" {
 		cfg.Structured = structured == "true" || structured == "1"
+	}
+
+	// Check VERBOSE environment variable
+	if verbose := os.Getenv("VERBOSE"); verbose != "" {
+		cfg.Verbose = verbose == "true" || verbose == "1"
 	}
 
 	// Always try loading from config file (environment variables can override)
@@ -149,6 +155,9 @@ func Load() (*Config, error) {
 	}
 	if structured := os.Getenv("STRUCTURED"); structured != "" {
 		cfg.Structured = structured == "true" || structured == "1"
+	}
+	if verbose := os.Getenv("VERBOSE"); verbose != "" {
+		cfg.Verbose = verbose == "true" || verbose == "1"
 	}
 
 	// Set defaults
