@@ -560,6 +560,41 @@ func (m model) View() string {
 	}
 	view := m.list.View()
 
+	// Add custom pagination info at the top, right after the title (only if multiple pages)
+	totalItems := len(m.list.Items())
+	if totalItems > 0 {
+		// Use paginator information for accurate page display
+		p := m.list.Paginator
+		totalPages := p.TotalPages
+
+		// Only show pagination info if there's more than one page
+		if totalPages > 1 {
+			currentPage := p.Page
+			itemsPerPage := p.PerPage
+
+			// Calculate the range of items on current page
+			startIdx := currentPage * itemsPerPage
+			endIdx := startIdx + itemsPerPage
+			if endIdx > totalItems {
+				endIdx = totalItems
+			}
+
+			paginationInfo := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("240")).
+				Render(fmt.Sprintf("Showing %d-%d of %d • Page %d/%d",
+					startIdx+1, endIdx, totalItems, currentPage+1, totalPages))
+
+			// Split the view and insert pagination info after the title line (first line)
+			lines := strings.Split(view, "\n")
+			if len(lines) >= 1 {
+				// Insert pagination info after the title (first line)
+				result := []string{lines[0], paginationInfo}
+				result = append(result, lines[1:]...)
+				view = strings.Join(result, "\n")
+			}
+		}
+	}
+
 	// Show filter status if active
 	if m.filtering || m.customFilter != "" {
 		var filterText string
