@@ -203,8 +203,8 @@ func (c *Config) initializeColors() {
 		CompletedColor:     "8",  // Bright black (faded)
 		TaskColor:          "0",  // Black
 		CompletedTaskColor: "8",  // Bright black (faded)
-		TagColor:           "0",  // Black text
-		TagBgColor:         "7",  // Light gray background
+		TagColor:           "15", // White text
+		TagBgColor:         "4",  // Magenta background
 		DateColor:          "4",  // Blue
 		DateBgColor:        "7",  // Light gray background (visible with blue text)
 		PastDateColor:      "15", // White text
@@ -223,8 +223,8 @@ func (c *Config) initializeColors() {
 		CompletedColor:     "8",  // Bright black (faded)
 		TaskColor:          "15", // White
 		CompletedTaskColor: "8",  // Bright black (faded)
-		TagColor:           "15", // White text
-		TagBgColor:         "0",  // Black background
+		TagColor:           "0",  // Black text
+		TagBgColor:         "14", // Light blue background
 		DateColor:          "0",  // Black text
 		DateBgColor:        "12", // Light blue background
 		PastDateColor:      "0",  // Black text
