@@ -6,6 +6,7 @@ A fast, concurrent task and note management toolkit written in Go. Karya helps y
 
 - **Fast & Concurrent**: Multi-threaded file processing handles 2000+ files efficiently
 - **Task Management**: Track TODOs, tasks, and project status across multiple projects
+- **Live File Monitoring**: Task list automatically updates when files change (no refresh needed)
 - **Zettelkasten Support**: Built-in support for zettelkasten note-taking methodology
 - **Git Integration**: Automatic git commits for notes and zettels using go-git
 - **Beautiful TUI**: Interactive terminal UI powered by Bubble Tea and Glamour
@@ -104,7 +105,7 @@ Environment variables take precedence over the config file.
 
 ### `todo` - Task Management
 
-Manage tasks across projects with support for tags, dates, and assignees. Features powerful field-specific filtering and an interactive TUI.
+Manage tasks across projects with support for tags, dates, and assignees. Features powerful field-specific filtering, an interactive TUI, and **live file monitoring** that automatically updates the task list when files change.
 
 ```bash
 # Interactive TUI mode (default)
@@ -126,7 +127,19 @@ todo projects
 todo pl
 ```
 
+**Live File Monitoring:**
+
+The interactive TUI automatically monitors your project directories for changes and updates the task list in real-time:
+
+- **External edits**: Detects when files are modified by other tools/editors
+- **New projects**: Automatically picks up newly created directories and files
+- **New files**: Detects new markdown files added to existing projects
+- **Works with filters**: Updates happen even when a custom filter is active
+
+The monitoring works in both structured and unstructured modes
+
 **Interactive Mode Keys:**
+
 - `j/k` or `↑/↓` - Navigate tasks
 - `/` - Start filtering
 - `Enter` - Edit selected task / Exit filter mode
@@ -148,6 +161,7 @@ Press `/` in interactive mode to filter tasks by specific fields:
 - `@d:date` - Filter by due date (e.g., `@d:2025-01-20`)
 
 **Examples:**
+
 ```bash
 # In interactive mode, press '/' then type:
 >> john          # Show tasks assigned to john
@@ -157,6 +171,7 @@ Press `/` in interactive mode to filter tasks by specific fields:
 ```
 
 **Task Format in Markdown:**
+
 ```markdown
 TODO: Implement feature X #urgent @2025-01-15 >> john
 TODO: Review PR @s:2025-01-16 @d:2025-01-18 >> alice
@@ -165,15 +180,18 @@ TASK: Meeting notes #meeting @2025-01-20
 ```
 
 **Date Prefixes in UI:**
+
 - `S:` - Scheduled date (when work should start)
 - `D:` - Due date (when work must be completed)
 
 **Date Color Coding:**
+
 - Past dates: Red (inverted)
 - Today: Yellow (bold)
 - Future dates: Standard
 
 **Environment Variables:**
+
 ```bash
 EDITOR="nvim"              # Editor to use (supports vim, nvim, emacs, nano, code)
 SHOW_COMPLETED=true        # Show completed tasks (default: false)
@@ -181,10 +199,12 @@ STRUCTURED=true            # Use zettelkasten structure (default: true)
 ```
 
 **Structured vs Unstructured Mode:**
+
 - **Structured** (`STRUCTURED=true`): Scans `project/notes/zettelID/README.md` files
 - **Unstructured** (`STRUCTURED=false`): Scans all `.md` files in project directory tree
 
 **Supported Keywords:**
+
 - Active: TODO, TASK, NOTE, REMINDER, EVENT, MEETING, CALL, EMAIL, MESSAGE, FOLLOWUP, REVIEW, CHECKIN, CHECKOUT, RESEARCH, READING, WRITING, DRAFT, EDITING, FINALIZE, SUBMIT, PRESENTATION, WAITING, DEFERRED, DELEGATED
 - In-Progress: DOING, INPROGRESS, STARTED, WORKING, WIP
 - Completed: ARCHIVED, CANCELED, DELETED, DONE, COMPLETED, CLOSED
@@ -359,7 +379,7 @@ holiday en-US "" 2024
 
 ## Project Structure
 
-```
+```text
 karya/
 ├── cmd/                    # Command implementations
 │   ├── todo/              # Task management
@@ -388,7 +408,7 @@ karya/
 
 Karya expects the following directory structure:
 
-```
+```text
 $PRJDIR/
 ├── project1/
 │   ├── goals.md
@@ -473,6 +493,7 @@ The task processing system uses an adaptive worker pool calculation to maximize 
 
 - **[BurntSushi/toml](https://github.com/BurntSushi/toml)**: TOML configuration parsing
 - **[go-git/go-git](https://github.com/go-git/go-git)**: Git operations without CLI
+- **[fsnotify/fsnotify](https://github.com/fsnotify/fsnotify)**: Cross-platform file system notifications
 - **[charmbracelet/bubbletea](https://github.com/charmbracelet/bubbletea)**: Terminal UI framework
 - **[charmbracelet/bubbles](https://github.com/charmbracelet/bubbles)**: TUI components
 - **[charmbracelet/glamour](https://github.com/charmbracelet/glamour)**: Markdown rendering
@@ -541,5 +562,3 @@ git push origin feature/my-feature
 - [ ] Export to various formats (JSON, CSV, etc.)
 
 ---
-
-**Built with ❤️ using Go and Charm libraries**

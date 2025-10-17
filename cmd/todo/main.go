@@ -224,17 +224,35 @@ type loadingDoneMsg struct {
 
 func waitForFileChange(watcher *fsnotify.Watcher) tea.Cmd {
 	return func() tea.Msg {
-		select {
-		case event := <-watcher.Events:
-			if event.Op&fsnotify.Write == fsnotify.Write {
-				// Debounce: wait a bit for multiple writes to settle
-				time.Sleep(100 * time.Millisecond)
-				return fileChangedMsg{}
-			}
-		case err := <-watcher.Errors:
-			log.Printf("Watcher error: %v", err)
+		if watcher == nil {
+			return nil
 		}
-		return nil
+
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					// Channel closed
+					return nil
+				}
+				// Watch for Write (file modification), Create (new file), and Remove (file deletion) events
+				if event.Op&fsnotify.Write == fsnotify.Write ||
+					event.Op&fsnotify.Create == fsnotify.Create ||
+					event.Op&fsnotify.Remove == fsnotify.Remove {
+					// Debounce: wait a bit for multiple writes to settle
+					time.Sleep(100 * time.Millisecond)
+					return fileChangedMsg{}
+				}
+				// If it's not a matching event, continue the loop to wait for the next one
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					// Channel closed
+					return nil
+				}
+				log.Printf("Watcher error: %v", err)
+				// Continue the loop to keep watching even after an error
+			}
+		}
 	}
 }
 
@@ -380,6 +398,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.list.SetItems(items)
 			}
 			m.list.ResetSelected()
+
+			// Update watcher to monitor new files/directories
+			updateWatcher(m.watcher, m.config, m.project)
 		}
 		// Continue watching for changes
 		return m, waitForFileChange(m.watcher)
@@ -652,6 +673,114 @@ func calculateProjectColWidth(tasks []*task.Task) int {
 	return maxLen
 }
 
+// setupWatcher creates a new watcher and watches all relevant directories
+func setupWatcher(config *task.Config, project string) (*fsnotify.Watcher, error) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return nil, err
+	}
+
+	updateWatcher(watcher, config, project)
+	return watcher, nil
+}
+
+// updateWatcher updates the watcher to monitor all relevant directories and files
+func updateWatcher(watcher *fsnotify.Watcher, config *task.Config, project string) {
+	if watcher == nil {
+		return
+	}
+
+	// Get list of directories to watch
+	dirsToWatch := getWatchDirectories(config, project)
+
+	// Remove all current watches (fsnotify doesn't have a list method, so we track what we add)
+	// Since we can't efficiently remove specific watches, we'll just add new ones
+	// fsnotify handles duplicate adds gracefully
+
+	for _, dir := range dirsToWatch {
+		// Ignore errors - directory might not exist yet or might already be watched
+		watcher.Add(dir)
+	}
+}
+
+// getWatchDirectories returns a list of directories that should be watched
+func getWatchDirectories(config *task.Config, project string) []string {
+	var dirs []string
+
+	if config.Structured {
+		// Structured mode: watch notes directories in each project
+		if project == "" || project == "*" {
+			// Watch all projects
+			pattern := filepath.Join(config.PRJDIR, "*", "notes")
+			matches, err := filepath.Glob(pattern)
+			if err == nil {
+				dirs = append(dirs, matches...)
+			}
+
+			// Also watch each zettel directory within notes
+			zettelPattern := filepath.Join(config.PRJDIR, "*", "notes", "*")
+			zettelMatches, err := filepath.Glob(zettelPattern)
+			if err == nil {
+				for _, match := range zettelMatches {
+					info, err := os.Stat(match)
+					if err == nil && info.IsDir() {
+						dirs = append(dirs, match)
+					}
+				}
+			}
+		} else {
+			// Watch specific project
+			notesDir := filepath.Join(config.PRJDIR, project, "notes")
+			dirs = append(dirs, notesDir)
+
+			// Watch each zettel directory within this project's notes
+			zettelPattern := filepath.Join(config.PRJDIR, project, "notes", "*")
+			matches, err := filepath.Glob(zettelPattern)
+			if err == nil {
+				for _, match := range matches {
+					info, err := os.Stat(match)
+					if err == nil && info.IsDir() {
+						dirs = append(dirs, match)
+					}
+				}
+			}
+		}
+	} else {
+		// Unstructured mode: watch the project directory tree
+		if project == "" || project == "*" {
+			// Watch all project directories
+			pattern := filepath.Join(config.PRJDIR, "*")
+			matches, err := filepath.Glob(pattern)
+			if err == nil {
+				for _, match := range matches {
+					info, err := os.Stat(match)
+					if err == nil && info.IsDir() {
+						dirs = append(dirs, match)
+						// Also walk subdirectories
+						filepath.Walk(match, func(path string, info os.FileInfo, err error) error {
+							if err == nil && info.IsDir() {
+								dirs = append(dirs, path)
+							}
+							return nil
+						})
+					}
+				}
+			}
+		} else {
+			// Watch specific project directory tree
+			projectDir := filepath.Join(config.PRJDIR, project)
+			filepath.Walk(projectDir, func(path string, info os.FileInfo, err error) error {
+				if err == nil && info.IsDir() {
+					dirs = append(dirs, path)
+				}
+				return nil
+			})
+		}
+	}
+
+	return dirs
+}
+
 func main() {
 	config := task.NewConfig()
 
@@ -730,6 +859,11 @@ COMMANDS:
     -h, --help, help    Show this help message
 
 INTERACTIVE MODE:
+    The TUI features live file monitoring - the task list automatically updates
+    when files are modified (by external editors or tools like 'zet', 'note'),
+    when new projects are created, or when new files are added to existing projects.
+    No manual refresh needed!
+
     Type '/' to filter  Filter tasks list (See FILTERING below)
     j/k or ↑/↓          Navigate tasks
     Enter               Edit selected task at specific line / Exit filter mode
@@ -792,18 +926,10 @@ func showInteractiveTUI(config *task.Config, project string) {
 		return
 	}
 
-	// Set up file watcher
-	watcher, err := fsnotify.NewWatcher()
+	// Set up file watcher to monitor directories
+	watcher, err := setupWatcher(config, project)
 	if err != nil {
 		log.Printf("Warning: Could not create file watcher: %v", err)
-	}
-
-	// Watch all README.md files in the project
-	files, err := config.FindFiles(project)
-	if err == nil && watcher != nil {
-		for _, file := range files {
-			watcher.Add(file)
-		}
 	}
 
 	// Sort tasks: pending first, in-progress second, completed last
