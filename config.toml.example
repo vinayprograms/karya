@@ -21,22 +21,26 @@ prjdir = "/path/to/your/projects"
 # - true: Search for project/notes/zettelID/README.md files (zettelkasten format)
 # - false: Search all .md files in project directory tree (unstructured)
 
-# Optional: Active/Pending task keywords (defaults shown below)
-# active_keywords = [
+# ============================================================================
+# KEYWORDS CONFIGURATION
+# ============================================================================
+# Customize task state detection by defining keyword lists.
+# Keywords are case-sensitive and matched against task markers (e.g., "TODO:", "DOING:").
+#
+# [keywords]
+# active = [
 #     "TODO", "TASK", "NOTE", "REMINDER", "EVENT", "MEETING",
 #     "CALL", "EMAIL", "MESSAGE", "FOLLOWUP", "REVIEW",
 #     "CHECKIN", "CHECKOUT", "RESEARCH", "READING", "WRITING",
 #     "DRAFT", "FINALIZE", "SUBMIT", "PRESENTATION"
 # ]
-
-# Optional: In-progress task keywords (defaults shown below)
-# inprogress_keywords = [
+#
+# inprogress = [
 #     "DOING", "EDITING", "INPROGRESS", "WIP", "WORKING", "STARTED",
 #     "WAITING", "DEFERRED", "DELEGATED"
 # ]
-
-# Optional: Completed task keywords (defaults shown below)
-# completed_keywords = [
+#
+# completed = [
 #     "ARCHIVED", "CANCELED", "DELETED", "DONE", "COMPLETED", "CLOSED"
 # ]
 

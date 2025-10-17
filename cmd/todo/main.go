@@ -776,16 +776,7 @@ ENVIRONMENT VARIABLES:
                         Can also be set in ~/.config/karya/config.toml
 
 CONFIGURATION:
-    Config file: ~/.config/karya/config.toml
-
-    Options:
-        show_completed = true/false     # Show completed tasks
-        structured = true/false         # Use zettelkasten format vs all .md files
-        active_keywords = [...]          # Customize active task keywords
-        inprogress_keywords = [...]      # Customize in-progress keywords
-        completed_keywords = [...]       # Customize completed keywords
-
-    See config.toml.example for full configuration options.
+    See config file: ~/.config/karya/config.toml.example for full configuration options.
 `
 	fmt.Print(help)
 }

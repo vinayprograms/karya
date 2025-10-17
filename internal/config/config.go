@@ -73,18 +73,26 @@ type ColorScheme struct {
 	AssigneeBgColor    string `toml:"assignee-bg"`
 }
 
+type Keywords struct {
+	Active     []string `toml:"active"`
+	InProgress []string `toml:"inprogress"`
+	Completed  []string `toml:"completed"`
+}
+
 type Config struct {
-	PRJDIR             string      `toml:"prjdir"`
-	ZETDIR             string      `toml:"zetdir"`
-	EDITOR             string      `toml:"editor"`
-	KARYA_DIR          string      `toml:"karya_dir"`
-	ShowCompleted      bool        `toml:"show_completed"`
-	Structured         bool        `toml:"structured"`
-	ColorMode          string      `toml:"color_mode"` // "light", "dark", or empty for auto-detect
-	Colors             ColorScheme `toml:"colors"`
-	ActiveKeywords     []string    `toml:"active_keywords"`
-	InProgressKeywords []string    `toml:"inprogress_keywords"`
-	CompletedKeywords  []string    `toml:"completed_keywords"`
+	PRJDIR        string      `toml:"prjdir"`
+	ZETDIR        string      `toml:"zetdir"`
+	EDITOR        string      `toml:"editor"`
+	KARYA_DIR     string      `toml:"karya_dir"`
+	ShowCompleted bool        `toml:"show_completed"`
+	Structured    bool        `toml:"structured"`
+	ColorMode     string      `toml:"color_mode"` // "light", "dark", or empty for auto-detect
+	Colors        ColorScheme `toml:"colors"`
+	Keywords      Keywords    `toml:"keywords"`
+	// For backwards compatibility, keep these as module-level exports
+	ActiveKeywords     []string
+	InProgressKeywords []string
+	CompletedKeywords  []string
 }
 
 func Load() (*Config, error) {
@@ -150,24 +158,31 @@ func Load() (*Config, error) {
 	if cfg.KARYA_DIR == "" && cfg.PRJDIR != "" {
 		cfg.KARYA_DIR = cfg.PRJDIR
 	}
-	if len(cfg.ActiveKeywords) == 0 {
-		cfg.ActiveKeywords = []string{
+
+	// Set keyword defaults if not provided
+	if len(cfg.Keywords.Active) == 0 {
+		cfg.Keywords.Active = []string{
 			"TODO", "TASK", "NOTE", "REMINDER", "EVENT", "MEETING",
 			"CALL", "EMAIL", "MESSAGE", "FOLLOWUP", "REVIEW",
 			"CHECKIN", "CHECKOUT", "RESEARCH", "READING", "WRITING",
 			"DRAFT", "FINALIZE", "SUBMIT", "PRESENTATION",
 		}
 	}
-	if len(cfg.InProgressKeywords) == 0 {
-		cfg.InProgressKeywords = []string{
+	if len(cfg.Keywords.InProgress) == 0 {
+		cfg.Keywords.InProgress = []string{
 			"DOING", "INPROGRESS", "WIP", "WORKING", "STARTED",
 		}
 	}
-	if len(cfg.CompletedKeywords) == 0 {
-		cfg.CompletedKeywords = []string{
+	if len(cfg.Keywords.Completed) == 0 {
+		cfg.Keywords.Completed = []string{
 			"ARCHIVED", "CANCELED", "DELETED", "DONE", "COMPLETED", "CLOSED",
 		}
 	}
+
+	// Copy keywords to module-level exports for backwards compatibility
+	cfg.ActiveKeywords = cfg.Keywords.Active
+	cfg.InProgressKeywords = cfg.Keywords.InProgress
+	cfg.CompletedKeywords = cfg.Keywords.Completed
 
 	// Initialize colors with defaults based on mode
 	cfg.initializeColors()
