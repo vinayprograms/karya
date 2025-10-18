@@ -79,49 +79,40 @@ type Keywords struct {
 	Completed  []string `toml:"completed"`
 }
 
+type Directories struct {
+	Projects     string `toml:"projects"`     // Project root directory
+	Zettelkasten string `toml:"zettelkasten"` // Zettelkasten directory
+	Karya        string `toml:"karya"`        // Karya inbox directory
+}
+
 type Config struct {
-	PRJDIR        string      `toml:"prjdir"`
-	ZETDIR        string      `toml:"zetdir"`
-	EDITOR        string      `toml:"editor"`
-	KARYA_DIR     string      `toml:"karya_dir"`
-	ShowCompleted bool        `toml:"show_completed"`
-	Structured    bool        `toml:"structured"`
-	Verbose       bool        `toml:"verbose"`    // Show additional details like Zettel ID in table view
-	ColorMode     string      `toml:"color_mode"` // "light", "dark", or empty for auto-detect
-	Colors        ColorScheme `toml:"colors"`
-	Keywords      Keywords    `toml:"keywords"`
-	// For backwards compatibility, keep these as module-level exports
+	// Directories section
+	Directories Directories `toml:"directories"`
+
+	// Editor and display settings
+	EDITOR        string `toml:"editor"`
+	ShowCompleted bool   `toml:"show_completed"`
+	Structured    bool   `toml:"structured"`
+	Verbose       bool   `toml:"verbose"`    // Show additional details like Zettel ID in table view
+	ColorMode     string `toml:"color_mode"` // "light", "dark", or empty for auto-detect
+
+	// Subsections
+	Colors   ColorScheme `toml:"colors"`
+	Keywords Keywords    `toml:"keywords"`
+
+	// For module-level keyword exports
 	ActiveKeywords     []string
 	InProgressKeywords []string
 	CompletedKeywords  []string
 }
 
 func Load() (*Config, error) {
-	// Try environment variables first
+	// Initialize empty config with defaults
 	cfg := &Config{
-		PRJDIR:    os.Getenv("PRJDIR"),
-		ZETDIR:    os.Getenv("ZETDIR"),
-		EDITOR:    os.Getenv("EDITOR"),
-		KARYA_DIR: os.Getenv("KARYA_DIR"),
+		Structured: true, // default value
 	}
 
-	// Check SHOW_COMPLETED environment variable
-	if showCompleted := os.Getenv("SHOW_COMPLETED"); showCompleted != "" {
-		cfg.ShowCompleted = showCompleted == "true" || showCompleted == "1"
-	}
-
-	// Check STRUCTURED environment variable (defaults to true)
-	cfg.Structured = true // default value
-	if structured := os.Getenv("STRUCTURED"); structured != "" {
-		cfg.Structured = structured == "true" || structured == "1"
-	}
-
-	// Check VERBOSE environment variable
-	if verbose := os.Getenv("VERBOSE"); verbose != "" {
-		cfg.Verbose = verbose == "true" || verbose == "1"
-	}
-
-	// Always try loading from config file (environment variables can override)
+	// Load from config file first
 	home, err := os.UserHomeDir()
 	if err == nil {
 		configPath := filepath.Join(home, ".config", "karya", "config.toml")
@@ -130,25 +121,25 @@ func Load() (*Config, error) {
 				return nil, fmt.Errorf("failed to parse config file: %w", err)
 			}
 			// Expand environment variables in config values
-			cfg.PRJDIR = expandEnv(cfg.PRJDIR)
-			cfg.ZETDIR = expandEnv(cfg.ZETDIR)
 			cfg.EDITOR = expandEnv(cfg.EDITOR)
-			cfg.KARYA_DIR = expandEnv(cfg.KARYA_DIR)
+			cfg.Directories.Projects = expandEnv(cfg.Directories.Projects)
+			cfg.Directories.Zettelkasten = expandEnv(cfg.Directories.Zettelkasten)
+			cfg.Directories.Karya = expandEnv(cfg.Directories.Karya)
 		}
 	}
 
 	// Environment variables override config file (applied AFTER config file load)
-	if prjdir := os.Getenv("PRJDIR"); prjdir != "" {
-		cfg.PRJDIR = prjdir
+	if projects := os.Getenv("PROJECTS"); projects != "" {
+		cfg.Directories.Projects = projects
 	}
-	if zetdir := os.Getenv("ZETDIR"); zetdir != "" {
-		cfg.ZETDIR = zetdir
+	if zettelkasten := os.Getenv("ZETTELKASTEN"); zettelkasten != "" {
+		cfg.Directories.Zettelkasten = zettelkasten
+	}
+	if karya := os.Getenv("KARYA"); karya != "" {
+		cfg.Directories.Karya = karya
 	}
 	if editor := os.Getenv("EDITOR"); editor != "" {
 		cfg.EDITOR = editor
-	}
-	if karyaDir := os.Getenv("KARYA_DIR"); karyaDir != "" {
-		cfg.KARYA_DIR = karyaDir
 	}
 	if showCompleted := os.Getenv("SHOW_COMPLETED"); showCompleted != "" {
 		cfg.ShowCompleted = showCompleted == "true" || showCompleted == "1"
@@ -164,8 +155,8 @@ func Load() (*Config, error) {
 	if cfg.EDITOR == "" {
 		cfg.EDITOR = "vim"
 	}
-	if cfg.KARYA_DIR == "" && cfg.PRJDIR != "" {
-		cfg.KARYA_DIR = cfg.PRJDIR
+	if cfg.Directories.Karya == "" && cfg.Directories.Projects != "" {
+		cfg.Directories.Karya = cfg.Directories.Projects
 	}
 
 	// Set keyword defaults if not provided
@@ -213,8 +204,8 @@ func expandEnv(s string) string {
 }
 
 func (c *Config) Validate() error {
-	if c.PRJDIR == "" {
-		return fmt.Errorf("PRJDIR not set. Please create ~/.config/karya/config.toml with:\nprjdir = \"/path/to/projects\"")
+	if c.Directories.Projects == "" {
+		return fmt.Errorf("projects directory not set. Please create ~/.config/karya/config.toml with:\n[directories]\nprojects = \"/path/to/projects\"")
 	}
 	return nil
 }

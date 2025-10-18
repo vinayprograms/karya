@@ -107,7 +107,7 @@ func NewConfig() *Config {
 		os.Exit(1)
 	}
 	taskCfg := &Config{
-		PRJDIR:             cfg.PRJDIR,
+		PRJDIR:             cfg.Directories.Projects,
 		ShowCompleted:      cfg.ShowCompleted,
 		Structured:         cfg.Structured,
 		Verbose:            cfg.Verbose,

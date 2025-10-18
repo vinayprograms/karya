@@ -79,22 +79,27 @@ Karya uses a TOML configuration file located at `~/.config/karya/config.toml`.
 **Quick Start:**
 
 ```toml
-# Minimum required configuration
-prjdir = "$HOME/Documents/projects"
-
-# Optional settings
-zetdir = "$HOME/Documents/zet"
+# General settings (must be before [sections])
 editor = "nvim"
 show_completed = false
 structured = true
+
+# Directory paths
+[directories]
+projects = "$HOME/Documents/projects"
+zettelkasten = "$HOME/Documents/zet"
+karya = "$HOME/Documents/karya"
 ```
+
+**Note:** Root-level settings must be defined before any `[section]` declarations in TOML format.
 
 **Environment Variables:**
 
 Environment variables take precedence over the config file.
 
-- `PRJDIR` - Project root directory (required)
-- `ZETDIR` - Zettelkasten directory
+- `PROJECTS` - Project root directory (required)
+- `ZETTELKASTEN` - Zettelkasten directory
+- `KARYA` - Karya inbox directory
 - `EDITOR` - Text editor (default: vim)
 - `SHOW_COMPLETED` - Show completed tasks (true/false)
 - `STRUCTURED` - Use zettelkasten structure (true/false)
@@ -433,7 +438,7 @@ karya/
 Karya expects the following directory structure:
 
 ```text
-$PRJDIR/
+$PROJECTS/
 ├── project1/
 │   ├── goals.md
 │   ├── thots.md
@@ -447,7 +452,7 @@ $PRJDIR/
 │       └── ...
 └── ...
 
-$ZETDIR/
+$ZETTELKASTEN/
 ├── 20240115120000/
 │   └── README.md
 ├── 20240116130000/

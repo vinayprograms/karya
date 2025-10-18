@@ -1,17 +1,13 @@
 # Karya Task Management Configuration
 # Supports structured/unstructured project layouts and field-specific filtering
 
-# Required: Root directory for projects
-prjdir = "/path/to/your/projects"
-
-# Optional: Zettelkasten directory (for zet command)
-# zetdir = "/path/to/zettelkasten"
+# ============================================================================
+# GENERAL SETTINGS
+# ============================================================================
+# These must be defined before any [section] declarations
 
 # Optional: Editor (defaults to vim)
 # editor = "nvim"
-
-# Optional: Karya directory for inbox (defaults to prjdir)
-# karya_dir = "/path/to/karya"
 
 # Optional: Show completed tasks in TUI (defaults to false)
 # show_completed = true
@@ -24,6 +20,25 @@ prjdir = "/path/to/your/projects"
 # Optional: Show additional details like Zettel ID column in table view (defaults to false)
 # verbose = true
 # Note: -v/--verbose command-line flag takes precedence over this setting
+
+# Optional: Color mode for terminal display
+# color_mode = "dark"  # or "light"
+
+# ============================================================================
+# DIRECTORIES CONFIGURATION
+# ============================================================================
+# Directory paths for various karya commands
+# Environment variables in paths (like $HOME) will be automatically expanded
+
+[directories]
+# Required: Root directory for projects (used by todo, prj, etc.)
+projects = "/path/to/your/projects"
+
+# Optional: Zettelkasten directory (for zet and note commands)
+zettelkasten = "/path/to/zettelkasten"
+
+# Optional: Karya inbox directory (defaults to projects directory)
+karya = "/path/to/karya"
 
 # ============================================================================
 # KEYWORDS CONFIGURATION
