@@ -44,8 +44,9 @@ var (
 )
 
 type zettelItem struct {
-	zettel  Zettel
-	verbose bool
+	zettel        Zettel
+	verbose       bool
+	searchResults []SearchResult // For fulltext search results
 }
 
 func (i zettelItem) FilterValue() string {
@@ -54,6 +55,15 @@ func (i zettelItem) FilterValue() string {
 
 func (i zettelItem) renderWithSelection(isSelected bool) string {
 	var parts []string
+
+	// Show match count if there are search results
+	if len(i.searchResults) > 0 {
+		matchCount := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("11")).
+			Bold(true).
+			Render(fmt.Sprintf("[%d] ", len(i.searchResults)))
+		parts = append(parts, matchCount)
+	}
 
 	if i.verbose {
 		parts = append(parts, magentaStyle.Render(fmt.Sprintf("%-14s", i.zettel.ID)))
@@ -106,16 +116,17 @@ type model struct {
 	zetDir                 string
 	quitting               bool
 	editor                 string
-	customFilter           string
-	filtering              bool
-	allItems               []list.Item
 	verbose                bool
 	watcher                *fsnotify.Watcher
-	savedFilter            string
 	sortNewestFirst        bool
 	showDeleteConfirm      bool
 	deleteZettel           *Zettel
 	deleteConfirmSelection int // 0 = Cancel, 1 = Delete
+	filtering              bool
+	filterMode             string // "title" or "fulltext"
+	customFilter           string
+	allItems               []list.Item
+	searchResults          map[string][]SearchResult // Map zettel ID to search results
 }
 
 func (m model) Init() tea.Cmd {
@@ -194,11 +205,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							items[i] = zettelItem{zettel: z, verbose: m.verbose}
 						}
 						m.allItems = items
-						if m.customFilter != "" {
-							m.applyCustomFilter()
-						} else {
-							m.list.SetItems(items)
-						}
+						m.list.SetItems(items)
 						m.list.ResetSelected()
 					}
 					return m, nil
@@ -213,97 +220,116 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Handle custom filtering
+		// Handle filtering
 		if m.filtering {
 			switch msg.String() {
 			case "esc":
+				// Cancel filtering
 				m.filtering = false
 				m.customFilter = ""
 				m.list.SetItems(m.allItems)
 				return m, nil
 			case "enter":
+				// Exit filtering mode but keep filter applied
 				m.filtering = false
 				return m, nil
 			case "backspace":
 				if len(m.customFilter) > 0 {
 					m.customFilter = m.customFilter[:len(m.customFilter)-1]
-					m.applyCustomFilter()
+					m.applyFilter()
 				} else {
+					// Exit filtering if filter is empty
 					m.filtering = false
 					m.list.SetItems(m.allItems)
 				}
 				return m, nil
 			default:
+				// Add character to filter
 				if len(msg.Runes) > 0 && msg.Runes[0] >= 32 && msg.Runes[0] <= 126 {
 					m.customFilter += string(msg.Runes[0])
-					m.applyCustomFilter()
+					m.applyFilter()
 					return m, nil
 				}
-			}
-		} else {
-			if msg.String() == "esc" {
-				if m.customFilter != "" {
-					m.customFilter = ""
-					m.list.SetItems(m.allItems)
-					return m, nil
-				}
-			}
-
-			if msg.String() == "q" {
-				m.quitting = true
-				return m, tea.Quit
-			}
-
-			if msg.String() == "/" {
-				m.filtering = true
+				// Ignore other keys while filtering
 				return m, nil
 			}
+		}
 
-			if msg.String() == "s" {
-				m.sortNewestFirst = !m.sortNewestFirst
-				m.sortZettels()
+		// Handle esc when not filtering
+		if msg.String() == "esc" {
+			if m.customFilter != "" {
+				// Clear filter
+				m.customFilter = ""
+				m.list.SetItems(m.allItems)
 				return m, nil
 			}
+		}
 
-			// Subcommand keybindings
-			if msg.String() == "n" {
-				// New zettel
-				return m, newZettelCmd(m.zetDir, m.editor)
-			}
+		if msg.String() == "q" {
+			m.quitting = true
+			return m, tea.Quit
+		}
 
-			if msg.String() == "l" {
-				// Edit last zettel
-				return m, editLastZettelCmd(m.zetDir, m.editor)
-			}
+		// Start title filter
+		if msg.String() == "/" {
+			m.filtering = true
+			m.filterMode = "title"
+			return m, nil
+		}
 
-			if msg.String() == "c" {
-				// Show count (just refresh, count is visible in pagination)
+		// Start fulltext filter
+		if msg.String() == "*" {
+			m.filtering = true
+			m.filterMode = "fulltext"
+			return m, nil
+		}
+
+		if msg.String() == "s" {
+			m.sortNewestFirst = !m.sortNewestFirst
+			m.sortZettels()
+			return m, nil
+		}
+
+		// Subcommand keybindings
+		if msg.String() == "n" {
+			// New zettel
+			return m, newZettelCmd(m.zetDir, m.editor)
+		}
+
+		if msg.String() == "l" {
+			// Edit last zettel
+			return m, editLastZettelCmd(m.zetDir, m.editor)
+		}
+
+		if msg.String() == "c" {
+			// Show count (just refresh, count is visible in pagination)
+			return m, nil
+		}
+
+		if msg.String() == "shift+t" || msg.String() == "T" {
+			// Edit TOC
+			tocPath := filepath.Join(m.zetDir, "README.md")
+			return m, openEditorCmd(m.editor, tocPath, "")
+		}
+
+		if msg.String() == "d" {
+			// Delete zettel - show confirmation
+			if i, ok := m.list.SelectedItem().(zettelItem); ok {
+				m.showDeleteConfirm = true
+				m.deleteZettel = &i.zettel
+				m.deleteConfirmSelection = 0 // Default to Cancel
 				return m, nil
 			}
+		}
 
-			if msg.String() == "shift+t" || msg.String() == "T" {
-				// Edit TOC
-				tocPath := filepath.Join(m.zetDir, "README.md")
-				return m, openEditorCmd(m.editor, tocPath)
-			}
-
-			if msg.String() == "d" {
-				// Delete zettel - show confirmation
-				if i, ok := m.list.SelectedItem().(zettelItem); ok {
-					m.showDeleteConfirm = true
-					m.deleteZettel = &i.zettel
-					m.deleteConfirmSelection = 0 // Default to Cancel
-					return m, nil
+		if msg.String() == "enter" {
+			if i, ok := m.list.SelectedItem().(zettelItem); ok {
+				// Pass search term if in fulltext mode
+				searchTerm := ""
+				if m.filterMode == "fulltext" && m.customFilter != "" {
+					searchTerm = m.customFilter
 				}
-			}
-
-			if msg.String() == "enter" {
-				if !m.filtering {
-					if i, ok := m.list.SelectedItem().(zettelItem); ok {
-						m.savedFilter = m.customFilter
-						return m, openEditorCmd(m.editor, i.zettel.Path)
-					}
-				}
+				return m, openEditorCmd(m.editor, i.zettel.Path, searchTerm)
 			}
 		}
 	case fileChangedMsg:
@@ -316,7 +342,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.allItems = items
 			if m.customFilter != "" {
-				m.applyCustomFilter()
+				m.applyFilter()
 			} else {
 				m.list.SetItems(items)
 			}
@@ -336,9 +362,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				items[i] = zettelItem{zettel: z, verbose: m.verbose}
 			}
 			m.allItems = items
-			if m.savedFilter != "" {
-				m.customFilter = m.savedFilter
-				m.applyCustomFilter()
+			if m.customFilter != "" {
+				m.applyFilter()
 			} else {
 				m.list.SetItems(items)
 			}
@@ -347,7 +372,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.WindowSizeMsg:
 		m.list.SetWidth(msg.Width)
-		m.list.SetHeight(msg.Height - 2)
+		m.list.SetHeight(msg.Height - 5) // Reduce by 5: 2 for custom help lines + 3 for spacing/margins
 	}
 
 	var cmd tea.Cmd
@@ -361,59 +386,63 @@ func (m model) View() string {
 	}
 	view := m.list.View()
 
-	// Add custom pagination info at the top, right after the title (only if multiple pages)
-	totalItems := len(m.list.Items())
-	if totalItems > 0 {
-		// Use paginator information for accurate page display
-		p := m.list.Paginator
-		totalPages := p.TotalPages
+	lines := strings.Split(view, "\n")
+	if len(lines) > 0 {
+		// Build header in order: Title → Filter → Pagination
+		header := []string{lines[0]} // Title (first line from list)
 
-		// Only show pagination info if there's more than one page
-		if totalPages > 1 {
-			currentPage := p.Page
-			itemsPerPage := p.PerPage
-
-			// Calculate the range of items on current page
-			startIdx := currentPage * itemsPerPage
-			endIdx := startIdx + itemsPerPage
-			if endIdx > totalItems {
-				endIdx = totalItems
+		// Add filter line (always reserve space)
+		var filterLine string
+		if m.filtering || m.customFilter != "" {
+			var filterText string
+			modeLabel := "Search by title"
+			if m.filterMode == "fulltext" {
+				modeLabel = "Fulltext search"
 			}
+			if m.filtering {
+				filterText = fmt.Sprintf("%s: %s▓", modeLabel, m.customFilter)
+			} else {
+				filterText = fmt.Sprintf("%s: %s", modeLabel, m.customFilter)
+			}
+			filterLine = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("11")).
+				Background(lipgloss.Color("0")).
+				Padding(0, 1).
+				Render(filterText)
+		} else {
+			filterLine = "" // Empty line when not filtering
+		}
+		header = append(header, filterLine)
 
-			paginationInfo := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("240")).
-				Render(fmt.Sprintf("Showing %d-%d of %d • Page %d/%d",
-					startIdx+1, endIdx, totalItems, currentPage+1, totalPages))
-
-			// Split the view and insert pagination info after the title line (first line)
-			lines := strings.Split(view, "\n")
-			if len(lines) >= 1 {
-				// Insert pagination info after the title (first line)
-				result := []string{lines[0], paginationInfo}
-				result = append(result, lines[1:]...)
-				view = strings.Join(result, "\n")
+		// Add pagination info if multiple pages
+		totalItems := len(m.list.Items())
+		if totalItems > 0 {
+			p := m.list.Paginator
+			totalPages := p.TotalPages
+			if totalPages > 1 {
+				currentPage := p.Page
+				itemsPerPage := p.PerPage
+				startIdx := currentPage * itemsPerPage
+				endIdx := startIdx + itemsPerPage
+				if endIdx > totalItems {
+					endIdx = totalItems
+				}
+				paginationInfo := lipgloss.NewStyle().
+					Foreground(lipgloss.Color("240")).
+					Render(fmt.Sprintf("Showing %d-%d of %d • Page %d/%d",
+						startIdx+1, endIdx, totalItems, currentPage+1, totalPages))
+				header = append(header, paginationInfo)
 			}
 		}
-	}
 
-	if m.filtering || m.customFilter != "" {
-		var filterText string
-		if m.filtering {
-			filterText = fmt.Sprintf("Filter: %s▓", m.customFilter)
-		} else if m.customFilter != "" {
-			filterText = fmt.Sprintf("Filter: %s", m.customFilter)
-		}
-
-		filterInfo := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("11")).
-			Background(lipgloss.Color("0")).
-			Padding(0, 1).
-			Render(filterText)
-		view = filterInfo + "\n" + view
+		// Combine header with rest of list (skip first line which is title)
+		result := header
+		result = append(result, lines[1:]...)
+		view = strings.Join(result, "\n")
 	}
 
 	// Replace the default help with a custom compact status bar
-	lines := strings.Split(view, "\n")
+	lines = strings.Split(view, "\n")
 	if len(lines) > 0 {
 		// Remove the last line (default help)
 		lines = lines[:len(lines)-1]
@@ -424,8 +453,8 @@ func (m model) View() string {
 			//Background(lipgloss.Color("236"))
 		navStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 
-		line1 := commandStyle.Render(" Commands: n:new • l:last • d:delete • T:toc • c:count ")
-		line2 := navStyle.Render(" ↑↓/jk • g/G:top/bottom • Ctrl+d/u:page • /:filter • s:sort • Enter:edit • q:quit")
+		line1 := commandStyle.Render(" Commands: n:new • l:last • d:delete • T:toc • c:count")
+		line2 := navStyle.Render(" ↑↓/jk • g/G:top/bottom • Ctrl+d/u:page • /:title search • *:fulltext search • s:sort order • Enter:edit • q:quit • ?:more help ")
 
 		lines = append(lines, line1, line2, "") // Add empty line for spacing
 		view = strings.Join(lines, "\n")
@@ -493,26 +522,77 @@ func (m model) View() string {
 	return view
 }
 
-func (m *model) applyCustomFilter() {
+func (m *model) applyFilter() {
 	if m.customFilter == "" {
 		m.list.SetItems(m.allItems)
+		m.searchResults = nil
 		return
 	}
 
 	filterLower := strings.ToLower(m.customFilter)
 	var filteredItems []list.Item
 
+	if m.filterMode == "fulltext" {
+		// Clear previous search results
+		m.searchResults = make(map[string][]SearchResult)
+	}
+
 	for _, item := range m.allItems {
 		if zetItem, ok := item.(zettelItem); ok {
-			// Search in ID and title
-			if strings.Contains(strings.ToLower(zetItem.zettel.ID), filterLower) ||
-				strings.Contains(strings.ToLower(zetItem.zettel.Title), filterLower) {
-				filteredItems = append(filteredItems, item)
+			if m.filterMode == "title" {
+				// Title search: search in ID and title
+				if strings.Contains(strings.ToLower(zetItem.zettel.ID), filterLower) ||
+					strings.Contains(strings.ToLower(zetItem.zettel.Title), filterLower) {
+					filteredItems = append(filteredItems, item)
+				}
+			} else if m.filterMode == "fulltext" {
+				// Fulltext search: search in file content and collect results
+				results := m.searchInFile(zetItem.zettel.Path, filterLower)
+				if len(results) > 0 {
+					m.searchResults[zetItem.zettel.ID] = results
+					// Create new zettelItem with search results
+					newItem := zettelItem{
+						zettel:        zetItem.zettel,
+						verbose:       zetItem.verbose,
+						searchResults: results,
+					}
+					filteredItems = append(filteredItems, newItem)
+				}
 			}
 		}
 	}
 
 	m.list.SetItems(filteredItems)
+}
+
+func (m *model) searchInFile(filePath, searchTerm string) []SearchResult {
+	var results []SearchResult
+	
+	file, err := os.Open(filePath)
+	if err != nil {
+		return results
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	lineNum := 0
+	for scanner.Scan() {
+		lineNum++
+		line := scanner.Text()
+		if strings.Contains(strings.ToLower(line), searchTerm) {
+			// Extract zettel ID from path
+			dir := filepath.Dir(filePath)
+			zetID := filepath.Base(dir)
+			
+			results = append(results, SearchResult{
+				ZettelID: zetID,
+				LineNum:  lineNum,
+				Line:     line,
+				Path:     filePath,
+			})
+		}
+	}
+	return results
 }
 
 func (m *model) sortZettels() {
@@ -540,7 +620,7 @@ func (m *model) sortZettels() {
 
 	// Reapply filter if active
 	if m.customFilter != "" {
-		m.applyCustomFilter()
+		m.applyFilter()
 	} else {
 		m.list.SetItems(items)
 	}
@@ -664,7 +744,7 @@ func editLastZettelCmd(zetDir, editor string) tea.Cmd {
 	})
 }
 
-func openEditorCmd(editor, filePath string) tea.Cmd {
+func openEditorCmd(editor, filePath, searchTerm string) tea.Cmd {
 	if strings.HasPrefix(editor, "~/") {
 		home, err := os.UserHomeDir()
 		if err == nil {
@@ -675,6 +755,28 @@ func openEditorCmd(editor, filePath string) tea.Cmd {
 	editorParts := strings.Fields(editor)
 	editorCmd := editorParts[0]
 	editorArgs := editorParts[1:]
+	
+	// Add search term support for common editors
+	if searchTerm != "" {
+		editorName := filepath.Base(editorCmd)
+		switch editorName {
+		case "vim", "nvim", "vi":
+			// Vim: +/pattern to search and highlight
+			editorArgs = append(editorArgs, fmt.Sprintf("+/%s", searchTerm))
+		case "nano":
+			// Nano: -w (disable line wrapping) and then we can't directly search, but we can go to first match
+			// Nano doesn't support opening with search, user will need to Ctrl+W to search
+		case "emacs":
+			// Emacs: --eval to search
+			editorArgs = append(editorArgs, "--eval", fmt.Sprintf("(progn (goto-char (point-min)) (search-forward \"%s\" nil t))", searchTerm))
+		case "code", "code-insiders":
+			// VS Code: -g flag with :line:column, but we can't highlight search
+			// VS Code doesn't support opening with search highlighting
+		case "subl", "sublime_text":
+			// Sublime: doesn't support opening with search
+		}
+	}
+	
 	editorArgs = append(editorArgs, filePath)
 
 	c := exec.Command(editorCmd, editorArgs...)
@@ -928,12 +1030,11 @@ func showInteractiveTUI(zetDir, editor string, verbose bool) {
 
 	l := list.New(items, delegate, 0, 0)
 	l.Title = "Zettels (Newest First)"
+	l.SetShowTitle(true)
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
-	l.KeyMap.Quit.SetKeys("ctrl+c")
-
-	// Keep help compact (short mode)
-	l.Help.ShowAll = false
+	l.KeyMap.Quit.SetKeys("q")
+	l.KeyMap.ForceQuit.SetKeys("ctrl+c")
 
 	// Match vim-style keybindings
 	l.KeyMap.NextPage.SetKeys("pgdown", "ctrl+f", "ctrl+d")
@@ -945,10 +1046,7 @@ func showInteractiveTUI(zetDir, editor string, verbose bool) {
 				key.WithKeys("enter"),
 				key.WithHelp("enter", "edit"),
 			),
-			key.NewBinding(
-				key.WithKeys("/"),
-				key.WithHelp("/", "filter"),
-			),
+
 			key.NewBinding(
 				key.WithKeys("s"),
 				key.WithHelp("s", "sort"),
@@ -974,14 +1072,7 @@ func showInteractiveTUI(zetDir, editor string, verbose bool) {
 				key.WithKeys("enter"),
 				key.WithHelp("enter", "edit selected zettel"),
 			),
-			key.NewBinding(
-				key.WithKeys("/"),
-				key.WithHelp("/", "start filtering"),
-			),
-			key.NewBinding(
-				key.WithKeys("esc"),
-				key.WithHelp("esc", "exit filter/clear filter"),
-			),
+
 			key.NewBinding(
 				key.WithKeys("s"),
 				key.WithHelp("s", "toggle sort (newest/oldest)"),
@@ -1042,10 +1133,10 @@ func showInteractiveTUI(zetDir, editor string, verbose bool) {
 		zettels:         zettels,
 		zetDir:          zetDir,
 		editor:          editor,
-		allItems:        items,
 		verbose:         verbose,
 		watcher:         watcher,
 		sortNewestFirst: true,
+		allItems:        items,
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
