@@ -127,8 +127,7 @@ func (m *projectModel) adjustScroll() {
 		return
 	}
 
-	cardHeight := 1
-	visibleRows := (m.height - 6) / cardHeight
+	visibleRows := m.height - 6
 	if visibleRows < 1 {
 		visibleRows = 1
 	}
@@ -160,36 +159,22 @@ func (m projectModel) View() string {
 	output.WriteString(titleStyle.Render("Projects"))
 	output.WriteString("\n\n")
 
-	cardHeight := 1
-	gap := 0
-
-	selectedStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Background(lipgloss.Color("15")).
-		Foreground(lipgloss.Color("0")).
-		Padding(0, 1).
-		Align(lipgloss.Center)
-
-	normalStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Padding(0, 1).
-		Align(lipgloss.Center)
-
 	// Find max width needed across ALL projects
 	maxWidth := 0
 	for _, prj := range m.projects {
 		contentWidth := len(prj.Name)
 		if prj.HasNotes {
-			contentWidth += 3 // space + emoji
+			contentWidth += 2 // space + emoji
 		}
 		if contentWidth > maxWidth {
 			maxWidth = contentWidth
 		}
 	}
 
-	visibleRows := (m.height - 6) / cardHeight
+	// Add padding for spacing between columns
+	columnWidth := maxWidth + 3
+
+	visibleRows := m.height - 6
 	if visibleRows < 1 {
 		visibleRows = 1
 	}
@@ -202,105 +187,54 @@ func (m projectModel) View() string {
 	}
 
 	for row := startRow; row < endRow; row++ {
-		var rowCards []string
-		var rowProjects []Project
+		output.WriteString("  ")
 		for col := 0; col < m.columns; col++ {
 			idx := row*m.columns + col
 			if idx >= len(m.projects) {
 				break
 			}
-			rowProjects = append(rowProjects, m.projects[idx])
-		}
 
-		// Create cards with uniform width for this row
-		for i, prj := range rowProjects {
-			idx := row*m.columns + i
-			var cardContent strings.Builder
-
+			prj := m.projects[idx]
 			isSelected := idx == m.selectedIndex
 
-			// Use different styles for selected vs normal
+			// Build the content
+			var content string
 			if isSelected {
-				// For selected, use plain text (inverted colors from style)
-				cardContent.WriteString(prj.Name)
-				if prj.HasNotes {
-					cardContent.WriteString(" 📝")
-				}
-			} else {
-				// For normal, use colored text
-				projectNameStyle := lipgloss.NewStyle().
+				// Selected: solid block cursor + project name
+				cursorStyle := lipgloss.NewStyle().
+					Background(lipgloss.Color("15")).
+					Foreground(lipgloss.Color("0"))
+				content = cursorStyle.Render("█") + " "
+				
+				highlightStyle := lipgloss.NewStyle().
 					Bold(true).
-					Foreground(lipgloss.Color("2"))
-				cardContent.WriteString(projectNameStyle.Render(prj.Name))
-
-				if prj.HasNotes {
-					notesStyle := lipgloss.NewStyle().
-						Foreground(lipgloss.Color("8"))
-					cardContent.WriteString(" ")
-					cardContent.WriteString(notesStyle.Render("📝"))
-				}
-			}
-
-			// Pad content to max width
-			currentWidth := len(prj.Name)
-			if prj.HasNotes {
-				currentWidth += 3
-			}
-			if currentWidth < maxWidth {
-				cardContent.WriteString(strings.Repeat(" ", maxWidth-currentWidth))
-			}
-
-			var card string
-			if isSelected {
-				card = selectedStyle.Render(cardContent.String())
+					Foreground(lipgloss.Color("11"))
+				content += highlightStyle.Render(prj.Name)
 			} else {
-				card = normalStyle.Render(cardContent.String())
+				// Normal: space + project name
+				projectStyle := lipgloss.NewStyle().
+					Foreground(lipgloss.Color("2"))
+				content = "  " + projectStyle.Render(prj.Name)
 			}
 
-			rowCards = append(rowCards, card)
+			if prj.HasNotes {
+				notesStyle := lipgloss.NewStyle().
+					Foreground(lipgloss.Color("8"))
+				content += " " + notesStyle.Render("📝")
+			}
+
+			// Pad to column width
+			displayWidth := len(prj.Name) + 2 // 2 for cursor/spaces
+			if prj.HasNotes {
+				displayWidth += 2
+			}
+			if displayWidth < columnWidth {
+				content += strings.Repeat(" ", columnWidth-displayWidth)
+			}
+
+			output.WriteString(content)
 		}
-
-		if len(rowCards) > 0 {
-			// Split each card into lines
-			var cardLines [][]string
-			maxLines := 0
-			for _, card := range rowCards {
-				lines := strings.Split(card, "\n")
-				cardLines = append(cardLines, lines)
-				if len(lines) > maxLines {
-					maxLines = len(lines)
-				}
-			}
-
-			// Get the width of the first card (all should be same now)
-			cardWidth := 0
-			if len(cardLines) > 0 && len(cardLines[0]) > 0 {
-				cardWidth = lipgloss.Width(cardLines[0][0])
-			}
-
-			// Render each line of the row
-			for lineIdx := 0; lineIdx < maxLines; lineIdx++ {
-				output.WriteString("  ")
-				for cardIdx, lines := range cardLines {
-					if lineIdx < len(lines) {
-						line := lines[lineIdx]
-						output.WriteString(line)
-						// Pad to card width
-						lineWidth := lipgloss.Width(line)
-						if lineWidth < cardWidth {
-							output.WriteString(strings.Repeat(" ", cardWidth-lineWidth))
-						}
-					} else {
-						// Pad with spaces if this card has fewer lines
-						output.WriteString(strings.Repeat(" ", cardWidth))
-					}
-					if cardIdx < len(cardLines)-1 {
-						output.WriteString(strings.Repeat(" ", gap))
-					}
-				}
-				output.WriteString("\n")
-			}
-		}
+		output.WriteString("\n")
 	}
 
 	navStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).MarginTop(1)
