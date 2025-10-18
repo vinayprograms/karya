@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/vinayprograms/karya/internal/zet"
 )
 
 func TestNewZettel(t *testing.T) {
@@ -13,7 +15,7 @@ func TestNewZettel(t *testing.T) {
 	zetID := time.Now().UTC().Format("20060102150405")
 	title := "Test Zettel"
 	
-	err := createZettel(tmpDir, zetID, title)
+	err := zet.CreateZettel(tmpDir, zetID, title)
 	if err != nil {
 		t.Fatalf("createZettel failed: %v", err)
 	}
@@ -47,13 +49,13 @@ func TestListZettels(t *testing.T) {
 	}
 	
 	for _, z := range zettels {
-		err := createZettel(tmpDir, z.id, z.title)
+		err := zet.CreateZettel(tmpDir, z.id, z.title)
 		if err != nil {
 			t.Fatalf("Failed to create zettel: %v", err)
 		}
 	}
 	
-	list, err := listZettels(tmpDir)
+	list, err := zet.ListZettels(tmpDir)
 	if err != nil {
 		t.Fatalf("listZettels failed: %v", err)
 	}
@@ -76,7 +78,7 @@ func TestListZettels(t *testing.T) {
 func TestCountZettels(t *testing.T) {
 	tmpDir := t.TempDir()
 	
-	count, err := countZettels(tmpDir)
+	count, err := zet.CountZettels(tmpDir)
 	if err != nil {
 		t.Fatalf("countZettels failed: %v", err)
 	}
@@ -86,13 +88,13 @@ func TestCountZettels(t *testing.T) {
 	
 	for i := 0; i < 5; i++ {
 		zetID := time.Now().UTC().Add(time.Duration(i) * time.Second).Format("20060102150405")
-		err := createZettel(tmpDir, zetID, "Test")
+		err := zet.CreateZettel(tmpDir, zetID, "Test")
 		if err != nil {
 			t.Fatalf("Failed to create zettel: %v", err)
 		}
 	}
 	
-	count, err = countZettels(tmpDir)
+	count, err = zet.CountZettels(tmpDir)
 	if err != nil {
 		t.Fatalf("countZettels failed: %v", err)
 	}
@@ -120,7 +122,7 @@ func TestSearchZettels(t *testing.T) {
 		os.WriteFile(filepath.Join(zetPath, "README.md"), []byte(z.content), 0644)
 	}
 	
-	results, err := searchZettels(tmpDir, "golang")
+	results, err := zet.SearchZettels(tmpDir, "golang")
 	if err != nil {
 		t.Fatalf("searchZettels failed: %v", err)
 	}
@@ -143,13 +145,13 @@ func TestSearchZettelTitles(t *testing.T) {
 	}
 	
 	for _, z := range zettels {
-		err := createZettel(tmpDir, z.id, z.title)
+		err := zet.CreateZettel(tmpDir, z.id, z.title)
 		if err != nil {
 			t.Fatalf("Failed to create zettel: %v", err)
 		}
 	}
 	
-	results, err := searchZettelTitles(tmpDir, "Golang")
+	results, err := zet.SearchZettelTitles(tmpDir, "Golang")
 	if err != nil {
 		t.Fatalf("searchZettelTitles failed: %v", err)
 	}
@@ -164,12 +166,12 @@ func TestGetZettelTitle(t *testing.T) {
 	zetID := "20231001120000"
 	title := "Test Zettel Title"
 	
-	err := createZettel(tmpDir, zetID, title)
+	err := zet.CreateZettel(tmpDir, zetID, title)
 	if err != nil {
 		t.Fatalf("createZettel failed: %v", err)
 	}
 	
-	gotTitle, err := getZettelTitle(tmpDir, zetID)
+	gotTitle, err := zet.GetZettelTitle(tmpDir, zetID)
 	if err != nil {
 		t.Fatalf("getZettelTitle failed: %v", err)
 	}
@@ -198,7 +200,7 @@ More content.
 	os.MkdirAll(zetPath, 0755)
 	os.WriteFile(filepath.Join(zetPath, "README.md"), []byte(content), 0644)
 	
-	results, err := findTodos(tmpDir)
+	results, err := zet.FindTodos(tmpDir)
 	if err != nil {
 		t.Fatalf("findTodos failed: %v", err)
 	}
@@ -220,13 +222,13 @@ func TestUpdateReadme(t *testing.T) {
 	}
 	
 	for _, z := range zettels {
-		err := createZettel(tmpDir, z.id, z.title)
+		err := zet.CreateZettel(tmpDir, z.id, z.title)
 		if err != nil {
 			t.Fatalf("Failed to create zettel: %v", err)
 		}
 	}
 	
-	err := updateReadme(tmpDir)
+	err := zet.UpdateReadme(tmpDir)
 	if err != nil {
 		t.Fatalf("updateReadme failed: %v", err)
 	}
@@ -267,7 +269,7 @@ func TestValidateZettelID(t *testing.T) {
 	}
 	
 	for _, tt := range tests {
-		got := isValidZettelID(tt.id)
+		got := zet.IsValidZettelID(tt.id)
 		if got != tt.valid {
 			t.Errorf("isValidZettelID(%q) = %v, want %v", tt.id, got, tt.valid)
 		}
@@ -300,13 +302,13 @@ func TestFindMatchingZettels(t *testing.T) {
 	}
 	
 	for _, z := range zettels {
-		err := createZettel(tmpDir, z.id, z.title)
+		err := zet.CreateZettel(tmpDir, z.id, z.title)
 		if err != nil {
 			t.Fatalf("Failed to create zettel: %v", err)
 		}
 	}
 	
-	matches, err := findMatchingZettels(tmpDir, "20231001")
+	matches, err := zet.FindMatchingZettels(tmpDir, "20231001")
 	if err != nil {
 		t.Fatalf("findMatchingZettels failed: %v", err)
 	}
@@ -315,7 +317,7 @@ func TestFindMatchingZettels(t *testing.T) {
 		t.Errorf("findMatchingZettels returned %d matches, want 2", len(matches))
 	}
 	
-	matches, err = findMatchingZettels(tmpDir, "202310011200")
+	matches, err = zet.FindMatchingZettels(tmpDir, "202310011200")
 	if err != nil {
 		t.Fatalf("findMatchingZettels failed: %v", err)
 	}
@@ -324,7 +326,7 @@ func TestFindMatchingZettels(t *testing.T) {
 		t.Errorf("findMatchingZettels returned %d matches, want 1", len(matches))
 	}
 	
-	matches, err = findMatchingZettels(tmpDir, "20239999")
+	matches, err = zet.FindMatchingZettels(tmpDir, "20239999")
 	if err != nil {
 		t.Fatalf("findMatchingZettels failed: %v", err)
 	}
@@ -337,7 +339,7 @@ func TestFindMatchingZettels(t *testing.T) {
 func TestGitCommit(t *testing.T) {
 	tmpDir := t.TempDir()
 	
-	err := gitCommit(tmpDir, "20231001120000", "Test")
+	err := zet.GitCommit(tmpDir, "20231001120000", "Test")
 	if err != nil {
 		t.Errorf("gitCommit should not fail when .git doesn't exist: %v", err)
 	}
@@ -348,7 +350,7 @@ func TestShowZettel(t *testing.T) {
 	zetID := "20231001120000"
 	title := "Test Zettel"
 	
-	err := createZettel(tmpDir, zetID, title)
+	err := zet.CreateZettel(tmpDir, zetID, title)
 	if err != nil {
 		t.Fatalf("createZettel failed: %v", err)
 	}
@@ -402,7 +404,7 @@ func TestSubstringSearch(t *testing.T) {
 	}
 	
 	// Test case-insensitive substring search
-	results, err := searchZettels(tmpDir, "go")
+	results, err := zet.SearchZettels(tmpDir, "go")
 	if err != nil {
 		t.Fatalf("searchZettels failed: %v", err)
 	}
@@ -414,7 +416,7 @@ func TestSubstringSearch(t *testing.T) {
 	}
 	
 	// Verify it's case-insensitive
-	results, err = searchZettels(tmpDir, "GOLANG")
+	results, err = zet.SearchZettels(tmpDir, "GOLANG")
 	if err != nil {
 		t.Fatalf("searchZettels failed: %v", err)
 	}
@@ -424,7 +426,7 @@ func TestSubstringSearch(t *testing.T) {
 	}
 	
 	// Test title search
-	titleResults, err := searchZettelTitles(tmpDir, "go")
+	titleResults, err := zet.SearchZettelTitles(tmpDir, "go")
 	if err != nil {
 		t.Fatalf("searchZettelTitles failed: %v", err)
 	}
@@ -434,7 +436,7 @@ func TestSubstringSearch(t *testing.T) {
 	}
 	
 	// Test case-insensitive title search
-	titleResults, err = searchZettelTitles(tmpDir, "TEST")
+	titleResults, err = zet.SearchZettelTitles(tmpDir, "TEST")
 	if err != nil {
 		t.Fatalf("searchZettelTitles failed: %v", err)
 	}
@@ -444,7 +446,7 @@ func TestSubstringSearch(t *testing.T) {
 	}
 	
 	// Test partial word matching
-	titleResults, err = searchZettelTitles(tmpDir, "lang")
+	titleResults, err = zet.SearchZettelTitles(tmpDir, "lang")
 	if err != nil {
 		t.Fatalf("searchZettelTitles failed: %v", err)
 	}

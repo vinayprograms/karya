@@ -8,12 +8,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/vinayprograms/karya/internal/config"
+	"github.com/vinayprograms/karya/internal/zet"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
@@ -22,19 +22,8 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-type Zettel struct {
-	ID    string
-	Title string
-	Path  string
-}
-
-type SearchResult struct {
-	ZettelID string
-	Title    string
-	LineNum  int
-	Line     string
-	Path     string
-}
+type Zettel = zet.Zettel
+type SearchResult = zet.SearchResult
 
 var (
 	magentaStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
@@ -188,16 +177,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				if m.deleteConfirmSelection == 1 && m.deleteZettel != nil {
 					// Delete confirmed
-					err := deleteZettel(m.zetDir, m.deleteZettel.ID)
+					title, _ := zet.GetZettelTitle(m.zetDir, m.deleteZettel.ID)
+					err := zet.DeleteZettel(m.zetDir, m.deleteZettel.ID)
 					if err != nil {
 						log.Printf("Error deleting zettel: %v", err)
+					}
+					// Git commit the deletion
+					if title != "" {
+						zet.GitDeleteZettel(m.zetDir, m.deleteZettel.ID, title)
 					}
 					m.showDeleteConfirm = false
 					m.deleteZettel = nil
 					m.deleteConfirmSelection = 0
 
 					// Reload zettels
-					zettels, err := listZettels(m.zetDir)
+					zettels, err := zet.ListZettels(m.zetDir)
 					if err == nil {
 						m.zettels = zettels
 						items := make([]list.Item, len(m.zettels))
@@ -333,7 +327,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case fileChangedMsg:
-		zettels, err := listZettels(m.zetDir)
+		zettels, err := zet.ListZettels(m.zetDir)
 		if err == nil {
 			m.zettels = zettels
 			items := make([]list.Item, len(m.zettels))
@@ -354,7 +348,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			log.Printf("Editor error: %v", msg.err)
 		}
-		zettels, err := listZettels(m.zetDir)
+		zettels, err := zet.ListZettels(m.zetDir)
 		if err == nil {
 			m.zettels = zettels
 			items := make([]list.Item, len(m.zettels))
@@ -566,33 +560,7 @@ func (m *model) applyFilter() {
 }
 
 func (m *model) searchInFile(filePath, searchTerm string) []SearchResult {
-	var results []SearchResult
-	
-	file, err := os.Open(filePath)
-	if err != nil {
-		return results
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	lineNum := 0
-	for scanner.Scan() {
-		lineNum++
-		line := scanner.Text()
-		if strings.Contains(strings.ToLower(line), searchTerm) {
-			// Extract zettel ID from path
-			dir := filepath.Dir(filePath)
-			zetID := filepath.Base(dir)
-			
-			results = append(results, SearchResult{
-				ZettelID: zetID,
-				LineNum:  lineNum,
-				Line:     line,
-				Path:     filePath,
-			})
-		}
-	}
-	return results
+	return zet.SearchInFile(filePath, searchTerm)
 }
 
 func (m *model) sortZettels() {
@@ -630,10 +598,10 @@ func (m *model) sortZettels() {
 type editorFinishedMsg struct{ err error }
 
 func newZettelCmd(zetDir, editor string) tea.Cmd {
-	zetID := time.Now().UTC().Format("20060102150405")
+	zetID := zet.GenerateZettelID()
 
 	// Create empty zettel
-	if err := createZettel(zetDir, zetID, ""); err != nil {
+	if err := zet.CreateZettel(zetDir, zetID, ""); err != nil {
 		return func() tea.Msg {
 			return editorFinishedMsg{err: err}
 		}
@@ -657,12 +625,12 @@ func newZettelCmd(zetDir, editor string) tea.Cmd {
 	c := exec.Command(editorCmd, editorArgs...)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		// Update README after editing
-		updateReadme(zetDir)
+		zet.UpdateReadme(zetDir)
 
 		// Get actual title and commit
-		actualTitle, _ := getZettelTitle(zetDir, zetID)
+		actualTitle, _ := zet.GetZettelTitle(zetDir, zetID)
 		if actualTitle != "" {
-			gitCommit(zetDir, zetID, actualTitle)
+			zet.GitCommit(zetDir, zetID, actualTitle)
 		}
 
 		return editorFinishedMsg{err: err}
@@ -670,51 +638,10 @@ func newZettelCmd(zetDir, editor string) tea.Cmd {
 }
 
 func editLastZettelCmd(zetDir, editor string) tea.Cmd {
-	gitDir := filepath.Join(zetDir, ".git")
-	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
-		return func() tea.Msg {
-			return editorFinishedMsg{err: fmt.Errorf("not a git repository")}
-		}
-	}
-
-	cmd := exec.Command("git", "-C", zetDir, "log", "--pretty=format:%h", "-n", "1")
-	output, err := cmd.Output()
+	zetID, err := zet.GetLastZettelID(zetDir)
 	if err != nil {
 		return func() tea.Msg {
 			return editorFinishedMsg{err: err}
-		}
-	}
-	commit := strings.TrimSpace(string(output))
-
-	cmd = exec.Command("git", "-C", zetDir, "show", "--name-only", "--pretty=", commit)
-	output, err = cmd.Output()
-	if err != nil {
-		return func() tea.Msg {
-			return editorFinishedMsg{err: err}
-		}
-	}
-
-	files := strings.Split(strings.TrimSpace(string(output)), "\n")
-	if len(files) == 0 {
-		return func() tea.Msg {
-			return editorFinishedMsg{err: fmt.Errorf("no files in last commit")}
-		}
-	}
-
-	zetID := ""
-	for _, file := range files {
-		if strings.Contains(file, "/") {
-			parts := strings.Split(file, "/")
-			if len(parts) > 0 && isValidZettelID(parts[0]) {
-				zetID = parts[0]
-				break
-			}
-		}
-	}
-
-	if zetID == "" {
-		return func() tea.Msg {
-			return editorFinishedMsg{err: fmt.Errorf("could not determine zettel ID from last commit")}
 		}
 	}
 
@@ -735,9 +662,9 @@ func editLastZettelCmd(zetDir, editor string) tea.Cmd {
 	c := exec.Command(editorCmd, editorArgs...)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		// Commit changes
-		title, _ := getZettelTitle(zetDir, zetID)
+		title, _ := zet.GetZettelTitle(zetDir, zetID)
 		if title != "" {
-			gitCommit(zetDir, zetID, title)
+			zet.GitCommit(zetDir, zetID, title)
 		}
 
 		return editorFinishedMsg{err: err}
@@ -788,11 +715,11 @@ func openEditorCmd(editor, filePath, searchTerm string) tea.Cmd {
 		zetDir := filepath.Dir(dir)
 
 		// Update README and commit
-		if isValidZettelID(zetID) {
-			updateReadme(zetDir)
-			title, _ := getZettelTitle(zetDir, zetID)
+		if zet.IsValidZettelID(zetID) {
+			zet.UpdateReadme(zetDir)
+			title, _ := zet.GetZettelTitle(zetDir, zetID)
 			if title != "" {
-				gitCommit(zetDir, zetID, title)
+				zet.GitCommit(zetDir, zetID, title)
 			}
 		}
 
@@ -846,7 +773,7 @@ func main() {
 	case "-h", "--help", "help":
 		printHelp()
 	case "count":
-		count, err := countZettels(zetDir)
+		count, err := zet.CountZettels(zetDir)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -865,13 +792,13 @@ func main() {
 			os.Exit(1)
 		}
 		pattern := strings.Join(args[1:], " ")
-		results, err := searchZettels(zetDir, pattern)
+		results, err := zet.SearchZettels(zetDir, pattern)
 		if err != nil {
 			log.Fatal(err)
 		}
 		printSearchResults(results)
 	case "d", "todo":
-		results, err := findTodos(zetDir)
+		results, err := zet.FindTodos(zetDir)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -882,7 +809,7 @@ func main() {
 			os.Exit(1)
 		}
 		pattern := strings.Join(args[1:], " ")
-		results, err := searchZettelTitles(zetDir, pattern)
+		results, err := zet.SearchZettelTitles(zetDir, pattern)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -897,7 +824,7 @@ func main() {
 			}
 		}
 	case "ls", "list":
-		zettels, err := listZettels(zetDir)
+		zettels, err := zet.ListZettels(zetDir)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -1003,7 +930,7 @@ ENVIRONMENT VARIABLES:
 }
 
 func showInteractiveTUI(zetDir, editor string, verbose bool) {
-	zettels, err := listZettels(zetDir)
+	zettels, err := zet.ListZettels(zetDir)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -1160,10 +1087,10 @@ func newZettel(zetDir, title, editor string) error {
 		title = strings.TrimSpace(input)
 	}
 
-	zetID := time.Now().UTC().Format("20060102150405")
+	zetID := zet.GenerateZettelID()
 	fmt.Printf("Creating zettel: %s\n", zetID)
 
-	if err := createZettel(zetDir, zetID, title); err != nil {
+	if err := zet.CreateZettel(zetDir, zetID, title); err != nil {
 		return err
 	}
 
@@ -1176,16 +1103,16 @@ func newZettel(zetDir, title, editor string) error {
 		return err
 	}
 
-	if err := updateReadme(zetDir); err != nil {
+	if err := zet.UpdateReadme(zetDir); err != nil {
 		return err
 	}
 
-	actualTitle, err := getZettelTitle(zetDir, zetID)
+	actualTitle, err := zet.GetZettelTitle(zetDir, zetID)
 	if err != nil {
 		actualTitle = title
 	}
 
-	if err := gitCommit(zetDir, zetID, actualTitle); err != nil {
+	if err := zet.GitCommit(zetDir, zetID, actualTitle); err != nil {
 		log.Printf("Warning: git commit failed: %v", err)
 	}
 
@@ -1193,8 +1120,8 @@ func newZettel(zetDir, title, editor string) error {
 }
 
 func editZettel(zetDir, zetID, editor string) error {
-	if !isValidZettelID(zetID) {
-		matches, err := findMatchingZettels(zetDir, zetID)
+	if !zet.IsValidZettelID(zetID) {
+		matches, err := zet.FindMatchingZettels(zetDir, zetID)
 		if err != nil {
 			return err
 		}
@@ -1216,7 +1143,7 @@ func editZettel(zetDir, zetID, editor string) error {
 		return fmt.Errorf("zettel not found: %s", zetID)
 	}
 
-	title, err := getZettelTitle(zetDir, zetID)
+	title, err := zet.GetZettelTitle(zetDir, zetID)
 	if err != nil {
 		title = "Unknown"
 	}
@@ -1230,7 +1157,7 @@ func editZettel(zetDir, zetID, editor string) error {
 		return err
 	}
 
-	if err := gitCommit(zetDir, zetID, title); err != nil {
+	if err := zet.GitCommit(zetDir, zetID, title); err != nil {
 		log.Printf("Warning: git commit failed: %v", err)
 	}
 
@@ -1238,42 +1165,9 @@ func editZettel(zetDir, zetID, editor string) error {
 }
 
 func editLastZettel(zetDir, editor string) error {
-	gitDir := filepath.Join(zetDir, ".git")
-	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
-		return fmt.Errorf("not a git repository")
-	}
-
-	cmd := exec.Command("git", "-C", zetDir, "log", "--pretty=format:%h", "-n", "1")
-	output, err := cmd.Output()
+	zetID, err := zet.GetLastZettelID(zetDir)
 	if err != nil {
 		return err
-	}
-	commit := strings.TrimSpace(string(output))
-
-	cmd = exec.Command("git", "-C", zetDir, "show", "--name-only", "--pretty=", commit)
-	output, err = cmd.Output()
-	if err != nil {
-		return err
-	}
-
-	files := strings.Split(strings.TrimSpace(string(output)), "\n")
-	if len(files) == 0 {
-		return fmt.Errorf("no files in last commit")
-	}
-
-	zetID := ""
-	for _, file := range files {
-		if strings.Contains(file, "/") {
-			parts := strings.Split(file, "/")
-			if len(parts) > 0 && isValidZettelID(parts[0]) {
-				zetID = parts[0]
-				break
-			}
-		}
-	}
-
-	if zetID == "" {
-		return fmt.Errorf("could not determine zettel ID from last commit")
 	}
 
 	fmt.Printf("Editing last zettel: %s\n", zetID)
@@ -1296,351 +1190,6 @@ func showZettel(zetDir, zetID string) error {
 	fmt.Println()
 
 	return nil
-}
-
-func createZettel(zetDir, zetID, title string) error {
-	zetPath := filepath.Join(zetDir, zetID)
-	if err := os.MkdirAll(zetPath, 0755); err != nil {
-		return err
-	}
-
-	readmePath := filepath.Join(zetPath, "README.md")
-	content := fmt.Sprintf("# %s\n\n\n", title)
-	return os.WriteFile(readmePath, []byte(content), 0644)
-}
-
-func listZettels(zetDir string) ([]Zettel, error) {
-	entries, err := os.ReadDir(zetDir)
-	if err != nil {
-		return nil, err
-	}
-
-	// Filter valid zettel directories
-	var validDirs []string
-	for _, entry := range entries {
-		if entry.IsDir() && isValidZettelID(entry.Name()) {
-			validDirs = append(validDirs, entry.Name())
-		}
-	}
-
-	if len(validDirs) == 0 {
-		return []Zettel{}, nil
-	}
-
-	// Calculate worker count (similar to todo)
-	numWorkers := len(validDirs)
-	maxWorkers := 8 // Reasonable limit for directory operations
-	if numWorkers > maxWorkers {
-		numWorkers = maxWorkers
-	}
-	if numWorkers < 1 {
-		numWorkers = 1
-	}
-
-	// Create channels
-	jobs := make(chan string, len(validDirs))
-	results := make(chan Zettel, len(validDirs))
-
-	// Start workers
-	for w := 0; w < numWorkers; w++ {
-		go func() {
-			for zetID := range jobs {
-				readmePath := filepath.Join(zetDir, zetID, "README.md")
-				title, err := getZettelTitle(zetDir, zetID)
-				if err != nil {
-					continue
-				}
-				results <- Zettel{
-					ID:    zetID,
-					Title: title,
-					Path:  readmePath,
-				}
-			}
-		}()
-	}
-
-	// Send jobs
-	for _, zetID := range validDirs {
-		jobs <- zetID
-	}
-	close(jobs)
-
-	// Collect results
-	var zettels []Zettel
-	for i := 0; i < len(validDirs); i++ {
-		select {
-		case z := <-results:
-			zettels = append(zettels, z)
-		case <-time.After(5 * time.Second):
-			// Timeout after 5 seconds
-			break
-		}
-	}
-
-	sort.Slice(zettels, func(i, j int) bool {
-		return zettels[i].ID > zettels[j].ID
-	})
-
-	return zettels, nil
-}
-
-func countZettels(zetDir string) (int, error) {
-	entries, err := os.ReadDir(zetDir)
-	if err != nil {
-		return 0, err
-	}
-
-	count := 0
-	for _, entry := range entries {
-		if entry.IsDir() && isValidZettelID(entry.Name()) {
-			count++
-		}
-	}
-
-	return count, nil
-}
-
-func getZettelTitle(zetDir, zetID string) (string, error) {
-	readmePath := filepath.Join(zetDir, zetID, "README.md")
-	file, err := os.Open(readmePath)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	if scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "# ") {
-			return strings.TrimSpace(line[2:]), nil
-		}
-	}
-
-	return "", fmt.Errorf("no title found")
-}
-
-func searchZettels(zetDir, pattern string) ([]SearchResult, error) {
-	zettels, err := listZettels(zetDir)
-	if err != nil {
-		return nil, err
-	}
-
-	var results []SearchResult
-	patternLower := strings.ToLower(pattern)
-
-	for _, z := range zettels {
-		file, err := os.Open(z.Path)
-		if err != nil {
-			continue
-		}
-
-		scanner := bufio.NewScanner(file)
-		lineNum := 0
-		for scanner.Scan() {
-			lineNum++
-			line := scanner.Text()
-			if strings.Contains(strings.ToLower(line), patternLower) {
-				results = append(results, SearchResult{
-					ZettelID: z.ID,
-					Title:    z.Title,
-					LineNum:  lineNum,
-					Line:     line,
-					Path:     z.Path,
-				})
-			}
-		}
-		file.Close()
-	}
-
-	return results, nil
-}
-
-func searchZettelTitles(zetDir, pattern string) ([]Zettel, error) {
-	zettels, err := listZettels(zetDir)
-	if err != nil {
-		return nil, err
-	}
-
-	var results []Zettel
-	patternLower := strings.ToLower(pattern)
-
-	for _, z := range zettels {
-		if strings.Contains(strings.ToLower(z.Title), patternLower) {
-			results = append(results, z)
-		}
-	}
-
-	return results, nil
-}
-
-func findTodos(zetDir string) ([]SearchResult, error) {
-	zettels, err := listZettels(zetDir)
-	if err != nil {
-		return nil, err
-	}
-
-	var results []SearchResult
-	todoPattern := regexp.MustCompile(`- \[ \]`)
-
-	for _, z := range zettels {
-		file, err := os.Open(z.Path)
-		if err != nil {
-			continue
-		}
-
-		scanner := bufio.NewScanner(file)
-		lineNum := 0
-		for scanner.Scan() {
-			lineNum++
-			line := scanner.Text()
-			if todoPattern.MatchString(line) {
-				results = append(results, SearchResult{
-					ZettelID: z.ID,
-					Title:    z.Title,
-					LineNum:  lineNum,
-					Line:     line,
-					Path:     z.Path,
-				})
-			}
-		}
-		file.Close()
-	}
-
-	return results, nil
-}
-
-func updateReadme(zetDir string) error {
-	zettels, err := listZettels(zetDir)
-	if err != nil {
-		return err
-	}
-
-	var content strings.Builder
-	content.WriteString("# Index\n")
-
-	for _, z := range zettels {
-		content.WriteString(fmt.Sprintf("* [%s](./%s/README.md) - %s\n", z.ID, z.ID, z.Title))
-	}
-
-	readmePath := filepath.Join(zetDir, "README.md")
-	return os.WriteFile(readmePath, []byte(content.String()), 0644)
-}
-
-func deleteZettel(zetDir, zetID string) error {
-	zetPath := filepath.Join(zetDir, zetID)
-
-	// Get the title before deleting
-	title, err := getZettelTitle(zetDir, zetID)
-	if err != nil {
-		title = zetID // Fallback to ID if title can't be read
-	}
-
-	// Remove the directory
-	if err := os.RemoveAll(zetPath); err != nil {
-		return err
-	}
-
-	// Update README
-	if err := updateReadme(zetDir); err != nil {
-		return err
-	}
-
-	// Git operations
-	gitDir := filepath.Join(zetDir, ".git")
-	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
-		return nil // No git repo, we're done
-	}
-
-	// Git rm the zettel directory
-	cmd := exec.Command("git", "-C", zetDir, "rm", "-rf", zetID)
-	if err := cmd.Run(); err != nil {
-		// If git rm fails, just add the README
-		cmd = exec.Command("git", "-C", zetDir, "add", "README.md")
-		cmd.Run()
-	} else {
-		// Also add the updated README
-		cmd = exec.Command("git", "-C", zetDir, "add", "README.md")
-		cmd.Run()
-	}
-
-	// Commit with title
-	commitMsg := fmt.Sprintf("Delete zettel '%s'", title)
-	cmd = exec.Command("git", "-C", zetDir, "commit", "-m", commitMsg)
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-
-	// Push if remote exists
-	cmd = exec.Command("git", "-C", zetDir, "remote")
-	output, err := cmd.Output()
-	if err != nil || len(strings.TrimSpace(string(output))) == 0 {
-		return nil
-	}
-
-	cmd = exec.Command("git", "-C", zetDir, "push")
-	return cmd.Run()
-}
-
-func gitCommit(zetDir, zetID, title string) error {
-	gitDir := filepath.Join(zetDir, ".git")
-	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
-		return nil
-	}
-
-	zetPath := filepath.Join(zetID, "README.md")
-	readmePath := "README.md"
-
-	cmd := exec.Command("git", "-C", zetDir, "add", zetPath, readmePath)
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-
-	cmd = exec.Command("git", "-C", zetDir, "commit", "-m", title)
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-
-	cmd = exec.Command("git", "-C", zetDir, "remote")
-	output, err := cmd.Output()
-	if err != nil || len(strings.TrimSpace(string(output))) == 0 {
-		fmt.Println("No remotes for this repository")
-		return nil
-	}
-
-	cmd = exec.Command("git", "-C", zetDir, "push")
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func isValidZettelID(id string) bool {
-	if len(id) != 14 {
-		return false
-	}
-	for _, c := range id {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-func findMatchingZettels(zetDir, prefix string) ([]Zettel, error) {
-	zettels, err := listZettels(zetDir)
-	if err != nil {
-		return nil, err
-	}
-
-	var matches []Zettel
-	for _, z := range zettels {
-		if strings.HasPrefix(z.ID, prefix) {
-			matches = append(matches, z)
-		}
-	}
-
-	return matches, nil
 }
 
 func printSearchResults(results []SearchResult) {
