@@ -2,7 +2,7 @@
 
 A fast, concurrent task and note management toolkit written in Go. Karya helps you manage tasks, notes, and projects using a simple markdown-based system with powerful CLI tools.
 
-The term "karya" means "work" or "creation" in several Indian languages, reflecting the tool's purpose of helping you organize and create your work efficiently (interesting tidbit - terms "karya" and "karma" share the same root word).
+The term "karya" means "work" or "creation" in several Indian languages, reflecting the tool's purpose of helping you organize and create your work efficiently (interesting tidbit - "karya" and "karma" share the same root word).
 
 ## Features
 
