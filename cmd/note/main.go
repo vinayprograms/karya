@@ -40,16 +40,17 @@ type Project struct {
 }
 
 type projectModel struct {
-	projects      []Project
-	prjDir        string
-	quitting      bool
-	editor        string
-	verbose       bool
-	selectedIndex int
-	width         int
-	height        int
-	columns       int
-	scrollOffset  int
+	projects        []Project
+	prjDir          string
+	quitting        bool
+	editor          string
+	verbose         bool
+	selectedIndex   int
+	width           int
+	height          int
+	columns         int
+	scrollOffset    int
+	launchProject   string
 }
 
 func (m projectModel) Init() tea.Cmd {
@@ -66,7 +67,9 @@ func (m projectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if msg.String() == "enter" {
 			if m.selectedIndex >= 0 && m.selectedIndex < len(m.projects) {
-				return m, launchNoteForProject(m.projects[m.selectedIndex].Name, m.prjDir, m.editor, m.verbose)
+				m.launchProject = m.projects[m.selectedIndex].Name
+				m.quitting = true
+				return m, tea.Quit
 			}
 		}
 
@@ -99,6 +102,8 @@ func (m projectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selectedIndex = len(m.projects) - 1
 			m.adjustScroll()
 		}
+
+
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -199,35 +204,35 @@ func (m projectModel) View() string {
 
 			// Build the content
 			var content string
+			var displayWidth int
 			if isSelected {
 				// Selected: solid block cursor + project name
 				cursorStyle := lipgloss.NewStyle().
-					Background(lipgloss.Color("15")).
-					Foreground(lipgloss.Color("0"))
+					Foreground(lipgloss.Color("13")).
+					Bold(true)
 				content = cursorStyle.Render("█") + " "
 				
 				highlightStyle := lipgloss.NewStyle().
 					Bold(true).
 					Foreground(lipgloss.Color("11"))
 				content += highlightStyle.Render(prj.Name)
+				displayWidth = 2 + len(prj.Name) // block + space + name
 			} else {
 				// Normal: space + project name
 				projectStyle := lipgloss.NewStyle().
 					Foreground(lipgloss.Color("2"))
 				content = "  " + projectStyle.Render(prj.Name)
+				displayWidth = 2 + len(prj.Name) // 2 spaces + name
 			}
 
 			if prj.HasNotes {
 				notesStyle := lipgloss.NewStyle().
 					Foreground(lipgloss.Color("8"))
 				content += " " + notesStyle.Render("📝")
+				displayWidth += 3 // space + emoji (2 wide)
 			}
 
 			// Pad to column width
-			displayWidth := len(prj.Name) + 2 // 2 for cursor/spaces
-			if prj.HasNotes {
-				displayWidth += 2
-			}
 			if displayWidth < columnWidth {
 				content += strings.Repeat(" ", columnWidth-displayWidth)
 			}
@@ -317,6 +322,7 @@ type zettelModel struct {
 	zetDir                 string
 	projectName            string
 	quitting               bool
+	backToProjects         bool
 	editor                 string
 	verbose                bool
 	watcher                *fsnotify.Watcher
@@ -456,9 +462,14 @@ func (m zettelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.list.SetItems(m.allItems)
 				return m, nil
 			}
+			// If no filter active, go back to projects
+			m.backToProjects = true
+			m.quitting = true
+			return m, tea.Quit
 		}
 
 		if msg.String() == "q" {
+			m.backToProjects = true
 			m.quitting = true
 			return m, tea.Quit
 		}
@@ -629,7 +640,7 @@ func (m zettelModel) View() string {
 		navStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 
 		line1 := commandStyle.Render(" Commands: n:new • l:last • d:delete • T:toc • c:count")
-		line2 := navStyle.Render(" ↑↓/jk • g/G:top/bottom • Ctrl+d/u:page • /:title search • *:fulltext search • s:sort order • Enter:edit • q:quit • ?:more help ")
+		line2 := navStyle.Render(" ↑↓/jk • g/G:top/bottom • Ctrl+d/u:page • /:title search • *:fulltext search • s:sort order • Enter:edit • q/esc:back • ?:more help ")
 
 		lines = append(lines, line1, line2, "")
 		view = strings.Join(lines, "\n")
@@ -878,49 +889,7 @@ func openEditorCmd(editor, filePath, searchTerm string) tea.Cmd {
 	})
 }
 
-func launchNoteForProject(projectName, prjDir, editor string, verbose bool) tea.Cmd {
-	return func() tea.Msg {
-		exists, err := checkProjectDir(prjDir, projectName)
-		if err != nil {
-			log.Fatal(err)
-		}
-		if !exists {
-			fmt.Printf("Project directory - '%s', doesn't exist. Create [Y/n]? ", filepath.Join(prjDir, projectName))
-			reader := bufio.NewReader(os.Stdin)
-			input, _ := reader.ReadString('\n')
-			input = strings.TrimSpace(input)
-			if input == "Y" || input == "" {
-				if err := createProjectDir(prjDir, projectName); err != nil {
-					log.Fatal(err)
-				}
-			} else {
-				log.Fatal("Cannot capture notes! Exiting.")
-			}
-		}
 
-		exists, err = checkNotesDir(prjDir, projectName)
-		if err != nil {
-			log.Fatal(err)
-		}
-		if !exists {
-			fmt.Printf("Notes directory '%s' doesn't exist. Create (Y/n)? ", filepath.Join(prjDir, projectName, "notes"))
-			reader := bufio.NewReader(os.Stdin)
-			input, _ := reader.ReadString('\n')
-			input = strings.TrimSpace(input)
-			if input == "Y" || input == "" {
-				if err := createNotesDir(prjDir, projectName); err != nil {
-					log.Fatal(err)
-				}
-			} else {
-				log.Fatal("Cannot capture notes! Exiting.")
-			}
-		}
-
-		zetDir := getNotesDir(prjDir, projectName)
-		showZettelTUI(zetDir, projectName, editor, verbose)
-		return nil
-	}
-}
 
 func listProjects(prjDir string) ([]Project, error) {
 	entries, err := os.ReadDir(prjDir)
@@ -988,33 +957,84 @@ func getNotesDir(prjDir, prjName string) string {
 }
 
 func showProjectList(prjDir, editor string, verbose bool) {
-	projects, err := listProjects(prjDir)
-	if err != nil {
-		log.Fatal(err)
-	}
+	for {
+		projects, err := listProjects(prjDir)
+		if err != nil {
+			log.Fatal(err)
+		}
 
-	if len(projects) == 0 {
-		fmt.Println("No projects found")
-		return
-	}
+		if len(projects) == 0 {
+			fmt.Println("No projects found")
+			return
+		}
 
-	m := projectModel{
-		projects:      projects,
-		prjDir:        prjDir,
-		editor:        editor,
-		verbose:       verbose,
-		selectedIndex: 0,
-		columns:       3,
-		scrollOffset:  0,
-	}
+		m := projectModel{
+			projects:      projects,
+			prjDir:        prjDir,
+			editor:        editor,
+			verbose:       verbose,
+			selectedIndex: 0,
+			columns:       3,
+			scrollOffset:  0,
+		}
 
-	p := tea.NewProgram(m, tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
-		log.Fatal(err)
+		p := tea.NewProgram(m, tea.WithAltScreen())
+		finalModel, err := p.Run()
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		if finalModel, ok := finalModel.(projectModel); ok && finalModel.launchProject != "" {
+			projectName := finalModel.launchProject
+			
+			exists, err := checkProjectDir(prjDir, projectName)
+			if err != nil {
+				log.Fatal(err)
+			}
+			if !exists {
+				fmt.Printf("Project directory - '%s', doesn't exist. Create [Y/n]? ", filepath.Join(prjDir, projectName))
+				reader := bufio.NewReader(os.Stdin)
+				input, _ := reader.ReadString('\n')
+				input = strings.TrimSpace(input)
+				if input == "Y" || input == "" {
+					if err := createProjectDir(prjDir, projectName); err != nil {
+						log.Fatal(err)
+					}
+				} else {
+					log.Fatal("Cannot capture notes! Exiting.")
+				}
+			}
+
+			exists, err = checkNotesDir(prjDir, projectName)
+			if err != nil {
+				log.Fatal(err)
+			}
+			if !exists {
+				fmt.Printf("Notes directory '%s' doesn't exist. Create (Y/n)? ", filepath.Join(prjDir, projectName, "notes"))
+				reader := bufio.NewReader(os.Stdin)
+				input, _ := reader.ReadString('\n')
+				input = strings.TrimSpace(input)
+				if input == "Y" || input == "" {
+					if err := createNotesDir(prjDir, projectName); err != nil {
+						log.Fatal(err)
+					}
+				} else {
+					log.Fatal("Cannot capture notes! Exiting.")
+				}
+			}
+
+			zetDir := getNotesDir(prjDir, projectName)
+			backToProjects := showZettelTUI(zetDir, projectName, editor, verbose)
+			if !backToProjects {
+				return
+			}
+		} else {
+			return
+		}
 	}
 }
 
-func showZettelTUI(zetDir, projectName, editor string, verbose bool) {
+func showZettelTUI(zetDir, projectName, editor string, verbose bool) bool {
 	zettels, err := zet.ListZettels(zetDir)
 	if err != nil {
 		log.Fatal(err)
@@ -1022,7 +1042,7 @@ func showZettelTUI(zetDir, projectName, editor string, verbose bool) {
 
 	if len(zettels) == 0 {
 		fmt.Println("No notes found")
-		return
+		return false
 	}
 
 	watcher, err := setupWatcher(zetDir)
@@ -1047,6 +1067,9 @@ func showZettelTUI(zetDir, projectName, editor string, verbose bool) {
 	l.SetFilteringEnabled(false)
 	l.KeyMap.Quit.SetKeys("q")
 	l.KeyMap.ForceQuit.SetKeys("ctrl+c")
+	l.KeyMap.AcceptWhileFiltering.SetEnabled(false)
+	l.KeyMap.CancelWhileFiltering.SetEnabled(false)
+	l.KeyMap.ClearFilter.SetEnabled(false)
 
 	l.KeyMap.NextPage.SetKeys("pgdown", "ctrl+f", "ctrl+d")
 	l.KeyMap.PrevPage.SetKeys("pgup", "ctrl+b", "ctrl+u")
@@ -1150,13 +1173,19 @@ func showZettelTUI(zetDir, projectName, editor string, verbose bool) {
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
+	finalModel, err := p.Run()
+	if err != nil {
 		log.Fatal(err)
 	}
 
 	if watcher != nil {
 		watcher.Close()
 	}
+
+	if finalModel, ok := finalModel.(zettelModel); ok {
+		return finalModel.backToProjects
+	}
+	return false
 }
 
 func printHelp() {
