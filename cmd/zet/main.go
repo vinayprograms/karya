@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/vinayprograms/karya/internal/config"
+	"github.com/vinayprograms/karya/internal/task"
 	"github.com/vinayprograms/karya/internal/zet"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -798,11 +799,67 @@ func main() {
 		}
 		printSearchResults(results)
 	case "d", "todo":
-		results, err := zet.FindTodos(zetDir)
+		// Use task package for consistent task parsing
+		taskCfg := task.NewConfig()
+		taskCfg.Structured = true // Always use structured mode for zettels
+		
+		// Get the parent directory (zettelkasten root)
+		files, err := filepath.Glob(filepath.Join(zetDir, "??????????????", "README.md"))
 		if err != nil {
 			log.Fatal(err)
 		}
-		printSearchResults(results)
+		
+		// Process each file and collect tasks
+		var allTasks []*task.Task
+		for _, file := range files {
+			tasks, err := taskCfg.ProcessFile(file)
+			if err != nil {
+				continue
+			}
+			allTasks = append(allTasks, tasks...)
+		}
+		
+		// Group tasks by zettel
+		tasksByZettel := make(map[string][]*task.Task)
+		for _, t := range allTasks {
+			tasksByZettel[t.Zettel] = append(tasksByZettel[t.Zettel], t)
+		}
+		
+		// Print tasks grouped by zettel
+		for zettelID, tasks := range tasksByZettel {
+			if len(tasks) == 0 {
+				continue
+			}
+			
+			// Get zettel title
+			title, _ := zet.GetZettelTitle(zetDir, zettelID)
+			if title == "" {
+				title = "Unknown"
+			}
+			
+			// Print zettel header once
+			fmt.Printf("\n%s: %s\n",
+				magentaStyle.Render(zettelID),
+				boldOrange.Render(title))
+			
+			// Print all tasks for this zettel
+			for _, t := range tasks {
+				taskLine := fmt.Sprintf("%s: %s", t.Keyword, t.Title)
+				if t.Tag != "" {
+					taskLine += fmt.Sprintf(" #%s", t.Tag)
+				}
+				if t.ScheduledAt != "" {
+					taskLine += fmt.Sprintf(" @s:%s", t.ScheduledAt)
+				}
+				if t.DueAt != "" {
+					taskLine += fmt.Sprintf(" @d:%s", t.DueAt)
+				}
+				if t.Assignee != "" {
+					taskLine += fmt.Sprintf(" >> %s", t.Assignee)
+				}
+				fmt.Println(taskLine)
+			}
+		}
 	case "t?", "title?":
 		if len(args) < 2 {
 			fmt.Println("ERROR: Search pattern required")
@@ -878,7 +935,7 @@ COMMANDS:
     count               Count total number of zettels
     ? <pattern>         Search for pattern across all zettels (substring match)
     t?, title? <pattern> Search for pattern in zettel titles (substring match)
-    d, todo             Find all checklist items (- [ ]) across zettels
+    d, todo             Find all tasks across zettels
     last                Edit the most recently modified zettel
     toc                 Edit the table of contents (README.md)
     -h, --help, help    Show this help message

@@ -200,7 +200,8 @@ func FindTodos(zetDir string) ([]SearchResult, error) {
 	}
 
 	var results []SearchResult
-	todoPattern := regexp.MustCompile(`- \[ \]`)
+	// Match task keywords (TODO:, TASK:, etc.)
+	taskPattern := regexp.MustCompile(`^\s*(TODO|TASK|NOTE|REMINDER|EVENT|MEETING|CALL|EMAIL|MESSAGE|FOLLOWUP|REVIEW|CHECKIN|CHECKOUT|RESEARCH|READING|WRITING|DRAFT|EDITING|FINALIZE|SUBMIT|PRESENTATION|WAITING|DEFERRED|DELEGATED|DOING|INPROGRESS|STARTED|WORKING|WIP):`)
 
 	for _, z := range zettels {
 		file, err := os.Open(z.Path)
@@ -213,7 +214,7 @@ func FindTodos(zetDir string) ([]SearchResult, error) {
 		for scanner.Scan() {
 			lineNum++
 			line := scanner.Text()
-			if todoPattern.MatchString(line) {
+			if taskPattern.MatchString(line) {
 				results = append(results, SearchResult{
 					ZettelID: z.ID,
 					Title:    z.Title,

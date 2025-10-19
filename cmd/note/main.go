@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/vinayprograms/karya/internal/config"
+	"github.com/vinayprograms/karya/internal/task"
 	"github.com/vinayprograms/karya/internal/zet"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -948,8 +949,7 @@ func createNotesDir(prjDir, prjName string) error {
 		return err
 	}
 
-	cmd := exec.Command("git", "init", notesPath)
-	return cmd.Run()
+	return zet.GitInit(notesPath)
 }
 
 func getNotesDir(prjDir, prjName string) string {
@@ -1207,7 +1207,7 @@ COMMANDS:
     <project> show <ID> Display note content
     <project> ? <pattern> Search for pattern across all notes
     <project> t?, title? <pattern> Search for pattern in note titles
-    <project> d, todo   Find all checklist items across notes
+    <project> d, todo   Find all tasks across notes
     <project> last      Edit the most recently modified note
     <project> toc       Edit the table of contents (README.md)
     -h, --help, help    Show this help message
@@ -1592,11 +1592,60 @@ func main() {
 		}
 		printSearchResults(results)
 	case "d", "todo":
-		results, err := zet.FindTodos(zetDir)
+		// Use task package for consistent task parsing
+		taskCfg := task.NewConfig()
+		taskCfg.Structured = true // Always use structured mode for notes
+		
+		files, err := taskCfg.FindFiles(projectName)
 		if err != nil {
 			log.Fatal(err)
 		}
-		printSearchResults(results)
+		
+		// Process each file and collect tasks
+		var allTasks []*task.Task
+		for _, file := range files {
+			tasks, err := taskCfg.ProcessFile(file)
+			if err != nil {
+				continue
+			}
+			allTasks = append(allTasks, tasks...)
+		}
+		
+		// Group tasks by zettel
+		tasksByZettel := make(map[string][]*task.Task)
+		for _, t := range allTasks {
+			tasksByZettel[t.Zettel] = append(tasksByZettel[t.Zettel], t)
+		}
+		
+		// Print tasks grouped by zettel
+		for zettelID, tasks := range tasksByZettel {
+			if len(tasks) == 0 {
+				continue
+			}
+			
+			// Print zettel header once
+			fmt.Printf("\n%s: %s\n",
+				magentaStyle.Render(zettelID),
+				boldOrange.Render(tasks[0].Project))
+			
+			// Print all tasks for this zettel
+			for _, t := range tasks {
+				taskLine := fmt.Sprintf("%s: %s", t.Keyword, t.Title)
+				if t.Tag != "" {
+					taskLine += fmt.Sprintf(" #%s", t.Tag)
+				}
+				if t.ScheduledAt != "" {
+					taskLine += fmt.Sprintf(" @s:%s", t.ScheduledAt)
+				}
+				if t.DueAt != "" {
+					taskLine += fmt.Sprintf(" @d:%s", t.DueAt)
+				}
+				if t.Assignee != "" {
+					taskLine += fmt.Sprintf(" >> %s", t.Assignee)
+				}
+				fmt.Println(taskLine)
+			}
+		}
 	case "t?", "title?":
 		if len(subArgs) < 2 {
 			fmt.Println("ERROR: Search pattern required")

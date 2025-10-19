@@ -188,9 +188,9 @@ func TestFindTodos(t *testing.T) {
 
 Some content here.
 
-- [ ] First todo item
-- [x] Completed item
-- [ ] Second todo item
+TODO: First todo item
+DONE: Completed item
+TASK: Second todo item
 
 More content.
 `
