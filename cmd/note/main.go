@@ -25,14 +25,39 @@ import (
 type Zettel = zet.Zettel
 type SearchResult = zet.SearchResult
 
-var (
-	magentaStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
-	yellowStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	normalStyle  = lipgloss.NewStyle()
-	boldOrange   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("3"))
-	greenStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	grayStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-)
+type ColorScheme struct {
+	zettelIDStyle    lipgloss.Style
+	titleStyle       lipgloss.Style
+	normalStyle      lipgloss.Style
+	highlightStyle   lipgloss.Style
+	projectStyle     lipgloss.Style
+	grayStyle        lipgloss.Style
+	selectorStyle    lipgloss.Style
+	navStyle         lipgloss.Style
+	commandStyle     lipgloss.Style
+	errorStyle       lipgloss.Style
+	successStyle     lipgloss.Style
+	filterStyle      lipgloss.Style
+}
+
+var colors ColorScheme
+
+func InitializeColors(cfg *config.Config) {
+	colors = ColorScheme{
+		zettelIDStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
+		titleStyle:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TaskColor)),
+		normalStyle:    lipgloss.NewStyle(),
+		highlightStyle: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(cfg.Colors.ActiveColor)),
+		projectStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
+		grayStyle:      lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CompletedColor)),
+		selectorStyle:  colors.selectorStyle,
+		navStyle:       colors.navStyle,
+		commandStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
+		errorStyle:     colors.errorStyle,
+		successStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
+		filterStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ActiveColor)).Background(lipgloss.Color("0")),
+	}
+}
 
 type Project struct {
 	Name     string
@@ -208,27 +233,21 @@ func (m projectModel) View() string {
 			var displayWidth int
 			if isSelected {
 				// Selected: solid block cursor + project name
-				cursorStyle := lipgloss.NewStyle().
-					Foreground(lipgloss.Color("13")).
-					Bold(true)
+				cursorStyle := colors.selectorStyle
 				content = cursorStyle.Render("█") + " "
 				
-				highlightStyle := lipgloss.NewStyle().
-					Bold(true).
-					Foreground(lipgloss.Color("11"))
+				highlightStyle := colors.highlightStyle
 				content += highlightStyle.Render(prj.Name)
 				displayWidth = 2 + len(prj.Name) // block + space + name
 			} else {
 				// Normal: space + project name
-				projectStyle := lipgloss.NewStyle().
-					Foreground(lipgloss.Color("2"))
+				projectStyle := colors.projectStyle
 				content = "  " + projectStyle.Render(prj.Name)
 				displayWidth = 2 + len(prj.Name) // 2 spaces + name
 			}
 
 			if prj.HasNotes {
-				notesStyle := lipgloss.NewStyle().
-					Foreground(lipgloss.Color("8"))
+				notesStyle := colors.grayStyle
 				content += " " + notesStyle.Render("📝")
 				displayWidth += 3 // space + emoji (2 wide)
 			}
@@ -243,7 +262,7 @@ func (m projectModel) View() string {
 		output.WriteString("\n")
 	}
 
-	navStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).MarginTop(1)
+	navStyle := colors.navStyle.MarginTop(1)
 	helpLine := navStyle.Render(" ↑↓←→/hjkl:navigate • g/G:top/bottom • Enter:open project • q:quit")
 	output.WriteString("\n")
 	output.WriteString(helpLine)
@@ -273,13 +292,11 @@ func (i zettelItem) renderWithSelection(isSelected bool) string {
 	}
 
 	if i.verbose {
-		parts = append(parts, magentaStyle.Render(fmt.Sprintf("%-14s", i.zettel.ID)))
+		parts = append(parts, colors.zettelIDStyle.Render(fmt.Sprintf("%-14s", i.zettel.ID)))
 	}
 
 	if isSelected {
-		indicator := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("13")).
-			Bold(true).
+		indicator := colors.selectorStyle.
 			Render("█ ")
 		parts = append(parts, indicator+i.zettel.Title)
 	} else {
@@ -293,7 +310,7 @@ func (i zettelItem) Title() string {
 	var parts []string
 
 	if i.verbose {
-		parts = append(parts, magentaStyle.Render(fmt.Sprintf("%-14s", i.zettel.ID)))
+		parts = append(parts, colors.zettelIDStyle.Render(fmt.Sprintf("%-14s", i.zettel.ID)))
 	}
 
 	parts = append(parts, i.zettel.Title)
@@ -598,9 +615,7 @@ func (m zettelModel) View() string {
 			} else {
 				filterText = fmt.Sprintf("%s: %s", modeLabel, m.customFilter)
 			}
-			filterLine = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("11")).
-				Background(lipgloss.Color("0")).
+			filterLine = colors.filterStyle.
 				Padding(0, 1).
 				Render(filterText)
 		} else {
@@ -620,8 +635,7 @@ func (m zettelModel) View() string {
 				if endIdx > totalItems {
 					endIdx = totalItems
 				}
-				paginationInfo := lipgloss.NewStyle().
-					Foreground(lipgloss.Color("240")).
+				paginationInfo := colors.navStyle.
 					Render(fmt.Sprintf("Showing %d-%d of %d • Page %d/%d",
 						startIdx+1, endIdx, totalItems, currentPage+1, totalPages))
 				header = append(header, paginationInfo)
@@ -637,8 +651,8 @@ func (m zettelModel) View() string {
 	if len(lines) > 0 {
 		lines = lines[:len(lines)-1]
 
-		commandStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-		navStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+		commandStyle := colors.projectStyle
+		navStyle := colors.navStyle
 
 		line1 := commandStyle.Render(" Commands: n:new • l:last • d:delete • T:toc • c:count")
 		line2 := navStyle.Render(" ↑↓/jk • g/G:top/bottom • Ctrl+d/u:page • /:title search • *:fulltext search • s:sort order • Enter:edit • q/esc:back • ?:more help ")
@@ -691,7 +705,7 @@ func (m zettelModel) View() string {
 
 		dialog := dialogBox.Render(
 			title + zettelInfo + "\n" + buttons + "\n\n" +
-				lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("← → or h l to select • Enter to confirm • Esc to cancel"),
+				colors.navStyle.Render("← → or h l to select • Enter to confirm • Esc to cancel"),
 		)
 
 		view = lipgloss.Place(
@@ -1384,12 +1398,12 @@ func printSearchResults(results []SearchResult) {
 		if r.Title != currentTitle {
 			fmt.Println()
 			fmt.Printf("%s: %s\n",
-				magentaStyle.Render(r.ZettelID),
-				boldOrange.Render(r.Title))
+				colors.zettelIDStyle.Render(r.ZettelID),
+				colors.highlightStyle.Render(r.Title))
 			currentTitle = r.Title
 		}
 		fmt.Printf("[%s]: %s\n",
-			yellowStyle.Render(fmt.Sprintf("%d", r.LineNum)),
+			colors.highlightStyle.Render(fmt.Sprintf("%d", r.LineNum)),
 			r.Line)
 	}
 }
@@ -1397,7 +1411,7 @@ func printSearchResults(results []SearchResult) {
 func printTitleSearchResults(results []Zettel) {
 	for _, z := range results {
 		fmt.Printf("%s: %s\n",
-			magentaStyle.Render(z.ID),
+			colors.zettelIDStyle.Render(z.ID),
 			z.Title)
 	}
 }
@@ -1441,6 +1455,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	InitializeColors(cfg)
 
 	prjDir := cfg.Directories.Projects
 	if prjDir == "" {
@@ -1625,8 +1641,8 @@ func main() {
 			
 			// Print zettel header once
 			fmt.Printf("\n%s: %s\n",
-				magentaStyle.Render(zettelID),
-				boldOrange.Render(tasks[0].Project))
+				colors.zettelIDStyle.Render(zettelID),
+				colors.highlightStyle.Render(tasks[0].Project))
 			
 			// Print all tasks for this zettel
 			for _, t := range tasks {
@@ -1672,7 +1688,7 @@ func main() {
 			log.Fatal(err)
 		}
 		for _, z := range zettels {
-			fmt.Printf("%s %s\n", magentaStyle.Render(z.ID), z.Title)
+			fmt.Printf("%s %s\n", colors.zettelIDStyle.Render(z.ID), z.Title)
 		}
 	case "show":
 		if len(subArgs) < 2 {
