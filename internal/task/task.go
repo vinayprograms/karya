@@ -23,15 +23,14 @@ type Task struct {
 	Project     string
 	Zettel      string
 	FilePath    string // Original file path where this task was found
-	config      *Config
 }
 
 // IsActive returns true if the task is active (not completed)
-func (t *Task) IsActive() bool {
-	if t.config == nil {
+func (t *Task) IsActive(c *config.Config) bool {
+	if c == nil {
 		return false
 	}
-	for _, kw := range t.config.ActiveKeywords {
+	for _, kw := range c.Todo.Active {
 		if t.Keyword == kw {
 			return true
 		}
@@ -40,11 +39,11 @@ func (t *Task) IsActive() bool {
 }
 
 // IsInProgress returns true if the task is in progress
-func (t *Task) IsInProgress() bool {
-	if t.config == nil {
+func (t *Task) IsInProgress(c *config.Config) bool {
+	if c == nil {
 		return false
 	}
-	for _, kw := range t.config.InProgressKeywords {
+	for _, kw := range c.Todo.InProgress {
 		if t.Keyword == kw {
 			return true
 		}
@@ -53,11 +52,11 @@ func (t *Task) IsInProgress() bool {
 }
 
 // IsCompleted returns true if the task is completed
-func (t *Task) IsCompleted() bool {
-	if t.config == nil {
+func (t *Task) IsCompleted(c *config.Config) bool {
+	if c == nil {
 		return false
 	}
-	for _, kw := range t.config.CompletedKeywords {
+	for _, kw := range c.Todo.Completed {
 		if t.Keyword == kw {
 			return true
 		}
@@ -65,102 +64,31 @@ func (t *Task) IsCompleted() bool {
 	return false
 }
 
-// Config holds configuration
-type Config struct {
-	PRJDIR             string
-	ShowCompleted      bool
-	Structured         bool
-	Verbose            bool
-	ActiveKeywords     []string
-	InProgressKeywords []string
-	CompletedKeywords  []string
-	ColorMode          string
-	Colors             struct {
-		ProjectColor       string
-		ActiveColor        string
-		InProgressColor    string
-		CompletedColor     string
-		TaskColor          string
-		CompletedTaskColor string
-		TagColor           string
-		TagBgColor         string
-		DateColor          string
-		DateBgColor        string
-		PastDateColor      string
-		PastDateBgColor    string
-		TodayDateColor     string
-		TodayDateBgColor   string
-		AssigneeColor      string
-		AssigneeBgColor    string
-	}
-}
-
-// NewConfig creates a config from shared config
-func NewConfig() *Config {
-	cfg, err := config.Load()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-		os.Exit(1)
-	}
-	if err := cfg.Validate(); err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(1)
-	}
-	taskCfg := &Config{
-		PRJDIR:             cfg.Directories.Projects,
-		ShowCompleted:      cfg.ShowCompleted,
-		Structured:         cfg.Structured,
-		Verbose:            cfg.Verbose,
-		ActiveKeywords:     cfg.ActiveKeywords,
-		InProgressKeywords: cfg.InProgressKeywords,
-		CompletedKeywords:  cfg.CompletedKeywords,
-		ColorMode:          cfg.ColorMode,
-	}
-	// Copy colors from config.ColorScheme
-	taskCfg.Colors.ProjectColor = cfg.Colors.ProjectColor
-	taskCfg.Colors.ActiveColor = cfg.Colors.ActiveColor
-	taskCfg.Colors.InProgressColor = cfg.Colors.InProgressColor
-	taskCfg.Colors.CompletedColor = cfg.Colors.CompletedColor
-	taskCfg.Colors.TaskColor = cfg.Colors.TaskColor
-	taskCfg.Colors.CompletedTaskColor = cfg.Colors.CompletedTaskColor
-	taskCfg.Colors.TagColor = cfg.Colors.TagColor
-	taskCfg.Colors.TagBgColor = cfg.Colors.TagBgColor
-	taskCfg.Colors.DateColor = cfg.Colors.DateColor
-	taskCfg.Colors.DateBgColor = cfg.Colors.DateBgColor
-	taskCfg.Colors.PastDateColor = cfg.Colors.PastDateColor
-	taskCfg.Colors.PastDateBgColor = cfg.Colors.PastDateBgColor
-	taskCfg.Colors.TodayDateColor = cfg.Colors.TodayDateColor
-	taskCfg.Colors.TodayDateBgColor = cfg.Colors.TodayDateBgColor
-	taskCfg.Colors.AssigneeColor = cfg.Colors.AssigneeColor
-	taskCfg.Colors.AssigneeBgColor = cfg.Colors.AssigneeBgColor
-	return taskCfg
-}
-
 // FindFiles finds README.md files in project directories (structured mode)
 // or all .md files in the project tree (unstructured mode)
-func (c *Config) FindFiles(project string) ([]string, error) {
-	if c.Structured {
+func FindFiles(c *config.Config, project string) ([]string, error) {
+	if c.Todo.Structured {
 		// Structured mode: look for specific zettelkasten directory structure
-		pattern := filepath.Join(c.PRJDIR, project, "notes", "??????????????", "README.md")
+		pattern := filepath.Join(c.Directories.Projects, project, "notes", "??????????????", "README.md")
 		if project == "" || project == "*" {
-			pattern = filepath.Join(c.PRJDIR, "*", "notes", "??????????????", "README.md")
+			pattern = filepath.Join(c.Directories.Projects, "*", "notes", "??????????????", "README.md")
 		}
 		matches, err := filepath.Glob(pattern)
 		return matches, err
 	} else {
 		// Unstructured mode: find all .md files in project directory tree
-		return c.findUnstructuredFiles(project)
+		return findUnstructuredFiles(c, project)
 	}
 }
 
 // findUnstructuredFiles walks the project directory tree to find all .md files
-func (c *Config) findUnstructuredFiles(project string) ([]string, error) {
+func findUnstructuredFiles(c *config.Config, project string) ([]string, error) {
 	var files []string
 
 	// Determine the root directory to scan
-	rootDir := c.PRJDIR
+	rootDir := c.Directories.Projects
 	if project != "" && project != "*" {
-		rootDir = filepath.Join(c.PRJDIR, project)
+		rootDir = filepath.Join(c.Directories.Projects, project)
 	}
 
 	err := filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
@@ -181,7 +109,7 @@ func (c *Config) findUnstructuredFiles(project string) ([]string, error) {
 }
 
 // ProcessFile processes a README.md file and returns tasks
-func (c *Config) ProcessFile(filePath string) ([]*Task, error) {
+func ProcessFile(c *config.Config, filePath string) ([]*Task, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -191,7 +119,7 @@ func (c *Config) ProcessFile(filePath string) ([]*Task, error) {
 	// Extract project and zettel from path
 	var project, zettel string
 
-	if c.Structured {
+	if c.Todo.Structured {
 		// Structured mode: Path: PRJDIR/project/notes/zet/README.md
 		parts := strings.Split(filePath, string(filepath.Separator))
 		if len(parts) < 4 {
@@ -201,7 +129,7 @@ func (c *Config) ProcessFile(filePath string) ([]*Task, error) {
 		project = parts[len(parts)-4]
 	} else {
 		// Unstructured mode: derive project and zettel from file path
-		relPath, err := filepath.Rel(c.PRJDIR, filePath)
+		relPath, err := filepath.Rel(c.Directories.Projects, filePath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get relative path: %w", err)
 		}
@@ -228,7 +156,7 @@ func (c *Config) ProcessFile(filePath string) ([]*Task, error) {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
-		task := c.ParseLine(line, project, zettel, filePath)
+		task := ParseLine(c, line, project, zettel, filePath)
 		if task != nil {
 			tasks = append(tasks, task)
 		}
@@ -237,7 +165,7 @@ func (c *Config) ProcessFile(filePath string) ([]*Task, error) {
 }
 
 // ParseLine parses a task line and returns a Task
-func (c *Config) ParseLine(line, project, zettel, filePath string) *Task {
+func ParseLine(c *config.Config, line, project, zettel, filePath string) *Task {
 	// First check for basic structure: KEYWORD: title
 	basicRe := regexp.MustCompile(`^([A-Z]+):\s*(.+)$`)
 	basicMatches := basicRe.FindStringSubmatch(line)
@@ -247,7 +175,7 @@ func (c *Config) ParseLine(line, project, zettel, filePath string) *Task {
 
 	keyword := basicMatches[1]
 	// Check if keyword is valid
-	if !c.isValidKeyword(keyword) {
+	if !isValidKeyword(c, keyword) {
 		return nil
 	}
 
@@ -306,22 +234,21 @@ func (c *Config) ParseLine(line, project, zettel, filePath string) *Task {
 		Project:     project,
 		Zettel:      zettel,
 		FilePath:    filePath,
-		config:      c,
 	}
 }
 
-func (c *Config) isValidKeyword(keyword string) bool {
-	for _, kw := range c.ActiveKeywords {
+func isValidKeyword(c *config.Config, keyword string) bool {
+	for _, kw := range c.Todo.Active {
 		if keyword == kw {
 			return true
 		}
 	}
-	for _, kw := range c.InProgressKeywords {
+	for _, kw := range c.Todo.InProgress {
 		if keyword == kw {
 			return true
 		}
 	}
-	for _, kw := range c.CompletedKeywords {
+	for _, kw := range c.Todo.Completed {
 		if keyword == kw {
 			return true
 		}
@@ -330,8 +257,8 @@ func (c *Config) isValidKeyword(keyword string) bool {
 }
 
 // ListTasks lists tasks for a project, filtering by showCompleted
-func (c *Config) ListTasks(project string, showCompleted bool) ([]*Task, error) {
-	files, err := c.FindFiles(project)
+func ListTasks(c *config.Config, project string, showCompleted bool) ([]*Task, error) {
+	files, err := FindFiles(c, project)
 	if err != nil {
 		return nil, err
 	}
@@ -356,7 +283,7 @@ func (c *Config) ListTasks(project string, showCompleted bool) ([]*Task, error) 
 		go func() {
 			defer wg.Done()
 			for file := range fileChan {
-				tasks, err := c.ProcessFile(file)
+				tasks, err := ProcessFile(c, file)
 				if err != nil {
 					// Skip files with errors
 					continue
@@ -390,7 +317,7 @@ func (c *Config) ListTasks(project string, showCompleted bool) ([]*Task, error) 
 		// Exclude completed tasks
 		var filtered []*Task
 		for _, t := range allTasks {
-			if !t.IsCompleted() {
+			if !t.IsCompleted(c) {
 				filtered = append(filtered, t)
 			}
 		}
@@ -400,8 +327,8 @@ func (c *Config) ListTasks(project string, showCompleted bool) ([]*Task, error) 
 }
 
 // SummarizeProjects summarizes task counts per project
-func (c *Config) SummarizeProjects() (map[string]int, error) {
-	files, err := c.FindFiles("")
+func SummarizeProjects(c *config.Config) (map[string]int, error) {
+	files, err := FindFiles(c, "")
 	if err != nil {
 		return nil, err
 	}
@@ -427,7 +354,7 @@ func (c *Config) SummarizeProjects() (map[string]int, error) {
 		go func() {
 			defer wg.Done()
 			for file := range fileChan {
-				tasks, err := c.ProcessFile(file)
+				tasks, err := ProcessFile(c, file)
 				if err != nil {
 					continue
 				}
@@ -435,7 +362,7 @@ func (c *Config) SummarizeProjects() (map[string]int, error) {
 				project := parts[len(parts)-4]
 				activeCount := 0
 				for _, t := range tasks {
-					if t.IsActive() {
+					if t.IsActive(c) {
 						activeCount++
 					}
 				}

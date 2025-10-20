@@ -73,44 +73,35 @@ type ColorScheme struct {
 	AssigneeBgColor    string `toml:"assignee-bg"`
 }
 
-type Keywords struct {
-	Active     []string `toml:"active"`
-	InProgress []string `toml:"inprogress"`
-	Completed  []string `toml:"completed"`
-}
-
 type Directories struct {
 	Projects     string `toml:"projects"`     // Project root directory
 	Zettelkasten string `toml:"zettelkasten"` // Zettelkasten directory
 	Karya        string `toml:"karya"`        // Karya inbox directory
 }
 
+type Todo struct {
+	ShowCompleted bool     `toml:"show_completed"`
+	Structured    bool     `toml:"structured"`
+	Active        []string `toml:"active"`
+	InProgress    []string `toml:"inprogress"`
+	Completed     []string `toml:"completed"`
+}
+type GeneralConfig struct {
+	EDITOR    string `toml:"editor"`
+	Verbose   bool   `toml:"verbose"`    // Show additional details like Zettel ID in table view
+	ColorMode string `toml:"color_mode"` // "light", "dark", or empty for auto-detect
+}
+
 type Config struct {
-	// Directories section
-	Directories Directories `toml:"directories"`
-
-	// Editor and display settings
-	EDITOR        string `toml:"editor"`
-	ShowCompleted bool   `toml:"show_completed"`
-	Structured    bool   `toml:"structured"`
-	Verbose       bool   `toml:"verbose"`    // Show additional details like Zettel ID in table view
-	ColorMode     string `toml:"color_mode"` // "light", "dark", or empty for auto-detect
-
-	// Subsections
-	Colors   ColorScheme `toml:"colors"`
-	Keywords Keywords    `toml:"keywords"`
-
-	// For module-level keyword exports
-	ActiveKeywords     []string
-	InProgressKeywords []string
-	CompletedKeywords  []string
+	GeneralConfig GeneralConfig `toml:"general"`
+	Directories   Directories   `toml:"directories"`
+	Todo          Todo          `toml:"todo"`
+	Colors        ColorScheme   `toml:"colors"`
 }
 
 func Load() (*Config, error) {
 	// Initialize empty config with defaults
-	cfg := &Config{
-		Structured: true, // default value
-	}
+	cfg := &Config{}
 
 	// Load from config file first
 	home, err := os.UserHomeDir()
@@ -121,7 +112,7 @@ func Load() (*Config, error) {
 				return nil, fmt.Errorf("failed to parse config file: %w", err)
 			}
 			// Expand environment variables in config values
-			cfg.EDITOR = expandEnv(cfg.EDITOR)
+			cfg.GeneralConfig.EDITOR = expandEnv(cfg.GeneralConfig.EDITOR)
 			cfg.Directories.Projects = expandEnv(cfg.Directories.Projects)
 			cfg.Directories.Zettelkasten = expandEnv(cfg.Directories.Zettelkasten)
 			cfg.Directories.Karya = expandEnv(cfg.Directories.Karya)
@@ -139,50 +130,45 @@ func Load() (*Config, error) {
 		cfg.Directories.Karya = karya
 	}
 	if editor := os.Getenv("EDITOR"); editor != "" {
-		cfg.EDITOR = editor
+		cfg.GeneralConfig.EDITOR = editor
 	}
 	if showCompleted := os.Getenv("SHOW_COMPLETED"); showCompleted != "" {
-		cfg.ShowCompleted = showCompleted == "true" || showCompleted == "1"
+		cfg.Todo.ShowCompleted = showCompleted == "true" || showCompleted == "1"
 	}
 	if structured := os.Getenv("STRUCTURED"); structured != "" {
-		cfg.Structured = structured == "true" || structured == "1"
+		cfg.Todo.Structured = structured == "true" || structured == "1"
 	}
 	if verbose := os.Getenv("VERBOSE"); verbose != "" {
-		cfg.Verbose = verbose == "true" || verbose == "1"
+		cfg.GeneralConfig.Verbose = verbose == "true" || verbose == "1"
 	}
 
 	// Set defaults
-	if cfg.EDITOR == "" {
-		cfg.EDITOR = "vim"
+	if cfg.GeneralConfig.EDITOR == "" {
+		cfg.GeneralConfig.EDITOR = "vim"
 	}
 	if cfg.Directories.Karya == "" && cfg.Directories.Projects != "" {
 		cfg.Directories.Karya = cfg.Directories.Projects
 	}
 
 	// Set keyword defaults if not provided
-	if len(cfg.Keywords.Active) == 0 {
-		cfg.Keywords.Active = []string{
+	if len(cfg.Todo.Active) == 0 {
+		cfg.Todo.Active = []string{
 			"TODO", "TASK", "NOTE", "REMINDER", "EVENT", "MEETING",
 			"CALL", "EMAIL", "MESSAGE", "FOLLOWUP", "REVIEW",
 			"CHECKIN", "CHECKOUT", "RESEARCH", "READING", "WRITING",
 			"DRAFT", "FINALIZE", "SUBMIT", "PRESENTATION",
 		}
 	}
-	if len(cfg.Keywords.InProgress) == 0 {
-		cfg.Keywords.InProgress = []string{
+	if len(cfg.Todo.InProgress) == 0 {
+		cfg.Todo.InProgress = []string{
 			"DOING", "INPROGRESS", "WIP", "WORKING", "STARTED",
 		}
 	}
-	if len(cfg.Keywords.Completed) == 0 {
-		cfg.Keywords.Completed = []string{
+	if len(cfg.Todo.Completed) == 0 {
+		cfg.Todo.Completed = []string{
 			"ARCHIVED", "CANCELED", "DELETED", "DONE", "COMPLETED", "CLOSED",
 		}
 	}
-
-	// Copy keywords to module-level exports for backwards compatibility
-	cfg.ActiveKeywords = cfg.Keywords.Active
-	cfg.InProgressKeywords = cfg.Keywords.InProgress
-	cfg.CompletedKeywords = cfg.Keywords.Completed
 
 	// Initialize colors with defaults based on mode
 	cfg.initializeColors()
@@ -214,7 +200,7 @@ func (c *Config) Validate() error {
 // Colors can be overridden in the config file [colors] section
 func (c *Config) initializeColors() {
 	// Determine color mode: explicit config > environment > empty (auto-detect)
-	colorMode := c.ColorMode
+	colorMode := c.GeneralConfig.ColorMode
 	if colorMode == "" {
 		if envMode := os.Getenv("KARYA_COLOR_MODE"); envMode != "" {
 			colorMode = envMode

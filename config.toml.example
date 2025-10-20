@@ -1,52 +1,44 @@
 # Karya Task Management Configuration
-# Supports structured/unstructured project layouts and field-specific filtering
 
-# ============================================================================
-# GENERAL SETTINGS
-# ============================================================================
-# These must be defined before any [section] declarations
+[general]
+# Editor (defaults to vim). Supported options - "vim", "emacs", "nano", "code"
+# editor = "nvim" 
 
-# Optional: Editor (defaults to vim)
-# editor = "nvim"
-
-# Optional: Show completed tasks in TUI (defaults to false)
-# show_completed = true
-
-# Optional: Use structured zettelkasten format (defaults to true)
-# structured = true
-# - true: Search for project/notes/zettelID/README.md files (zettelkasten format)
-# - false: Search all .md files in project directory tree (unstructured)
-
-# Optional: Show additional details like Zettel ID column in table view (defaults to false)
-# verbose = true
+# Show additional details like Zettel ID column in table view (defaults to false)
 # Note: -v/--verbose command-line flag takes precedence over this setting
+# verbose = true
 
-# Optional: Color mode for terminal display
-# color_mode = "dark"  # or "light"
+# Color mode for terminal: "light" or "dark". Empty/unset defaults to dark
+# Can also be set via environment variable: KARYA_COLOR_MODE=light|dark
+# color_mode = "dark"
 
-# ============================================================================
-# DIRECTORIES CONFIGURATION
-# ============================================================================
+# -----------------------------------------------
 # Directory paths for various karya commands
 # Environment variables in paths (like $HOME) will be automatically expanded
-
 [directories]
 # Required: Root directory for projects (used by todo, prj, etc.)
-projects = "/path/to/your/projects"
+# projects = "/path/to/your/projects"
 
-# Optional: Zettelkasten directory (for zet and note commands)
-zettelkasten = "/path/to/zettelkasten"
+# Zettelkasten directory (for zet and note commands)
+# zettelkasten = "/path/to/zettelkasten"
 
-# Optional: Karya inbox directory (defaults to projects directory)
-karya = "/path/to/karya"
+# Karya inbox directory (defaults to projects directory)
+# karya = "/path/to/karya"
 
-# ============================================================================
-# KEYWORDS CONFIGURATION
-# ============================================================================
+# -----------------------------------------------
+# Settings specific to 'todo' tool
+[todo]
+# Show completed tasks in TUI (defaults to false)
+# show_completed = true
+
+# Should only scan directories following zettelkasten structure (defaults to true)
+# - true: Search for project/notes/zettelID/README.md files (zettelkasten structure)
+# - false: Search all .md files in projects directory tree (unstructured)
+# structured = true
+
 # Customize task state detection by defining keyword lists.
 # Keywords are case-sensitive and matched against task markers (e.g., "TODO:", "DOING:").
 #
-# [keywords]
 # active = [
 #     "TODO", "TASK", "NOTE", "REMINDER", "EVENT", "MEETING",
 #     "CALL", "EMAIL", "MESSAGE", "FOLLOWUP", "REVIEW",
@@ -63,29 +55,16 @@ karya = "/path/to/karya"
 #     "ARCHIVED", "CANCELED", "DELETED", "DONE", "COMPLETED", "CLOSED"
 # ]
 
-# ============================================================================
-# COLOR CONFIGURATION (Terminal UI colors for todo command)
-# ============================================================================
+# -----------------------------------------------
 # You can specify colors using three different methods:
 #   1. Color names (ANSI 16-color palette) - recommended for readability
 #   2. ANSI numbers (0-15) - for exact ANSI 16-color control
 #   3. Hex colors (#RRGGBB) - for full RGB color range (terminal permitting)
 #
-
-#
-# Color mode for terminal: "light" or "dark". Empty/unset defaults to dark
-# Can also be set via environment variable: KARYA_COLOR_MODE=light|dark
-#
-# color_mode = "dark"
-#
-# Individual color overrides (use color names, ANSI numbers 0-15, or hex colors):
 # Supported Color Names (ANSI 16-Color Palette):
 #   Basic:   black, red, green, yellow, blue, magenta, cyan, white
 #   Bright:  bright-red, bright-green, bright-yellow, bright-blue,
 #            bright-magenta, bright-cyan, bright-black, bright-white
-# Reference: https://en.wikipedia.org/wiki/ANSI_escape_code#8-bit
-# 
-# Hex colors are also supported.
 #
 # [colors]
 # project           = "green"                 # Color name example
@@ -105,28 +84,3 @@ karya = "/path/to/karya"
 # assignee          = "bright-white"         # Assignee badge text
 # assignee-bg       = "black"                 # Assignee badge background
 
-# ============================================================================
-# ENHANCED FILTERING CAPABILITIES
-# ============================================================================
-# The todo command supports field-specific filtering. In interactive mode,
-# press '/' to enter filter mode and use these patterns:
-#
-# General text search:
-#   authentication     # Search across all task fields
-#
-# Field-specific search:
-#   >> alice          # Filter by assignee (tasks assigned to "alice")
-#   #urgent           # Filter by tag (tasks with "#urgent" tag)
-#   @2025-01-15      # Filter by scheduled date (equivalent to @s:2025-01-15)
-#   @s:2025-01-15    # Filter by explicit scheduled date
-#   @d:2025-01-20    # Filter by due date
-#
-# Task format examples:
-#   TODO: Fix login bug #urgent @s:2025-01-15 @d:2025-01-20 >> alice
-#   PROGRESS: Write docs #documentation @2025-01-10 >> bob
-#   DONE: Setup project #setup @2025-01-01 >> charlie
-#
-# Date fields:
-#   @date        →  Scheduled date (when to start/work on task)
-#   @s:date      →  Explicit scheduled date (same as @date)  
-#   @d:date      →  Due date (when task must be completed)

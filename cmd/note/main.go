@@ -26,18 +26,18 @@ type Zettel = zet.Zettel
 type SearchResult = zet.SearchResult
 
 type ColorScheme struct {
-	zettelIDStyle    lipgloss.Style
-	titleStyle       lipgloss.Style
-	normalStyle      lipgloss.Style
-	highlightStyle   lipgloss.Style
-	projectStyle     lipgloss.Style
-	grayStyle        lipgloss.Style
-	selectorStyle    lipgloss.Style
-	navStyle         lipgloss.Style
-	commandStyle     lipgloss.Style
-	errorStyle       lipgloss.Style
-	successStyle     lipgloss.Style
-	filterStyle      lipgloss.Style
+	zettelIDStyle  lipgloss.Style
+	titleStyle     lipgloss.Style
+	normalStyle    lipgloss.Style
+	highlightStyle lipgloss.Style
+	projectStyle   lipgloss.Style
+	grayStyle      lipgloss.Style
+	selectorStyle  lipgloss.Style
+	navStyle       lipgloss.Style
+	commandStyle   lipgloss.Style
+	errorStyle     lipgloss.Style
+	successStyle   lipgloss.Style
+	filterStyle    lipgloss.Style
 }
 
 var colors ColorScheme
@@ -66,17 +66,17 @@ type Project struct {
 }
 
 type projectModel struct {
-	projects        []Project
-	prjDir          string
-	quitting        bool
-	editor          string
-	verbose         bool
-	selectedIndex   int
-	width           int
-	height          int
-	columns         int
-	scrollOffset    int
-	launchProject   string
+	projects      []Project
+	prjDir        string
+	quitting      bool
+	editor        string
+	verbose       bool
+	selectedIndex int
+	width         int
+	height        int
+	columns       int
+	scrollOffset  int
+	launchProject string
 }
 
 func (m projectModel) Init() tea.Cmd {
@@ -128,8 +128,6 @@ func (m projectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selectedIndex = len(m.projects) - 1
 			m.adjustScroll()
 		}
-
-
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -235,7 +233,7 @@ func (m projectModel) View() string {
 				// Selected: solid block cursor + project name
 				cursorStyle := colors.selectorStyle
 				content = cursorStyle.Render("█") + " "
-				
+
 				highlightStyle := colors.highlightStyle
 				content += highlightStyle.Render(prj.Name)
 				displayWidth = 2 + len(prj.Name) // block + space + name
@@ -904,8 +902,6 @@ func openEditorCmd(editor, filePath, searchTerm string) tea.Cmd {
 	})
 }
 
-
-
 func listProjects(prjDir string) ([]Project, error) {
 	entries, err := os.ReadDir(prjDir)
 	if err != nil {
@@ -1000,7 +996,7 @@ func showProjectList(prjDir, editor string, verbose bool) {
 
 		if finalModel, ok := finalModel.(projectModel); ok && finalModel.launchProject != "" {
 			projectName := finalModel.launchProject
-			
+
 			exists, err := checkProjectDir(prjDir, projectName)
 			if err != nil {
 				log.Fatal(err)
@@ -1470,12 +1466,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	editor := cfg.EDITOR
+	editor := cfg.GeneralConfig.EDITOR
 	if editor == "" {
 		editor = "vim"
 	}
 
-	verbose := cfg.Verbose
+	verbose := cfg.GeneralConfig.Verbose
 	args := os.Args[1:]
 
 	for i := 0; i < len(args); i++ {
@@ -1608,42 +1604,41 @@ func main() {
 		}
 		printSearchResults(results)
 	case "d", "todo":
-		// Use task package for consistent task parsing
-		taskCfg := task.NewConfig()
-		taskCfg.Structured = true // Always use structured mode for notes
-		
-		files, err := taskCfg.FindFiles(projectName)
+		taskCfg := cfg                 // Use the loaded config
+		taskCfg.Todo.Structured = true // Always use structured mode for notes
+
+		files, err := task.FindFiles(taskCfg, projectName)
 		if err != nil {
 			log.Fatal(err)
 		}
-		
+
 		// Process each file and collect tasks
 		var allTasks []*task.Task
 		for _, file := range files {
-			tasks, err := taskCfg.ProcessFile(file)
+			tasks, err := task.ProcessFile(taskCfg, file)
 			if err != nil {
 				continue
 			}
 			allTasks = append(allTasks, tasks...)
 		}
-		
+
 		// Group tasks by zettel
 		tasksByZettel := make(map[string][]*task.Task)
 		for _, t := range allTasks {
 			tasksByZettel[t.Zettel] = append(tasksByZettel[t.Zettel], t)
 		}
-		
+
 		// Print tasks grouped by zettel
 		for zettelID, tasks := range tasksByZettel {
 			if len(tasks) == 0 {
 				continue
 			}
-			
+
 			// Print zettel header once
 			fmt.Printf("\n%s: %s\n",
 				colors.zettelIDStyle.Render(zettelID),
 				colors.highlightStyle.Render(tasks[0].Project))
-			
+
 			// Print all tasks for this zettel
 			for _, t := range tasks {
 				taskLine := fmt.Sprintf("%s: %s", t.Keyword, t.Title)

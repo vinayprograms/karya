@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vinayprograms/karya/internal/config"
 	"github.com/vinayprograms/karya/internal/task"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -41,7 +42,7 @@ type ColorScheme struct {
 var colors ColorScheme
 
 // InitializeColors initializes the color scheme from task config
-func InitializeColors(cfg *task.Config) {
+func InitializeColors(cfg *config.Config) {
 	colors = ColorScheme{
 		prjColor:           lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
 		activeColor:        lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ActiveColor)),
@@ -58,10 +59,21 @@ func InitializeColors(cfg *task.Config) {
 }
 
 type taskItem struct {
+	config          *config.Config
 	task            *task.Task
 	projectColWidth int
 	keywordColWidth int
 	verbose         bool
+}
+
+func NewTaskItem(c *config.Config, t *task.Task, projectColWidth, keywordColWidth int, verbose bool) taskItem {
+	return taskItem{
+		config:          c,
+		task:            t,
+		projectColWidth: projectColWidth,
+		keywordColWidth: keywordColWidth,
+		verbose:         verbose,
+	}
 }
 
 func (i taskItem) renderWithSelection(isSelected bool) string {
@@ -75,10 +87,10 @@ func (i taskItem) renderWithSelection(isSelected bool) string {
 	}
 
 	var titleStyle lipgloss.Style
-	if i.task.IsActive() {
+	if i.task.IsActive(i.config) {
 		parts = append(parts, colors.activeColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
 		titleStyle = colors.taskColor
-	} else if i.task.IsInProgress() {
+	} else if i.task.IsInProgress(i.config) {
 		parts = append(parts, colors.inProgressColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
 		titleStyle = colors.taskColor
 	} else {
@@ -132,10 +144,10 @@ func (i taskItem) Title() string {
 	}
 
 	var titleStyle lipgloss.Style
-	if i.task.IsActive() {
+	if i.task.IsActive(i.config) {
 		parts = append(parts, colors.activeColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
 		titleStyle = colors.taskColor
-	} else if i.task.IsInProgress() {
+	} else if i.task.IsInProgress(i.config) {
 		parts = append(parts, colors.inProgressColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
 		titleStyle = colors.taskColor
 	} else {
@@ -226,7 +238,7 @@ func (d taskDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 type model struct {
 	list            list.Model
 	tasks           []*task.Task
-	config          *task.Config
+	config          *config.Config
 	project         string
 	quitting        bool
 	watcher         *fsnotify.Watcher
@@ -360,7 +372,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.String() == "s" {
 				if !m.structuredMode {
 					m.structuredMode = true
-					m.config.Structured = true
+					m.config.Todo.Structured = true
 					m.list.Title = "Tasks (Zettelkasten)"
 					return m, reloadTasksCmd()
 				}
@@ -371,7 +383,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.String() == "u" {
 				if m.structuredMode {
 					m.structuredMode = false
-					m.config.Structured = false
+					m.config.Todo.Structured = false
 					m.list.Title = "Tasks (All)"
 					return m, reloadTasksCmd()
 				}
@@ -391,15 +403,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case fileChangedMsg:
 		// Reload tasks when files change
-		tasks, err := m.config.ListTasks(m.project, m.config.ShowCompleted)
+		tasks, err := task.ListTasks(m.config, m.project, m.config.Todo.ShowCompleted)
 		if err == nil {
 			m.tasks = tasks
 			// Sort tasks: by priority first, then by project name
 			sort.Slice(m.tasks, func(i, j int) bool {
 				getPriority := func(t *task.Task) int {
-					if t.IsActive() {
+					if t.IsActive(m.config) {
 						return 0
-					} else if t.IsInProgress() {
+					} else if t.IsInProgress(m.config) {
 						return 1
 					}
 					return 2
@@ -420,7 +432,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.keywordColWidth = calculateKeywordColWidth(m.tasks)
 			items := make([]list.Item, len(m.tasks))
 			for i, t := range m.tasks {
-				items[i] = taskItem{task: t, projectColWidth: m.projectColWidth, keywordColWidth: m.keywordColWidth, verbose: m.config.Verbose}
+				items[i] = NewTaskItem(m.config, t, m.projectColWidth, m.keywordColWidth, m.config.GeneralConfig.Verbose)
 			}
 			m.allItems = items
 			if m.customFilter != "" {
@@ -447,9 +459,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Sort tasks: by priority first, then by project name
 			sort.Slice(m.tasks, func(i, j int) bool {
 				getPriority := func(t *task.Task) int {
-					if t.IsActive() {
+					if t.IsActive(m.config) {
 						return 0
-					} else if t.IsInProgress() {
+					} else if t.IsInProgress(m.config) {
 						return 1
 					}
 					return 2
@@ -471,7 +483,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.keywordColWidth = calculateKeywordColWidth(m.tasks)
 			items := make([]list.Item, len(m.tasks))
 			for i, t := range m.tasks {
-				items[i] = taskItem{task: t, projectColWidth: m.projectColWidth, keywordColWidth: m.keywordColWidth, verbose: m.config.Verbose}
+				items[i] = taskItem{config: m.config, task: t, projectColWidth: m.projectColWidth, keywordColWidth: m.keywordColWidth, verbose: m.config.GeneralConfig.Verbose}
 			}
 			m.allItems = items
 			m.list.SetItems(items)
@@ -485,7 +497,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			log.Printf("Editor error: %v", msg.err)
 		}
 		// Reload tasks after editing
-		tasks, err := m.config.ListTasks(m.project, m.config.ShowCompleted)
+		tasks, err := task.ListTasks(m.config, m.project, m.config.Todo.ShowCompleted)
 		if err != nil {
 			return m, tea.Quit
 		}
@@ -494,9 +506,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Sort tasks: by priority first, then by project name
 		sort.Slice(m.tasks, func(i, j int) bool {
 			getPriority := func(t *task.Task) int {
-				if t.IsActive() {
+				if t.IsActive(m.config) {
 					return 0
-				} else if t.IsInProgress() {
+				} else if t.IsInProgress(m.config) {
 					return 1
 				}
 				return 2
@@ -518,7 +530,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.keywordColWidth = calculateKeywordColWidth(m.tasks)
 		items := make([]list.Item, len(m.tasks))
 		for i, t := range m.tasks {
-			items[i] = taskItem{task: t, projectColWidth: m.projectColWidth, keywordColWidth: m.keywordColWidth, verbose: m.config.Verbose}
+			items[i] = taskItem{config: m.config, task: t, projectColWidth: m.projectColWidth, keywordColWidth: m.keywordColWidth, verbose: m.config.GeneralConfig.Verbose}
 		}
 		m.allItems = items
 
@@ -642,18 +654,18 @@ func reloadTasksCmd() tea.Cmd {
 	}
 }
 
-func loadTasksCmd(cfg *task.Config, project string) tea.Cmd {
+func loadTasksCmd(cfg *config.Config, project string) tea.Cmd {
 	return func() tea.Msg {
-		tasks, err := cfg.ListTasks(project, cfg.ShowCompleted)
+		tasks, err := task.ListTasks(cfg, project, cfg.Todo.ShowCompleted)
 		return loadingDoneMsg{tasks: tasks, err: err}
 	}
 }
 
-func openEditorCmd(cfg *task.Config, t *task.Task) tea.Cmd {
+func openEditorCmd(cfg *config.Config, t *task.Task) tea.Cmd {
 	var filePath string
-	if cfg.Structured {
+	if cfg.Todo.Structured {
 		// Structured mode: construct path from project/zettel
-		filePath = filepath.Join(cfg.PRJDIR, t.Project, "notes", t.Zettel, "README.md")
+		filePath = filepath.Join(cfg.Directories.Projects, t.Project, "notes", t.Zettel, "README.md")
 	} else {
 		// Unstructured mode: use the original file path where task was found
 		filePath = t.FilePath
@@ -752,7 +764,7 @@ func calculateKeywordColWidth(tasks []*task.Task) int {
 }
 
 // setupWatcher creates a new watcher and watches all relevant directories
-func setupWatcher(config *task.Config, project string) (*fsnotify.Watcher, error) {
+func setupWatcher(config *config.Config, project string) (*fsnotify.Watcher, error) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
@@ -763,7 +775,7 @@ func setupWatcher(config *task.Config, project string) (*fsnotify.Watcher, error
 }
 
 // updateWatcher updates the watcher to monitor all relevant directories and files
-func updateWatcher(watcher *fsnotify.Watcher, config *task.Config, project string) {
+func updateWatcher(watcher *fsnotify.Watcher, config *config.Config, project string) {
 	if watcher == nil {
 		return
 	}
@@ -782,17 +794,17 @@ func updateWatcher(watcher *fsnotify.Watcher, config *task.Config, project strin
 }
 
 // getWatchDirectories returns a list of directories that should be watched
-func getWatchDirectories(config *task.Config, project string) []string {
+func getWatchDirectories(config *config.Config, project string) []string {
 	var dirs []string
 
 	// Determine the root directory to watch
 	var rootDir string
 	if project == "" || project == "*" {
 		// Watch everything under PRJDIR
-		rootDir = config.PRJDIR
+		rootDir = config.Directories.Projects
 	} else {
 		// Watch specific project directory tree
-		rootDir = filepath.Join(config.PRJDIR, project)
+		rootDir = filepath.Join(config.Directories.Projects, project)
 	}
 
 	// Recursively walk and watch all directories under the root
@@ -808,7 +820,10 @@ func getWatchDirectories(config *task.Config, project string) []string {
 }
 
 func main() {
-	config := task.NewConfig()
+	config, err := config.Load()
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Initialize colors from config
 	InitializeColors(config)
@@ -818,7 +833,7 @@ func main() {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "-v" || arg == "--verbose" {
-			config.Verbose = true
+			config.GeneralConfig.Verbose = true
 			// Remove this flag from args
 			args = append(args[:i], args[i+1:]...)
 			i--
@@ -840,15 +855,15 @@ func main() {
 		if len(args) > 1 {
 			project = args[1]
 		}
-		tasks, err := config.ListTasks(project, config.ShowCompleted)
+		tasks, err := task.ListTasks(config, project, config.Todo.ShowCompleted)
 		if err != nil {
 			log.Fatal(err)
 		}
 		sort.Slice(tasks, func(i, j int) bool {
 			getPriority := func(t *task.Task) int {
-				if t.IsActive() {
+				if t.IsActive(config) {
 					return 0
-				} else if t.IsInProgress() {
+				} else if t.IsInProgress(config) {
 					return 1
 				}
 				return 2
@@ -865,13 +880,13 @@ func main() {
 		})
 		printTasksPlain(config, tasks)
 	case "projects":
-		summary, err := config.SummarizeProjects()
+		summary, err := task.SummarizeProjects(config)
 		if err != nil {
 			log.Fatal(err)
 		}
 		showProjectsTable(summary)
 	case "pl":
-		summary, err := config.SummarizeProjects()
+		summary, err := task.SummarizeProjects(config)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -969,8 +984,8 @@ CONFIGURATION:
 	fmt.Print(help)
 }
 
-func showInteractiveTUI(config *task.Config, project string) {
-	tasks, err := config.ListTasks(project, config.ShowCompleted)
+func showInteractiveTUI(config *config.Config, project string) {
+	tasks, err := task.ListTasks(config, project, config.Todo.ShowCompleted)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -991,9 +1006,9 @@ func showInteractiveTUI(config *task.Config, project string) {
 	sort.Slice(tasks, func(i, j int) bool {
 		// Assign priority: pending=0, in-progress=1, completed=2
 		getPriority := func(t *task.Task) int {
-			if t.IsActive() {
+			if t.IsActive(config) {
 				return 0
-			} else if t.IsInProgress() {
+			} else if t.IsInProgress(config) {
 				return 1
 			}
 			return 2
@@ -1015,7 +1030,7 @@ func showInteractiveTUI(config *task.Config, project string) {
 	keywordColWidth := calculateKeywordColWidth(tasks)
 	items := make([]list.Item, len(tasks))
 	for i, t := range tasks {
-		items[i] = taskItem{task: t, projectColWidth: projectColWidth, keywordColWidth: keywordColWidth, verbose: config.Verbose}
+		items[i] = taskItem{config: config, task: t, projectColWidth: projectColWidth, keywordColWidth: keywordColWidth, verbose: config.GeneralConfig.Verbose}
 	}
 
 	delegate := taskDelegate{DefaultDelegate: list.NewDefaultDelegate()}
@@ -1024,7 +1039,7 @@ func showInteractiveTUI(config *task.Config, project string) {
 	delegate.SetSpacing(0)
 
 	l := list.New(items, delegate, 0, 0)
-	if config.Structured {
+	if config.Todo.Structured {
 		l.Title = "Tasks (Zettelkasten)"
 	} else {
 		l.Title = "Tasks (All)"
@@ -1120,7 +1135,7 @@ func showInteractiveTUI(config *task.Config, project string) {
 		projectColWidth: projectColWidth,
 		keywordColWidth: keywordColWidth,
 		allItems:        items,
-		structuredMode:  config.Structured,
+		structuredMode:  config.Todo.Structured,
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
@@ -1134,10 +1149,10 @@ func showInteractiveTUI(config *task.Config, project string) {
 	}
 }
 
-func printTasksPlain(config *task.Config, tasks []*task.Task) {
+func printTasksPlain(config *config.Config, tasks []*task.Task) {
 	projectColWidth := calculateProjectColWidth(tasks)
 	for _, t := range tasks {
-		if config.Verbose {
+		if config.GeneralConfig.Verbose {
 			fmt.Printf("%-*s %-16s %-12s %-40s",
 				projectColWidth, t.Project, t.Zettel, t.Keyword, t.Title)
 		} else {

@@ -27,12 +27,12 @@ type Zettel = zet.Zettel
 type SearchResult = zet.SearchResult
 
 type ColorScheme struct {
-	zettelIDStyle    lipgloss.Style
-	titleStyle       lipgloss.Style
-	normalStyle      lipgloss.Style
-	highlightStyle   lipgloss.Style
-	matchCountStyle  lipgloss.Style
-	selectorStyle    lipgloss.Style
+	zettelIDStyle   lipgloss.Style
+	titleStyle      lipgloss.Style
+	normalStyle     lipgloss.Style
+	highlightStyle  lipgloss.Style
+	matchCountStyle lipgloss.Style
+	selectorStyle   lipgloss.Style
 }
 
 var colors ColorScheme
@@ -692,7 +692,7 @@ func openEditorCmd(editor, filePath, searchTerm string) tea.Cmd {
 	editorParts := strings.Fields(editor)
 	editorCmd := editorParts[0]
 	editorArgs := editorParts[1:]
-	
+
 	// Add search term support for common editors
 	if searchTerm != "" {
 		editorName := filepath.Base(editorCmd)
@@ -713,7 +713,7 @@ func openEditorCmd(editor, filePath, searchTerm string) tea.Cmd {
 			// Sublime: doesn't support opening with search
 		}
 	}
-	
+
 	editorArgs = append(editorArgs, filePath)
 
 	c := exec.Command(editorCmd, editorArgs...)
@@ -757,12 +757,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	editor := cfg.EDITOR
+	editor := cfg.GeneralConfig.EDITOR
 	if editor == "" {
 		editor = "vim"
 	}
 
-	verbose := cfg.Verbose
+	verbose := cfg.GeneralConfig.Verbose
 	args := os.Args[1:]
 
 	// Parse flags
@@ -810,49 +810,47 @@ func main() {
 		}
 		printSearchResults(results)
 	case "d", "todo":
-		// Use task package for consistent task parsing
-		taskCfg := task.NewConfig()
-		taskCfg.Structured = true // Always use structured mode for zettels
-		
+		cfg.Todo.Structured = true // Always use structured mode for zettels
+
 		// Get the parent directory (zettelkasten root)
 		files, err := filepath.Glob(filepath.Join(zetDir, "??????????????", "README.md"))
 		if err != nil {
 			log.Fatal(err)
 		}
-		
+
 		// Process each file and collect tasks
 		var allTasks []*task.Task
 		for _, file := range files {
-			tasks, err := taskCfg.ProcessFile(file)
+			tasks, err := task.ProcessFile(cfg, file)
 			if err != nil {
 				continue
 			}
 			allTasks = append(allTasks, tasks...)
 		}
-		
+
 		// Group tasks by zettel
 		tasksByZettel := make(map[string][]*task.Task)
 		for _, t := range allTasks {
 			tasksByZettel[t.Zettel] = append(tasksByZettel[t.Zettel], t)
 		}
-		
+
 		// Print tasks grouped by zettel
 		for zettelID, tasks := range tasksByZettel {
 			if len(tasks) == 0 {
 				continue
 			}
-			
+
 			// Get zettel title
 			title, _ := zet.GetZettelTitle(zetDir, zettelID)
 			if title == "" {
 				title = "Unknown"
 			}
-			
+
 			// Print zettel header once
 			fmt.Printf("\n%s: %s\n",
 				colors.zettelIDStyle.Render(zettelID),
 				colors.highlightStyle.Render(title))
-			
+
 			// Print all tasks for this zettel
 			for _, t := range tasks {
 				taskLine := fmt.Sprintf("%s: %s", t.Keyword, t.Title)
