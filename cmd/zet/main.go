@@ -26,12 +26,27 @@ import (
 type Zettel = zet.Zettel
 type SearchResult = zet.SearchResult
 
-var (
-	magentaStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
-	yellowStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	normalStyle  = lipgloss.NewStyle()
-	boldOrange   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("3"))
-)
+type ColorScheme struct {
+	zettelIDStyle    lipgloss.Style
+	titleStyle       lipgloss.Style
+	normalStyle      lipgloss.Style
+	highlightStyle   lipgloss.Style
+	matchCountStyle  lipgloss.Style
+	selectorStyle    lipgloss.Style
+}
+
+var colors ColorScheme
+
+func InitializeColors(cfg *config.Config) {
+	colors = ColorScheme{
+		zettelIDStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
+		titleStyle:      lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TaskColor)),
+		normalStyle:     lipgloss.NewStyle(),
+		highlightStyle:  lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(cfg.Colors.ActiveColor)),
+		matchCountStyle: lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.InProgressColor)).Bold(true),
+		selectorStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Bold(true),
+	}
+}
 
 type zettelItem struct {
 	zettel        Zettel
@@ -48,25 +63,19 @@ func (i zettelItem) renderWithSelection(isSelected bool) string {
 
 	// Show match count if there are search results
 	if len(i.searchResults) > 0 {
-		matchCount := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("11")).
-			Bold(true).
-			Render(fmt.Sprintf("[%d] ", len(i.searchResults)))
+		matchCount := colors.matchCountStyle.Render(fmt.Sprintf("[%d] ", len(i.searchResults)))
 		parts = append(parts, matchCount)
 	}
 
 	if i.verbose {
-		parts = append(parts, magentaStyle.Render(fmt.Sprintf("%-14s", i.zettel.ID)))
+		parts = append(parts, colors.zettelIDStyle.Render(fmt.Sprintf("%-14s", i.zettel.ID)))
 	}
 
 	if isSelected {
-		indicator := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("13")).
-			Bold(true).
-			Render("█ ")
-		parts = append(parts, indicator+i.zettel.Title)
+		indicator := colors.selectorStyle.Render("█ ")
+		parts = append(parts, indicator+colors.titleStyle.Render(i.zettel.Title))
 	} else {
-		parts = append(parts, "  "+i.zettel.Title)
+		parts = append(parts, "  "+colors.titleStyle.Render(i.zettel.Title))
 	}
 
 	return strings.Join(parts, " ")
@@ -76,10 +85,10 @@ func (i zettelItem) Title() string {
 	var parts []string
 
 	if i.verbose {
-		parts = append(parts, magentaStyle.Render(fmt.Sprintf("%-14s", i.zettel.ID)))
+		parts = append(parts, colors.zettelIDStyle.Render(fmt.Sprintf("%-14s", i.zettel.ID)))
 	}
 
-	parts = append(parts, i.zettel.Title)
+	parts = append(parts, colors.titleStyle.Render(i.zettel.Title))
 	return strings.Join(parts, " ")
 }
 
@@ -734,6 +743,8 @@ func main() {
 		log.Fatal(err)
 	}
 
+	InitializeColors(cfg)
+
 	zetDir := cfg.Directories.Zettelkasten
 	if zetDir == "" {
 		fmt.Println("ERROR: No zettelkasten location set.")
@@ -839,8 +850,8 @@ func main() {
 			
 			// Print zettel header once
 			fmt.Printf("\n%s: %s\n",
-				magentaStyle.Render(zettelID),
-				boldOrange.Render(title))
+				colors.zettelIDStyle.Render(zettelID),
+				colors.highlightStyle.Render(title))
 			
 			// Print all tasks for this zettel
 			for _, t := range tasks {
@@ -886,7 +897,7 @@ func main() {
 			log.Fatal(err)
 		}
 		for _, z := range zettels {
-			fmt.Printf("%s %s\n", magentaStyle.Render(z.ID), z.Title)
+			fmt.Printf("%s %s\n", colors.zettelIDStyle.Render(z.ID), z.Title)
 		}
 	case "show":
 		if len(args) < 2 {
@@ -1259,12 +1270,12 @@ func printSearchResults(results []SearchResult) {
 		if r.Title != currentTitle {
 			fmt.Println()
 			fmt.Printf("%s: %s\n",
-				magentaStyle.Render(r.ZettelID),
-				boldOrange.Render(r.Title))
+				colors.zettelIDStyle.Render(r.ZettelID),
+				colors.highlightStyle.Render(r.Title))
 			currentTitle = r.Title
 		}
 		fmt.Printf("[%s]: %s\n",
-			yellowStyle.Render(fmt.Sprintf("%d", r.LineNum)),
+			colors.highlightStyle.Render(fmt.Sprintf("%d", r.LineNum)),
 			r.Line)
 	}
 }
@@ -1272,7 +1283,7 @@ func printSearchResults(results []SearchResult) {
 func printTitleSearchResults(results []Zettel) {
 	for _, z := range results {
 		fmt.Printf("%s: %s\n",
-			magentaStyle.Render(z.ID),
+			colors.zettelIDStyle.Render(z.ID),
 			z.Title)
 	}
 }
