@@ -68,11 +68,11 @@ karya = "/test/karya"
 	}
 
 	// Verify other settings
-	if cfg.EDITOR != "nvim" {
-		t.Errorf("Expected editor = nvim, got %s", cfg.EDITOR)
+	if cfg.GeneralConfig.EDITOR != "nvim" {
+		t.Errorf("Expected editor = nvim, got %s", cfg.GeneralConfig.EDITOR)
 	}
 
-	if !cfg.Structured {
+	if !cfg.Todo.Structured {
 		t.Error("Expected structured = true")
 	}
 }
@@ -131,7 +131,7 @@ zettelkasten = "/config/zet"
 		t.Errorf("Expected directories.zettelkasten from env = /env/zet, got %s", cfg.Directories.Zettelkasten)
 	}
 
-	if cfg.EDITOR != "nvim" {
-		t.Errorf("Expected EDITOR from env = nvim, got %s", cfg.EDITOR)
+	if cfg.GeneralConfig.EDITOR != "nvim" {
+		t.Errorf("Expected EDITOR from env = nvim, got %s", cfg.GeneralConfig.EDITOR)
 	}
 }

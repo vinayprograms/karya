@@ -1,13 +1,15 @@
 package main
 
 import (
-	"github.com/vinayprograms/karya/internal/task"
 	"os"
 	"testing"
+
+	"github.com/vinayprograms/karya/internal/config"
+	"github.com/vinayprograms/karya/internal/task"
 )
 
 func TestTask_IsActive(t *testing.T) {
-	config := task.NewConfig()
+	config := config.Config{}
 	tests := []struct {
 		keyword string
 		want    bool
@@ -17,21 +19,21 @@ func TestTask_IsActive(t *testing.T) {
 		{"INVALID", false},
 	}
 	for _, tt := range tests {
-		tk := config.ParseLine(tt.keyword+": test", "proj", "zettel", "test.md")
+		tk := task.ParseLine(&config, tt.keyword+": test", "proj", "zettel", "test.md")
 		if tk == nil {
 			if tt.want {
 				t.Errorf("Task.IsActive() = nil, want %v", tt.want)
 			}
 			continue
 		}
-		if got := tk.IsActive(); got != tt.want {
+		if got := tk.IsActive(&config); got != tt.want {
 			t.Errorf("Task.IsActive() = %v, want %v", got, tt.want)
 		}
 	}
 }
 
 func TestTask_IsCompleted(t *testing.T) {
-	config := task.NewConfig()
+	config := config.Config{}
 	tests := []struct {
 		keyword string
 		want    bool
@@ -41,21 +43,21 @@ func TestTask_IsCompleted(t *testing.T) {
 		{"INVALID", false},
 	}
 	for _, tt := range tests {
-		tk := config.ParseLine(tt.keyword+": test", "proj", "zettel", "test.md")
+		tk := task.ParseLine(&config, tt.keyword+": test", "proj", "zettel", "test.md")
 		if tk == nil {
 			if tt.want {
 				t.Errorf("Task.IsCompleted() = nil, want %v", tt.want)
 			}
 			continue
 		}
-		if got := tk.IsCompleted(); got != tt.want {
+		if got := tk.IsCompleted(&config); got != tt.want {
 			t.Errorf("Task.IsCompleted() = %v, want %v", got, tt.want)
 		}
 	}
 }
 
 func TestParseLine(t *testing.T) {
-	config := task.NewConfig()
+	config := config.Config{}
 	tests := []struct {
 		line    string
 		project string
@@ -106,7 +108,7 @@ func TestParseLine(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		got := config.ParseLine(tt.line, tt.project, tt.zettel, "test.md")
+		got := task.ParseLine(&config, tt.line, tt.project, tt.zettel, "test.md")
 		if (got == nil && tt.want != nil) || (got != nil && tt.want == nil) {
 			t.Errorf("ParseLine(%q, %q, %q, %q) = %v, want %v", tt.line, tt.project, tt.zettel, "test.md", got, tt.want)
 			continue
@@ -120,7 +122,7 @@ func TestParseLine(t *testing.T) {
 }
 
 func TestProcessFile(t *testing.T) {
-	config := task.NewConfig()
+	config := config.Config{}
 	content := `TODO: Write code #urgent @2023-10-01 >> john
 DONE: Completed task
 INVALID: Skip this`
@@ -132,7 +134,7 @@ INVALID: Skip this`
 	tempFile.WriteString(content)
 	tempFile.Close()
 
-	tasks, err := config.ProcessFile(tempFile.Name())
+	tasks, err := task.ProcessFile(&config, tempFile.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,8 +148,8 @@ INVALID: Skip this`
 
 func TestListTasks(t *testing.T) {
 	// Mock config with non-existent dir
-	config := &task.Config{PRJDIR: "/nonexistent"}
-	tasks, err := config.ListTasks("", true)
+	config := &config.Config{Directories: config.Directories{Projects: "/nonexistent"}}
+	tasks, err := task.ListTasks(config, "", true)
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
 	}
