@@ -63,6 +63,8 @@ type ColorScheme struct {
 	CompletedTaskColor string `toml:"completed-description"`
 	TagColor           string `toml:"tag"`
 	TagBgColor         string `toml:"tag-bg"`
+	SpecialTagColor    string `toml:"special-tag"`
+	SpecialTagBgColor  string `toml:"special-tag-bg"`
 	DateColor          string `toml:"date"`
 	DateBgColor        string `toml:"date-bg"`
 	PastDateColor      string `toml:"past-date"`
@@ -85,6 +87,7 @@ type Todo struct {
 	Active        []string `toml:"active"`
 	InProgress    []string `toml:"inprogress"`
 	Completed     []string `toml:"completed"`
+	SpecialTags   []string `toml:"special-tags"`
 }
 type GeneralConfig struct {
 	EDITOR    string `toml:"editor"`
@@ -216,7 +219,9 @@ func (c *Config) initializeColors() {
 		TaskColor:          "0",  // Black
 		CompletedTaskColor: "8",  // Bright black (faded)
 		TagColor:           "15", // White text
-		TagBgColor:         "4",  // Magenta background
+		TagBgColor:         "4",  // Blue background
+		SpecialTagColor:    "15", // White text
+		SpecialTagBgColor:  "5",  // Magenta background
 		DateColor:          "4",  // Blue
 		DateBgColor:        "7",  // Light gray background (visible with blue text)
 		PastDateColor:      "15", // White text
@@ -237,6 +242,8 @@ func (c *Config) initializeColors() {
 		CompletedTaskColor: "8",  // Bright black (faded)
 		TagColor:           "0",  // Black text
 		TagBgColor:         "14", // Light blue background
+		SpecialTagColor:    "15", // White text
+		SpecialTagBgColor:  "5",  // Magenta background
 		DateColor:          "0",  // Black text
 		DateBgColor:        "12", // Light blue background
 		PastDateColor:      "0",  // Black text
@@ -284,6 +291,12 @@ func (c *Config) initializeColors() {
 	if c.Colors.TagBgColor == "" {
 		c.Colors.TagBgColor = defaults.TagBgColor
 	}
+	if c.Colors.SpecialTagColor == "" {
+		c.Colors.SpecialTagColor = defaults.SpecialTagColor
+	}
+	if c.Colors.SpecialTagBgColor == "" {
+		c.Colors.SpecialTagBgColor = defaults.SpecialTagBgColor
+	}
 	if c.Colors.DateColor == "" {
 		c.Colors.DateColor = defaults.DateColor
 	}
@@ -318,6 +331,8 @@ func (c *Config) initializeColors() {
 	c.Colors.CompletedTaskColor = resolveColorValue(c.Colors.CompletedTaskColor)
 	c.Colors.TagColor = resolveColorValue(c.Colors.TagColor)
 	c.Colors.TagBgColor = resolveColorValue(c.Colors.TagBgColor)
+	c.Colors.SpecialTagColor = resolveColorValue(c.Colors.SpecialTagColor)
+	c.Colors.SpecialTagBgColor = resolveColorValue(c.Colors.SpecialTagBgColor)
 	c.Colors.DateColor = resolveColorValue(c.Colors.DateColor)
 	c.Colors.DateBgColor = resolveColorValue(c.Colors.DateBgColor)
 	c.Colors.PastDateColor = resolveColorValue(c.Colors.PastDateColor)

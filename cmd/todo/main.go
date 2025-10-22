@@ -31,6 +31,7 @@ type ColorScheme struct {
 	completedColor     lipgloss.Style
 	taskColor          lipgloss.Style
 	completedTaskColor lipgloss.Style
+	specialTagColor    lipgloss.Style
 	tagColor           lipgloss.Style
 	dateColor          lipgloss.Style
 	pastDateColor      lipgloss.Style
@@ -51,6 +52,7 @@ func InitializeColors(cfg *config.Config) {
 		taskColor:          lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TaskColor)),
 		completedTaskColor: lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CompletedTaskColor)),
 		tagColor:           lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TagColor)).Background(lipgloss.Color(cfg.Colors.TagBgColor)),
+		specialTagColor:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.SpecialTagColor)).Background(lipgloss.Color(cfg.Colors.SpecialTagBgColor)).Bold(true),
 		dateColor:          lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.DateColor)).Background(lipgloss.Color(cfg.Colors.DateBgColor)),
 		pastDateColor:      lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.PastDateColor)).Background(lipgloss.Color(cfg.Colors.PastDateBgColor)),
 		todayDateColor:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TodayDateColor)).Background(lipgloss.Color(cfg.Colors.TodayDateBgColor)).Bold(true),
@@ -108,7 +110,21 @@ func (i taskItem) renderWithSelection(isSelected bool) string {
 		parts = append(parts, "  "+titleStyle.Render(fmt.Sprintf("%-40s", i.task.Title)))
 	}
 
-	if i.task.Tag != "" {
+	// Render tag with special color if it's in special tags. Special tags either contain
+	// that exact text or start with that text followed by a colon.
+	isSpecialTag := false
+	for _, specialTag := range i.config.Todo.SpecialTags {
+		if i.task.Tag == specialTag {
+			isSpecialTag = true
+			break
+		} else if strings.HasPrefix(i.task.Tag, specialTag+":") {
+			isSpecialTag = true
+			break
+		}
+	}
+	if isSpecialTag {
+		parts = append(parts, colors.specialTagColor.Render(fmt.Sprintf(" %s ", i.task.Tag)))
+	} else if i.task.Tag != "" {
 		parts = append(parts, colors.tagColor.Render(fmt.Sprintf(" %s ", i.task.Tag)))
 	}
 	// Display date types with prefixes
@@ -157,8 +173,24 @@ func (i taskItem) Title() string {
 
 	parts = append(parts, titleStyle.Render(fmt.Sprintf("%-40s", i.task.Title)))
 
+	// Render tag with special color if it's in special tags. Special tags either contain
+	// that exact text or start with that text followed by a colon.
+	isSpecialTag := false
+	for _, specialTag := range i.config.Todo.SpecialTags {
+		if i.task.Tag == specialTag {
+			isSpecialTag = true
+			break
+		} else if strings.HasPrefix(i.task.Tag, specialTag+":") {
+			isSpecialTag = true
+			break
+		}
+	}
 	if i.task.Tag != "" {
-		parts = append(parts, colors.tagColor.Render(fmt.Sprintf(" %s ", i.task.Tag)))
+		if isSpecialTag {
+			parts = append(parts, colors.specialTagColor.Render(fmt.Sprintf(" %s ", i.task.Tag)))
+		} else {
+			parts = append(parts, colors.tagColor.Render(fmt.Sprintf(" %s ", i.task.Tag)))
+		}
 	}
 	// Display date types with prefixes
 	if i.task.ScheduledAt != "" {
