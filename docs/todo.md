@@ -13,10 +13,14 @@ DONE: Fix bug Y
 TASK: Meeting notes #meeting @2025-01-20
 ```
 
-### Date Prefixes in UI
+### Field Definitions
 
-- `S:` - Scheduled date (when work should start)
-- `D:` - Due date (when work must be completed)
+- Any text prefixed by "#" is treated as a tag. Multiple tags can be added to a task.
+  - Special tags can be listed in `config.toml` which will be highlighted with a different color. Special tags can also be followe by a ":<additional text>" to provide extra context. For example "#priority:high".
+- Any text prefixed by "@" is treated as a date. By default, this is the scheduled date.
+  - To specify due dates, use the `@d:` prefix.
+  - To specify scheduled dates explicitly, use the `@s:` prefix.
+- Any text prefixed by ">>" is treated as an assignee. Multiple assignees must be separated by commas.
 
 ## Tool usage
 
