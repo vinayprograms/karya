@@ -54,12 +54,10 @@ Karya uses a TOML configuration file located at `~/.config/karya/config.toml`.
 ### Example Configuration
 
 ```toml
-# General settings (must be before [sections])
+[general]
 editor = "nvim"
-show_completed = true
-structured = true
 verbose = false
-color_mode = "dark" # "dark" or "light"
+theme = "Dracula"  # Optional: Choose from 361 themes
 
 # Directory paths
 [directories]
@@ -68,7 +66,9 @@ zettelkasten = "$HOME/Documents/zet"
 karya = "$HOME/Documents/karya"
 
 # Customize task keywords
-[keywords]
+[todo]
+show_completed = true
+structured = true
 active = [
     "TODO", "TASK", "NOTE", "REMINDER", "EVENT", "MEETING",
     "CALL", "EMAIL", "MESSAGE", "FOLLOWUP", "REVIEW",
@@ -107,7 +107,7 @@ tag-bg = "black"
   - `true`: Scans `project/notes/zettelID/README.md` files
   - `false`: Scans all `.md` files in project directory tree
 - **`verbose`** - Show additional details like Zettel ID column (default: false)
-- **`color_mode`** - Terminal color mode: "dark" or "light" (default: dark)
+- **`theme`** - Choose from 361 professional color themes (default: none)
 
 ### Environment Variables
 
@@ -120,19 +120,25 @@ Environment variables take precedence over the config file.
 - `SHOW_COMPLETED` - Show completed tasks (true/false)
 - `STRUCTURED` - Use zettelkasten structure (true/false)
 - `VERBOSE` - Show additional details like Zettel ID (true/false)
-- `KARYA_COLOR_MODE` - Color mode: "light" or "dark"
 
 **Note:** Command-line flags take precedence over environment variables and config file settings.
 
 ### Color Customization
 
-You can customize TUI colors using three methods:
+You can customize TUI colors using multiple methods:
 
-1. **Color names**: `"red"`, `"green"`, `"bright-magenta"`, etc.
-2. **ANSI numbers**: `"0"` through `"15"` for 16-color palette
-3. **Hex colors**: `"#E8F4F8"` for full RGB range
+1. **Themes**: Choose from 361 professional color schemes via [gogh-themes](https://github.com/WillyV3/gogh-themes)
+   ```toml
+   [general]
+   theme = "Dracula"  # Popular: Dracula, Nord, Gruvbox Dark, Tokyo Night
+   ```
+2. **Color names**: `"red"`, `"green"`, `"bright-magenta"` (uses theme palette when set)
+3. **ANSI numbers**: `"0"` through `"15"` for 16-color palette
+4. **Hex colors**: `"#E8F4F8"` for full RGB range (bypasses theme)
 
-**For full configuration options**, see `config.toml.example` in the repository.
+When a theme is set, color names like `"blue"` or `"bright-red"` will use the theme's palette. Direct hex codes and ANSI numbers override the theme.
+
+**For full configuration options**, see `config.toml.example` and `THEME_EXAMPLE.toml` in the repository.
 
 ## Commands
 
@@ -202,6 +208,7 @@ The task processing system uses an adaptive worker pool calculation to maximize 
 - **[charmbracelet/bubbles](https://github.com/charmbracelet/bubbles)**: TUI components
 - **[charmbracelet/glamour](https://github.com/charmbracelet/glamour)**: Markdown rendering
 - **[charmbracelet/lipgloss](https://github.com/charmbracelet/lipgloss)**: Terminal styling
+- **[willyv3/gogh-themes](https://github.com/WillyV3/gogh-themes)**: 361 professional terminal color themes
 
 ## Contributing
 

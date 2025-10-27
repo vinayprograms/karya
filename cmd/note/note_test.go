@@ -17,7 +17,7 @@ func TestListProjects(t *testing.T) {
 		}
 	}
 	
-	result, err := listProjects(tmpDir)
+	result, err := listProjects(tmpDir, nil)
 	if err != nil {
 		t.Fatalf("listProjects failed: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestListProjectsWithNotes(t *testing.T) {
 		t.Fatalf("Failed to create project: %v", err)
 	}
 	
-	result, err := listProjects(tmpDir)
+	result, err := listProjects(tmpDir, nil)
 	if err != nil {
 		t.Fatalf("listProjects failed: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestGetNotesDir(t *testing.T) {
 func TestListProjectsEmpty(t *testing.T) {
 	tmpDir := t.TempDir()
 	
-	result, err := listProjects(tmpDir)
+	result, err := listProjects(tmpDir, nil)
 	if err != nil {
 		t.Fatalf("listProjects failed: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestListProjectsIgnoresHidden(t *testing.T) {
 		t.Fatalf("Failed to create hidden project: %v", err)
 	}
 	
-	result, err := listProjects(tmpDir)
+	result, err := listProjects(tmpDir, nil)
 	if err != nil {
 		t.Fatalf("listProjects failed: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestListProjectsSorted(t *testing.T) {
 		}
 	}
 	
-	result, err := listProjects(tmpDir)
+	result, err := listProjects(tmpDir, nil)
 	if err != nil {
 		t.Fatalf("listProjects failed: %v", err)
 	}
