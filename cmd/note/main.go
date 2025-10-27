@@ -198,15 +198,10 @@ func (m projectModel) View() string {
 		}
 	}
 
-	// Calculate column width with fixed icon spacing
-	iconWidth := 0
-	if m.projects[0].HasNotes {
-		iconWidth += 3
-	}
-	if m.projects[0].HasTodos {
-		iconWidth += 3
-	}
-	columnWidth := maxNameWidth + iconWidth + 6 // 2 for selector + 3 for padding + 1 for spacing
+	// Calculate consistent column width
+	// Format: "  ProjectName 📝 ☑️" (2 spaces + name + up to 2 icons with spaces)
+	maxIconsWidth := 6 // Space for up to 2 icons with spacing: " 📝 ☑️"
+	columnWidth := 2 + maxNameWidth + maxIconsWidth + 2 // selector + name + icons + padding
 
 	visibleRows := m.height - 6
 	if visibleRows < 1 {
@@ -225,51 +220,51 @@ func (m projectModel) View() string {
 		for col := 0; col < m.columns; col++ {
 			idx := row*m.columns + col
 			if idx >= len(m.projects) {
-				// Fill empty space to maintain alignment
-				if col > 0 {
-					output.WriteString(strings.Repeat(" ", columnWidth))
-				}
 				break
 			}
 
 			prj := m.projects[idx]
 			isSelected := idx == m.selectedIndex
 
-			// Build the content with fixed width
-			var namePart string
+			// Build the content with fixed structure
+			var contentBuilder strings.Builder
+			
+			// Selector part
 			if isSelected {
 				cursorStyle := colors.selectorStyle
-				highlightStyle := colors.highlightStyle
-				namePart = cursorStyle.Render("█") + " " + highlightStyle.Render(prj.Name)
+				contentBuilder.WriteString(cursorStyle.Render("█") + " ")
 			} else {
-				projectStyle := colors.projectStyle
-				namePart = "  " + projectStyle.Render(prj.Name)
+				contentBuilder.WriteString("  ")
 			}
 
-			// Pad name to consistent width
+			// Project name
+			if isSelected {
+				highlightStyle := colors.highlightStyle
+				contentBuilder.WriteString(highlightStyle.Render(prj.Name))
+			} else {
+				projectStyle := colors.projectStyle
+				contentBuilder.WriteString(projectStyle.Render(prj.Name))
+			}
+			
+			// Pad name to max width
 			namePadding := maxNameWidth - len(prj.Name)
-			namePart += strings.Repeat(" ", namePadding)
+			contentBuilder.WriteString(strings.Repeat(" ", namePadding))
 
-			// Add icons with fixed positioning
-			var iconPart string
+			// Icons on the right side
 			if prj.HasNotes {
 				notesStyle := colors.grayStyle
-				iconPart += " " + notesStyle.Render("📝")
-			} else {
-				iconPart += "  " // Space for missing note icon
+				contentBuilder.WriteString(" " + notesStyle.Render("📝"))
 			}
 			if prj.HasTodos {
 				todoStyle := colors.highlightStyle
-				iconPart += " " + todoStyle.Render("☑️")
-			} else {
-				iconPart += "  " // Space for missing todo icon
+				contentBuilder.WriteString(" " + todoStyle.Render("☑️"))
 			}
 
-			// Combine parts and pad to column width
-			content := namePart + iconPart
-			contentWidth := lipgloss.Width(content)
-			if contentWidth < columnWidth {
-				content += strings.Repeat(" ", columnWidth-contentWidth)
+			// Pad to column width
+			content := contentBuilder.String()
+			actualWidth := lipgloss.Width(content)
+			if actualWidth < columnWidth {
+				content += strings.Repeat(" ", columnWidth-actualWidth)
 			}
 
 			output.WriteString(content)
