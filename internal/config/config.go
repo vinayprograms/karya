@@ -52,7 +52,7 @@ func resolveColorValue(colorInput string) string {
 }
 
 type ColorScheme struct {
-	// 16-color palette values (0-15)
+	Theme              string `toml:"theme"`
 	ProjectColor       string `toml:"project"`
 	ActiveColor        string `toml:"active"`
 	InProgressColor    string `toml:"inprogress"`
@@ -90,7 +90,6 @@ type Todo struct {
 type GeneralConfig struct {
 	EDITOR  string `toml:"editor"`
 	Verbose bool   `toml:"verbose"`
-	Theme   string `toml:"theme"`
 }
 
 type Config struct {
@@ -112,9 +111,9 @@ func Load() (*Config, error) {
 			if _, err := toml.DecodeFile(configPath, cfg); err != nil {
 				return nil, fmt.Errorf("failed to parse config file: %w", err)
 			}
-			if cfg.GeneralConfig.Theme != "" {
-				if err := loadTheme(cfg.GeneralConfig.Theme); err != nil {
-					return nil, fmt.Errorf("failed to load theme '%s': %w", cfg.GeneralConfig.Theme, err)
+			if cfg.Colors.Theme != "" {
+				if err := loadTheme(cfg.Colors.Theme); err != nil {
+					return nil, fmt.Errorf("failed to load theme '%s': %w", cfg.Colors.Theme, err)
 				}
 			}
 			cfg.GeneralConfig.EDITOR = expandEnv(cfg.GeneralConfig.EDITOR)

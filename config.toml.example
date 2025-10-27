@@ -8,12 +8,6 @@
 # Note: -v/--verbose command-line flag takes precedence over this setting
 # verbose = true
 
-# Themes sourced from gogh-themes package - https://github.com/WillyV3/gogh-themes (361 available themes)
-# When set, color names (black, red, bright-blue, etc.) in [colors] section
-i# will use the theme's palette. Direct hex codes (#RRGGBB) and ANSI numbers work too.
-# If no theme is set, terminal's native ANSI colors are used (adapts to light/dark mode)
-# theme = "Dracula"
-
 # -----------------------------------------------
 # Directory paths for various karya commands
 # Environment variables in paths (like $HOME) will be automatically expanded
@@ -58,6 +52,7 @@ i# will use the theme's palette. Direct hex codes (#RRGGBB) and ANSI numbers wor
 # ]
 
 # -----------------------------------------------
+# Color customization for TUI
 # You can specify colors using three different methods:
 #   1. Color names (ANSI 16-color palette) - recommended for readability
 #   2. ANSI numbers (0-15) - for exact ANSI 16-color control
@@ -69,6 +64,12 @@ i# will use the theme's palette. Direct hex codes (#RRGGBB) and ANSI numbers wor
 #            bright-magenta, bright-cyan, bright-black, bright-white
 #
 # [colors]
+# Theme sourced from gogh-themes package - https://github.com/WillyV3/gogh-themes (361 available themes)
+# When set, color names (black, red, bright-blue, etc.)  will use the
+# theme's palette. Direct hex codes (#RRGGBB) and ANSI numbers work too.
+# If no theme is set, terminal's native ANSI colors are used
+# theme = "Dracula"
+#
 # project           = "green"                 # Color name example
 # active            = "yellow"                # Color name example
 # inprogress        = "6"                     # ANSI number example (cyan)
@@ -85,4 +86,3 @@ i# will use the theme's palette. Direct hex codes (#RRGGBB) and ANSI numbers wor
 # today-bg          = "yellow"                # Today's date background (highlight)
 # assignee          = "bright-white"         # Assignee badge text
 # assignee-bg       = "black"                 # Assignee badge background
-
