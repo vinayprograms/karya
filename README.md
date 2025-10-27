@@ -57,7 +57,6 @@ Karya uses a TOML configuration file located at `~/.config/karya/config.toml`.
 [general]
 editor = "nvim"
 verbose = false
-theme = "Dracula"  # Optional: Choose from 361 themes
 
 # Directory paths
 [directories]
@@ -85,6 +84,7 @@ completed = [
 
 # Customize TUI colors (optional)
 [colors]
+theme = "Dracula"  # Optional: Choose from 361 themes
 # Use color names, ANSI numbers (0-15), or hex colors (#RRGGBB)
 tag = "bright-magenta"
 tag-bg = "black"
@@ -130,7 +130,7 @@ You can customize TUI colors using multiple methods:
 1. **No customization (default)**: Terminal's native ANSI colors are used, automatically adapting to light/dark mode
 2. **Themes**: Choose from 361 professional color schemes via [gogh-themes](https://github.com/WillyV3/gogh-themes)
    ```toml
-   [general]
+   [colors]
    theme = "Dracula"  # Popular: Dracula, Nord, Gruvbox Dark, Tokyo Night
    ```
 3. **Color names**: `"red"`, `"green"`, `"bright-magenta"` (uses theme palette when theme is set, otherwise terminal ANSI)
