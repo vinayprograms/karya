@@ -2,18 +2,16 @@
 
 [general]
 # Editor (defaults to vim). Supported options - "vim", "emacs", "nano", "code"
-# editor = "nvim" 
+# editor = "nvim"
 
 # Show additional details like Zettel ID column in table view (defaults to false)
 # Note: -v/--verbose command-line flag takes precedence over this setting
 # verbose = true
 
-# Theme from gogh-themes package (361 available themes)
-# Popular options: "Dracula", "Nord", "Gruvbox Dark", "Tokyo Night", "Solarized Dark"
+# Themes sourced from gogh-themes package - https://github.com/WillyV3/gogh-themes (361 available themes)
 # When set, color names (black, red, bright-blue, etc.) in [colors] section
-# will use the theme's palette. Direct hex codes and ANSI numbers still work.
-# Note: Projects with tasks are marked with ☑️ in the 'note' command
-# See: https://github.com/WillyV3/gogh-themes for full theme list
+i# will use the theme's palette. Direct hex codes (#RRGGBB) and ANSI numbers work too.
+# If no theme is set, terminal's native ANSI colors are used (adapts to light/dark mode)
 # theme = "Dracula"
 
 # -----------------------------------------------

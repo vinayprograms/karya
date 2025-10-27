@@ -127,16 +127,17 @@ Environment variables take precedence over the config file.
 
 You can customize TUI colors using multiple methods:
 
-1. **Themes**: Choose from 361 professional color schemes via [gogh-themes](https://github.com/WillyV3/gogh-themes)
+1. **No customization (default)**: Terminal's native ANSI colors are used, automatically adapting to light/dark mode
+2. **Themes**: Choose from 361 professional color schemes via [gogh-themes](https://github.com/WillyV3/gogh-themes)
    ```toml
    [general]
    theme = "Dracula"  # Popular: Dracula, Nord, Gruvbox Dark, Tokyo Night
    ```
-2. **Color names**: `"red"`, `"green"`, `"bright-magenta"` (uses theme palette when set)
-3. **ANSI numbers**: `"0"` through `"15"` for 16-color palette
-4. **Hex colors**: `"#E8F4F8"` for full RGB range (bypasses theme)
+3. **Color names**: `"red"`, `"green"`, `"bright-magenta"` (uses theme palette when theme is set, otherwise terminal ANSI)
+4. **ANSI numbers**: `"0"` through `"15"` for 16-color palette
+5. **Hex colors**: `"#E8F4F8"` for full RGB range (bypasses theme and terminal colors)
 
-When a theme is set, color names like `"blue"` or `"bright-red"` will use the theme's palette. Direct hex codes and ANSI numbers override the theme.
+When a theme is set, color names like `"blue"` or `"bright-red"` will use the theme's palette. Direct hex codes and ANSI numbers override the theme. With no theme set, ANSI color numbers respect your terminal emulator's color scheme.
 
 **For full configuration options**, see `config.toml.example` and `THEME_EXAMPLE.toml` in the repository.
 
