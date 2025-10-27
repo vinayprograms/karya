@@ -5,6 +5,13 @@ Wrapper around `zet` for project-specific notes. The `note` command provides the
 ## Usage
 
 ```bash
+# Show interactive list of all projects
+note
+
+# Projects are displayed with indicators:
+#   📝 - Project has notes
+#   ☑️  - Project has tasks/TODOs
+
 # Create new note for a project
 note myproject new
 note myproject n

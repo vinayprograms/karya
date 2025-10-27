@@ -8,9 +8,13 @@
 # Note: -v/--verbose command-line flag takes precedence over this setting
 # verbose = true
 
-# Color mode for terminal: "light" or "dark". Empty/unset defaults to dark
-# Can also be set via environment variable: KARYA_COLOR_MODE=light|dark
-# color_mode = "dark"
+# Theme from gogh-themes package (361 available themes)
+# Popular options: "Dracula", "Nord", "Gruvbox Dark", "Tokyo Night", "Solarized Dark"
+# When set, color names (black, red, bright-blue, etc.) in [colors] section
+# will use the theme's palette. Direct hex codes and ANSI numbers still work.
+# Note: Projects with tasks are marked with ☑️ in the 'note' command
+# See: https://github.com/WillyV3/gogh-themes for full theme list
+# theme = "Dracula"
 
 # -----------------------------------------------
 # Directory paths for various karya commands

@@ -1,8 +1,6 @@
 module github.com/vinayprograms/karya
 
-go 1.24.0
-
-toolchain go1.24.9
+go 1.25.3
 
 require (
 	github.com/BurntSushi/toml v1.5.0
@@ -11,6 +9,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-git/go-git/v5 v5.16.3
+	github.com/willyv3/gogh-themes v1.2.0
 )
 
 require (

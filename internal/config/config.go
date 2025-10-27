@@ -7,22 +7,21 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/charmbracelet/lipgloss"
+	lipglossthemes "github.com/willyv3/gogh-themes/lipgloss"
 )
 
-// colorNameMap maps user-friendly color names to ANSI 16-color values
 var colorNameMap = map[string]string{
-	// Standard colors (0-7)
-	"black":   "0",
-	"red":     "1",
-	"green":   "2",
-	"yellow":  "3",
-	"blue":    "4",
-	"magenta": "5",
-	"cyan":    "6",
-	"white":   "7",
-	// Bright colors (8-15)
+	"black":          "0",
+	"red":            "1",
+	"green":          "2",
+	"yellow":         "3",
+	"blue":           "4",
+	"magenta":        "5",
+	"cyan":           "6",
+	"white":          "7",
 	"bright-black":   "8",
-	"gray":           "8", // alias for bright-black
+	"gray":           "8",
 	"bright-red":     "9",
 	"bright-green":   "10",
 	"bright-yellow":  "11",
@@ -32,24 +31,23 @@ var colorNameMap = map[string]string{
 	"bright-white":   "15",
 }
 
-// resolveColorValue converts color names to ANSI 16-color numbers, or passes through other formats
-// Accepts:
-//   - Color names (red, bright-blue, etc.) → converted to ANSI numbers (0-15)
-//   - ANSI numbers (0-15) → returned as-is
-//   - Hex colors (#RRGGBB) → passed through to lipgloss (supports full RGB range)
-//   - 256-color codes → passed through to lipgloss
+var themeColorCache map[string]lipgloss.Color
+
 func resolveColorValue(colorInput string) string {
 	if colorInput == "" {
 		return colorInput
 	}
 
-	// Try as color name first - only names get converted to ANSI
+	if themeColorCache != nil {
+		if themeColor, exists := themeColorCache[strings.ToLower(colorInput)]; exists {
+			return string(themeColor)
+		}
+	}
+
 	if ansiValue, exists := colorNameMap[strings.ToLower(colorInput)]; exists {
 		return ansiValue
 	}
 
-	// Everything else (hex, ANSI numbers, 256-color codes) passed through unchanged
-	// lipgloss handles validation and rendering
 	return colorInput
 }
 
@@ -90,9 +88,9 @@ type Todo struct {
 	SpecialTags   []string `toml:"special-tags"`
 }
 type GeneralConfig struct {
-	EDITOR    string `toml:"editor"`
-	Verbose   bool   `toml:"verbose"`    // Show additional details like Zettel ID in table view
-	ColorMode string `toml:"color_mode"` // "light", "dark", or empty for auto-detect
+	EDITOR  string `toml:"editor"`
+	Verbose bool   `toml:"verbose"`
+	Theme   string `toml:"theme"`
 }
 
 type Config struct {
@@ -114,7 +112,11 @@ func Load() (*Config, error) {
 			if _, err := toml.DecodeFile(configPath, cfg); err != nil {
 				return nil, fmt.Errorf("failed to parse config file: %w", err)
 			}
-			// Expand environment variables in config values
+			if cfg.GeneralConfig.Theme != "" {
+				if err := loadTheme(cfg.GeneralConfig.Theme); err != nil {
+					return nil, fmt.Errorf("failed to load theme '%s': %w", cfg.GeneralConfig.Theme, err)
+				}
+			}
 			cfg.GeneralConfig.EDITOR = expandEnv(cfg.GeneralConfig.EDITOR)
 			cfg.Directories.Projects = expandEnv(cfg.Directories.Projects)
 			cfg.Directories.Zettelkasten = expandEnv(cfg.Directories.Zettelkasten)
@@ -173,8 +175,28 @@ func Load() (*Config, error) {
 		}
 	}
 
-	// Initialize colors with defaults based on mode
+	// Initialize colors with defaults
 	cfg.initializeColors()
+
+	// Resolve color names in user-specified colors (from config file)
+	cfg.Colors.ProjectColor = resolveColorValue(cfg.Colors.ProjectColor)
+	cfg.Colors.ActiveColor = resolveColorValue(cfg.Colors.ActiveColor)
+	cfg.Colors.InProgressColor = resolveColorValue(cfg.Colors.InProgressColor)
+	cfg.Colors.CompletedColor = resolveColorValue(cfg.Colors.CompletedColor)
+	cfg.Colors.TaskColor = resolveColorValue(cfg.Colors.TaskColor)
+	cfg.Colors.CompletedTaskColor = resolveColorValue(cfg.Colors.CompletedTaskColor)
+	cfg.Colors.TagColor = resolveColorValue(cfg.Colors.TagColor)
+	cfg.Colors.TagBgColor = resolveColorValue(cfg.Colors.TagBgColor)
+	cfg.Colors.SpecialTagColor = resolveColorValue(cfg.Colors.SpecialTagColor)
+	cfg.Colors.SpecialTagBgColor = resolveColorValue(cfg.Colors.SpecialTagBgColor)
+	cfg.Colors.DateColor = resolveColorValue(cfg.Colors.DateColor)
+	cfg.Colors.DateBgColor = resolveColorValue(cfg.Colors.DateBgColor)
+	cfg.Colors.PastDateColor = resolveColorValue(cfg.Colors.PastDateColor)
+	cfg.Colors.PastDateBgColor = resolveColorValue(cfg.Colors.PastDateBgColor)
+	cfg.Colors.TodayDateColor = resolveColorValue(cfg.Colors.TodayDateColor)
+	cfg.Colors.TodayDateBgColor = resolveColorValue(cfg.Colors.TodayDateBgColor)
+	cfg.Colors.AssigneeColor = resolveColorValue(cfg.Colors.AssigneeColor)
+	cfg.Colors.AssigneeBgColor = resolveColorValue(cfg.Colors.AssigneeBgColor)
 
 	return cfg, nil
 }
@@ -199,41 +221,9 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// initializeColors sets up default colors based on color mode
-// Colors can be overridden in the config file [colors] section
 func (c *Config) initializeColors() {
-	// Determine color mode: explicit config > environment > empty (auto-detect)
-	colorMode := c.GeneralConfig.ColorMode
-	if colorMode == "" {
-		if envMode := os.Getenv("KARYA_COLOR_MODE"); envMode != "" {
-			colorMode = envMode
-		}
-	}
-
-	// Light mode colors (better for light terminal themes)
-	lightMode := ColorScheme{
-		ProjectColor:       "4",  // Blue
-		ActiveColor:        "5",  // Magenta
-		InProgressColor:    "4",  // Blue (progress)
-		CompletedColor:     "8",  // Bright black (faded)
-		TaskColor:          "0",  // Black
-		CompletedTaskColor: "8",  // Bright black (faded)
-		TagColor:           "15", // White text
-		TagBgColor:         "4",  // Blue background
-		SpecialTagColor:    "15", // White text
-		SpecialTagBgColor:  "5",  // Magenta background
-		DateColor:          "4",  // Blue
-		DateBgColor:        "7",  // Light gray background (visible with blue text)
-		PastDateColor:      "15", // White text
-		PastDateBgColor:    "1",  // Red (urgent) background
-		TodayDateColor:     "0",  // Black text
-		TodayDateBgColor:   "3",  // Yellow background
-		AssigneeColor:      "0",  // Black text
-		AssigneeBgColor:    "7",  // Light gray background
-	}
-
-	// Dark mode colors (better for dark terminal themes)
-	darkMode := ColorScheme{
+	// Default colors when no theme is set
+	defaults := ColorScheme{
 		ProjectColor:       "2",  // Green
 		ActiveColor:        "3",  // Yellow
 		InProgressColor:    "6",  // Cyan
@@ -254,91 +244,145 @@ func (c *Config) initializeColors() {
 		AssigneeBgColor:    "8",  // Light gray background
 	}
 
-	// Select default mode based on colorMode
-	var defaults ColorScheme
-	switch strings.ToLower(colorMode) {
-	case "light":
-		defaults = lightMode
-	case "dark":
-		defaults = darkMode
-	default:
-		// Auto-detect: use dark mode as default (most common)
-		defaults = darkMode
+	if themeColorCache != nil {
+		if c.Colors.ProjectColor == "" {
+			c.Colors.ProjectColor = string(themeColorCache["green"])
+		}
+		if c.Colors.ActiveColor == "" {
+			c.Colors.ActiveColor = string(themeColorCache["yellow"])
+		}
+		if c.Colors.InProgressColor == "" {
+			c.Colors.InProgressColor = string(themeColorCache["cyan"])
+		}
+		if c.Colors.CompletedColor == "" {
+			c.Colors.CompletedColor = string(themeColorCache["gray"])
+		}
+		if c.Colors.TaskColor == "" {
+			c.Colors.TaskColor = string(themeColorCache["white"])
+		}
+		if c.Colors.CompletedTaskColor == "" {
+			c.Colors.CompletedTaskColor = string(themeColorCache["gray"])
+		}
+		if c.Colors.TagColor == "" {
+			c.Colors.TagColor = string(themeColorCache["black"])
+		}
+		if c.Colors.TagBgColor == "" {
+			c.Colors.TagBgColor = string(themeColorCache["bright-cyan"])
+		}
+		if c.Colors.SpecialTagColor == "" {
+			c.Colors.SpecialTagColor = string(themeColorCache["bright-white"])
+		}
+		if c.Colors.SpecialTagBgColor == "" {
+			c.Colors.SpecialTagBgColor = string(themeColorCache["magenta"])
+		}
+		if c.Colors.DateColor == "" {
+			c.Colors.DateColor = string(themeColorCache["black"])
+		}
+		if c.Colors.DateBgColor == "" {
+			c.Colors.DateBgColor = string(themeColorCache["bright-blue"])
+		}
+		if c.Colors.PastDateColor == "" {
+			c.Colors.PastDateColor = string(themeColorCache["black"])
+		}
+		if c.Colors.PastDateBgColor == "" {
+			c.Colors.PastDateBgColor = string(themeColorCache["red"])
+		}
+		if c.Colors.TodayDateColor == "" {
+			c.Colors.TodayDateColor = string(themeColorCache["black"])
+		}
+		if c.Colors.TodayDateBgColor == "" {
+			c.Colors.TodayDateBgColor = string(themeColorCache["bright-yellow"])
+		}
+		if c.Colors.AssigneeColor == "" {
+			c.Colors.AssigneeColor = string(themeColorCache["bright-white"])
+		}
+		if c.Colors.AssigneeBgColor == "" {
+			c.Colors.AssigneeBgColor = string(themeColorCache["gray"])
+		}
+	} else {
+		if c.Colors.ProjectColor == "" {
+			c.Colors.ProjectColor = defaults.ProjectColor
+		}
+		if c.Colors.ActiveColor == "" {
+			c.Colors.ActiveColor = defaults.ActiveColor
+		}
+		if c.Colors.InProgressColor == "" {
+			c.Colors.InProgressColor = defaults.InProgressColor
+		}
+		if c.Colors.CompletedColor == "" {
+			c.Colors.CompletedColor = defaults.CompletedColor
+		}
+		if c.Colors.TaskColor == "" {
+			c.Colors.TaskColor = defaults.TaskColor
+		}
+		if c.Colors.CompletedTaskColor == "" {
+			c.Colors.CompletedTaskColor = defaults.CompletedTaskColor
+		}
+		if c.Colors.TagColor == "" {
+			c.Colors.TagColor = defaults.TagColor
+		}
+		if c.Colors.TagBgColor == "" {
+			c.Colors.TagBgColor = defaults.TagBgColor
+		}
+		if c.Colors.SpecialTagColor == "" {
+			c.Colors.SpecialTagColor = defaults.SpecialTagColor
+		}
+		if c.Colors.SpecialTagBgColor == "" {
+			c.Colors.SpecialTagBgColor = defaults.SpecialTagBgColor
+		}
+		if c.Colors.DateColor == "" {
+			c.Colors.DateColor = defaults.DateColor
+		}
+		if c.Colors.DateBgColor == "" {
+			c.Colors.DateBgColor = defaults.DateBgColor
+		}
+		if c.Colors.PastDateColor == "" {
+			c.Colors.PastDateColor = defaults.PastDateColor
+		}
+		if c.Colors.PastDateBgColor == "" {
+			c.Colors.PastDateBgColor = defaults.PastDateBgColor
+		}
+		if c.Colors.TodayDateColor == "" {
+			c.Colors.TodayDateColor = defaults.TodayDateColor
+		}
+		if c.Colors.TodayDateBgColor == "" {
+			c.Colors.TodayDateBgColor = defaults.TodayDateBgColor
+		}
+		if c.Colors.AssigneeColor == "" {
+			c.Colors.AssigneeColor = defaults.AssigneeColor
+		}
+		if c.Colors.AssigneeBgColor == "" {
+			c.Colors.AssigneeBgColor = defaults.AssigneeBgColor
+		}
 	}
 
-	// Apply defaults only if colors are not explicitly set
-	if c.Colors.ProjectColor == "" {
-		c.Colors.ProjectColor = defaults.ProjectColor
-	}
-	if c.Colors.ActiveColor == "" {
-		c.Colors.ActiveColor = defaults.ActiveColor
-	}
-	if c.Colors.InProgressColor == "" {
-		c.Colors.InProgressColor = defaults.InProgressColor
-	}
-	if c.Colors.CompletedColor == "" {
-		c.Colors.CompletedColor = defaults.CompletedColor
-	}
-	if c.Colors.TaskColor == "" {
-		c.Colors.TaskColor = defaults.TaskColor
-	}
-	if c.Colors.CompletedTaskColor == "" {
-		c.Colors.CompletedTaskColor = defaults.CompletedTaskColor
-	}
-	if c.Colors.TagColor == "" {
-		c.Colors.TagColor = defaults.TagColor
-	}
-	if c.Colors.TagBgColor == "" {
-		c.Colors.TagBgColor = defaults.TagBgColor
-	}
-	if c.Colors.SpecialTagColor == "" {
-		c.Colors.SpecialTagColor = defaults.SpecialTagColor
-	}
-	if c.Colors.SpecialTagBgColor == "" {
-		c.Colors.SpecialTagBgColor = defaults.SpecialTagBgColor
-	}
-	if c.Colors.DateColor == "" {
-		c.Colors.DateColor = defaults.DateColor
-	}
-	if c.Colors.DateBgColor == "" {
-		c.Colors.DateBgColor = defaults.DateBgColor
-	}
-	if c.Colors.PastDateColor == "" {
-		c.Colors.PastDateColor = defaults.PastDateColor
-	}
-	if c.Colors.PastDateBgColor == "" {
-		c.Colors.PastDateBgColor = defaults.PastDateBgColor
-	}
-	if c.Colors.TodayDateColor == "" {
-		c.Colors.TodayDateColor = defaults.TodayDateColor
-	}
-	if c.Colors.TodayDateBgColor == "" {
-		c.Colors.TodayDateBgColor = defaults.TodayDateBgColor
-	}
-	if c.Colors.AssigneeColor == "" {
-		c.Colors.AssigneeColor = defaults.AssigneeColor
-	}
-	if c.Colors.AssigneeBgColor == "" {
-		c.Colors.AssigneeBgColor = defaults.AssigneeBgColor
+}
+
+func loadTheme(themeName string) error {
+	theme, ok := lipglossthemes.Get(themeName)
+	if !ok {
+		return fmt.Errorf("theme not found")
 	}
 
-	// Resolve all color names to ANSI values
-	c.Colors.ProjectColor = resolveColorValue(c.Colors.ProjectColor)
-	c.Colors.ActiveColor = resolveColorValue(c.Colors.ActiveColor)
-	c.Colors.InProgressColor = resolveColorValue(c.Colors.InProgressColor)
-	c.Colors.CompletedColor = resolveColorValue(c.Colors.CompletedColor)
-	c.Colors.TaskColor = resolveColorValue(c.Colors.TaskColor)
-	c.Colors.CompletedTaskColor = resolveColorValue(c.Colors.CompletedTaskColor)
-	c.Colors.TagColor = resolveColorValue(c.Colors.TagColor)
-	c.Colors.TagBgColor = resolveColorValue(c.Colors.TagBgColor)
-	c.Colors.SpecialTagColor = resolveColorValue(c.Colors.SpecialTagColor)
-	c.Colors.SpecialTagBgColor = resolveColorValue(c.Colors.SpecialTagBgColor)
-	c.Colors.DateColor = resolveColorValue(c.Colors.DateColor)
-	c.Colors.DateBgColor = resolveColorValue(c.Colors.DateBgColor)
-	c.Colors.PastDateColor = resolveColorValue(c.Colors.PastDateColor)
-	c.Colors.PastDateBgColor = resolveColorValue(c.Colors.PastDateBgColor)
-	c.Colors.TodayDateColor = resolveColorValue(c.Colors.TodayDateColor)
-	c.Colors.TodayDateBgColor = resolveColorValue(c.Colors.TodayDateBgColor)
-	c.Colors.AssigneeColor = resolveColorValue(c.Colors.AssigneeColor)
-	c.Colors.AssigneeBgColor = resolveColorValue(c.Colors.AssigneeBgColor)
+	themeColorCache = map[string]lipgloss.Color{
+		"black":          theme.Black,
+		"red":            theme.Red,
+		"green":          theme.Green,
+		"yellow":         theme.Yellow,
+		"blue":           theme.Blue,
+		"magenta":        theme.Magenta,
+		"cyan":           theme.Cyan,
+		"white":          theme.White,
+		"bright-black":   theme.BrightBlack,
+		"gray":           theme.BrightBlack,
+		"bright-red":     theme.BrightRed,
+		"bright-green":   theme.BrightGreen,
+		"bright-yellow":  theme.BrightYellow,
+		"bright-blue":    theme.BrightBlue,
+		"bright-magenta": theme.BrightMagenta,
+		"bright-cyan":    theme.BrightCyan,
+		"bright-white":   theme.BrightWhite,
+	}
+
+	return nil
 }

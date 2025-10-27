@@ -11,7 +11,10 @@ func TestLoadConfigWithDirectories(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.toml")
 
-	configContent := `editor = "nvim"
+	configContent := `[general]
+editor = "nvim"
+
+[todo]
 structured = true
 
 [directories]
@@ -81,7 +84,8 @@ func TestEnvironmentVariablesPrecedence(t *testing.T) {
 	// Create a temporary config file
 	tmpDir := t.TempDir()
 
-	configContent := `editor = "vim"
+	configContent := `[general]
+editor = "vim"
 
 [directories]
 projects = "/config/projects"

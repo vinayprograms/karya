@@ -63,6 +63,7 @@ type Project struct {
 	Name     string
 	Path     string
 	HasNotes bool
+	HasTodos bool
 }
 
 type projectModel struct {
@@ -77,6 +78,7 @@ type projectModel struct {
 	columns       int
 	scrollOffset  int
 	launchProject string
+	cfg           *config.Config
 }
 
 func (m projectModel) Init() tea.Cmd {
@@ -193,7 +195,10 @@ func (m projectModel) View() string {
 	for _, prj := range m.projects {
 		contentWidth := len(prj.Name)
 		if prj.HasNotes {
-			contentWidth += 2 // space + emoji
+			contentWidth += 3
+		}
+		if prj.HasTodos {
+			contentWidth += 3
 		}
 		if contentWidth > maxWidth {
 			maxWidth = contentWidth
@@ -247,7 +252,12 @@ func (m projectModel) View() string {
 			if prj.HasNotes {
 				notesStyle := colors.grayStyle
 				content += " " + notesStyle.Render("📝")
-				displayWidth += 3 // space + emoji (2 wide)
+				displayWidth += 3
+			}
+			if prj.HasTodos {
+				todoStyle := colors.highlightStyle
+				content += " " + todoStyle.Render("☑️")
+				displayWidth += 3
 			}
 
 			// Pad to column width
@@ -902,7 +912,7 @@ func openEditorCmd(editor, filePath, searchTerm string) tea.Cmd {
 	})
 }
 
-func listProjects(prjDir string) ([]Project, error) {
+func listProjects(prjDir string, cfg *config.Config) ([]Project, error) {
 	entries, err := os.ReadDir(prjDir)
 	if err != nil {
 		return nil, err
@@ -917,10 +927,20 @@ func listProjects(prjDir string) ([]Project, error) {
 			if _, err := os.Stat(notesPath); err == nil {
 				hasNotes = true
 			}
+
+			hasTodos := false
+			if cfg != nil {
+				tasks, err := task.ListTasks(cfg, entry.Name(), false)
+				if err == nil && len(tasks) > 0 {
+					hasTodos = true
+				}
+			}
+
 			projects = append(projects, Project{
 				Name:     entry.Name(),
 				Path:     prjPath,
 				HasNotes: hasNotes,
+				HasTodos: hasTodos,
 			})
 		}
 	}
@@ -966,9 +986,9 @@ func getNotesDir(prjDir, prjName string) string {
 	return filepath.Join(prjDir, prjName, "notes")
 }
 
-func showProjectList(prjDir, editor string, verbose bool) {
+func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 	for {
-		projects, err := listProjects(prjDir)
+		projects, err := listProjects(prjDir, cfg)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -986,6 +1006,7 @@ func showProjectList(prjDir, editor string, verbose bool) {
 			selectedIndex: 0,
 			columns:       3,
 			scrollOffset:  0,
+			cfg:           cfg,
 		}
 
 		p := tea.NewProgram(m, tea.WithAltScreen())
@@ -1484,7 +1505,7 @@ func main() {
 	}
 
 	if len(args) == 0 {
-		showProjectList(prjDir, editor, verbose)
+		showProjectList(prjDir, editor, verbose, cfg)
 		return
 	}
 
