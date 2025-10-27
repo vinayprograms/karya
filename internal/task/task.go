@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 
@@ -62,6 +63,39 @@ func (t *Task) IsCompleted(c *config.Config) bool {
 		}
 	}
 	return false
+}
+
+// IsSomeday returns true if the task is a someday/maybe task
+func (t *Task) IsSomeday(c *config.Config) bool {
+	if c == nil {
+		return false
+	}
+	for _, kw := range c.Todo.Someday {
+		if t.Keyword == kw {
+			return true
+		}
+	}
+	return false
+}
+
+// Priority returns the sorting priority of the task
+// Lower numbers indicate higher priority
+// 1 = In Progress, 2 = Active, 3 = Someday, 4 = Completed
+func (t *Task) Priority(c *config.Config) int {
+	if t.IsInProgress(c) {
+		return 1
+	}
+	if t.IsActive(c) {
+		return 2
+	}
+	if t.IsSomeday(c) {
+		return 3
+	}
+	if t.IsCompleted(c) {
+		return 4
+	}
+	// Unknown status gets lowest priority
+	return 5
 }
 
 // FindFiles finds README.md files in project directories (structured mode)
@@ -253,6 +287,11 @@ func isValidKeyword(c *config.Config, keyword string) bool {
 			return true
 		}
 	}
+	for _, kw := range c.Todo.Someday {
+		if keyword == kw {
+			return true
+		}
+	}
 	return false
 }
 
@@ -324,6 +363,14 @@ func ListTasks(c *config.Config, project string, showCompleted bool) ([]*Task, e
 		return filtered, nil
 	}
 	return allTasks, nil
+}
+
+// SortByPriority sorts tasks by their priority order
+// Order: In Progress (1) -> Active (2) -> Someday (3) -> Completed (4)
+func SortByPriority(tasks []*Task, c *config.Config) {
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].Priority(c) < tasks[j].Priority(c)
+	})
 }
 
 // SummarizeProjects summarizes task counts per project

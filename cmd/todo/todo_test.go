@@ -2,62 +2,102 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/vinayprograms/karya/internal/config"
 	"github.com/vinayprograms/karya/internal/task"
 )
 
+func createTestConfig() *config.Config {
+	return &config.Config{
+		Todo: config.Todo{
+			Active: []string{"TODO", "TASK"},
+			InProgress: []string{"DOING", "WIP"},
+			Completed: []string{"DONE", "COMPLETED"},
+			Someday: []string{"SOMEDAY", "MAYBE"},
+		},
+	}
+}
+
 func TestTask_IsActive(t *testing.T) {
-	config := config.Config{}
+	cfg := createTestConfig()
 	tests := []struct {
 		keyword string
 		want    bool
 	}{
 		{"TODO", true},
 		{"DONE", false},
+		{"SOMEDAY", false},
 		{"INVALID", false},
 	}
 	for _, tt := range tests {
-		tk := task.ParseLine(&config, tt.keyword+": test", "proj", "zettel", "test.md")
+		tk := task.ParseLine(cfg, tt.keyword+": test", "proj", "zettel", "test.md")
 		if tk == nil {
 			if tt.want {
 				t.Errorf("Task.IsActive() = nil, want %v", tt.want)
 			}
 			continue
 		}
-		if got := tk.IsActive(&config); got != tt.want {
+		if got := tk.IsActive(cfg); got != tt.want {
 			t.Errorf("Task.IsActive() = %v, want %v", got, tt.want)
 		}
 	}
 }
 
 func TestTask_IsCompleted(t *testing.T) {
-	config := config.Config{}
+	cfg := createTestConfig()
 	tests := []struct {
 		keyword string
 		want    bool
 	}{
 		{"DONE", true},
 		{"TODO", false},
+		{"SOMEDAY", false},
 		{"INVALID", false},
 	}
 	for _, tt := range tests {
-		tk := task.ParseLine(&config, tt.keyword+": test", "proj", "zettel", "test.md")
+		tk := task.ParseLine(cfg, tt.keyword+": test", "proj", "zettel", "test.md")
 		if tk == nil {
 			if tt.want {
 				t.Errorf("Task.IsCompleted() = nil, want %v", tt.want)
 			}
 			continue
 		}
-		if got := tk.IsCompleted(&config); got != tt.want {
+		if got := tk.IsCompleted(cfg); got != tt.want {
 			t.Errorf("Task.IsCompleted() = %v, want %v", got, tt.want)
 		}
 	}
 }
 
+func TestTask_IsSomeday(t *testing.T) {
+	cfg := createTestConfig()
+	tests := []struct {
+		keyword string
+		want    bool
+	}{
+		{"SOMEDAY", true},
+		{"MAYBE", true},
+		{"TODO", false},
+		{"DONE", false},
+		{"INVALID", false},
+	}
+	for _, tt := range tests {
+		tk := task.ParseLine(cfg, tt.keyword+": test", "proj", "zettel", "test.md")
+		if tk == nil {
+			if tt.want {
+				t.Errorf("Task.IsSomeday() = nil, want %v", tt.want)
+			}
+			continue
+		}
+		if got := tk.IsSomeday(cfg); got != tt.want {
+			t.Errorf("Task.IsSomeday() = %v, want %v", got, tt.want)
+		}
+	}
+}
+
 func TestParseLine(t *testing.T) {
-	config := config.Config{}
+	cfg := createTestConfig()
 	tests := []struct {
 		line    string
 		project string
@@ -106,9 +146,22 @@ func TestParseLine(t *testing.T) {
 				Zettel:  "z",
 			},
 		},
+		{
+			line:    "SOMEDAY: Learn Go deeply #learning @2024-06-01",
+			project: "personal",
+			zettel:  "20240201000000",
+			want: &task.Task{
+				Keyword:     "SOMEDAY",
+				Title:       "Learn Go deeply",
+				Tag:         "learning",
+				ScheduledAt: "2024-06-01",
+				Project:     "personal",
+				Zettel:      "20240201000000",
+			},
+		},
 	}
 	for _, tt := range tests {
-		got := task.ParseLine(&config, tt.line, tt.project, tt.zettel, "test.md")
+		got := task.ParseLine(cfg, tt.line, tt.project, tt.zettel, "test.md")
 		if (got == nil && tt.want != nil) || (got != nil && tt.want == nil) {
 			t.Errorf("ParseLine(%q, %q, %q, %q) = %v, want %v", tt.line, tt.project, tt.zettel, "test.md", got, tt.want)
 			continue
@@ -122,34 +175,55 @@ func TestParseLine(t *testing.T) {
 }
 
 func TestProcessFile(t *testing.T) {
-	config := config.Config{}
+	cfg := createTestConfig()
+	
+	// Create temp directory structure
+	tmpDir := t.TempDir()
+	projectDir := filepath.Join(tmpDir, "testproject", "notes", "20240101000000")
+	err := os.MkdirAll(projectDir, 0755)
+	if err != nil {
+		t.Fatal(err)
+	}
+	
+	// Set the projects directory in config
+	cfg.Directories.Projects = tmpDir
+	cfg.Todo.Structured = true
+	
 	content := `TODO: Write code #urgent @2023-10-01 >> john
 DONE: Completed task
+SOMEDAY: Learn new language
 INVALID: Skip this`
-	tempFile, err := os.CreateTemp("", "README.md")
+	
+	filePath := filepath.Join(projectDir, "README.md")
+	err = os.WriteFile(filePath, []byte(content), 0644)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(tempFile.Name())
-	tempFile.WriteString(content)
-	tempFile.Close()
 
-	tasks, err := task.ProcessFile(&config, tempFile.Name())
+	tasks, err := task.ProcessFile(cfg, filePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tasks) != 2 {
-		t.Errorf("Expected 2 tasks, got %d", len(tasks))
+	if len(tasks) != 3 {
+		t.Errorf("Expected 3 tasks, got %d", len(tasks))
 	}
-	if tasks[0].Keyword != "TODO" || tasks[1].Keyword != "DONE" {
-		t.Errorf("Unexpected tasks: %+v %+v", tasks[0], tasks[1])
+	
+	expectedKeywords := []string{"TODO", "DONE", "SOMEDAY"}
+	for i, expectedKeyword := range expectedKeywords {
+		if i >= len(tasks) || tasks[i].Keyword != expectedKeyword {
+			t.Errorf("Expected task %d to have keyword %s, got %v", i, expectedKeyword, tasks[i])
+		}
 	}
 }
 
 func TestListTasks(t *testing.T) {
-	// Mock config with non-existent dir
-	config := &config.Config{Directories: config.Directories{Projects: "/nonexistent"}}
-	tasks, err := task.ListTasks(config, "", true)
+	cfg := createTestConfig()
+	// Create empty temp directory
+	tmpDir := t.TempDir()
+	cfg.Directories.Projects = tmpDir
+	cfg.Todo.Structured = true
+	
+	tasks, err := task.ListTasks(cfg, "", true)
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
 	}

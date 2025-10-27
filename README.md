@@ -81,6 +81,9 @@ inprogress = [
 completed = [
     "ARCHIVED", "CANCELED", "DELETED", "DONE", "COMPLETED", "CLOSED"
 ]
+someday = [
+    "SOMEDAY", "MAYBE", "LATER", "WISHLIST"
+]
 
 # Customize TUI colors (optional)
 [colors]
@@ -92,6 +95,7 @@ tag-bg = "black"
 # active = "yellow"
 # inprogress = "cyan"
 # completed = "gray"
+# someday = "7"
 # date = "yellow"
 # past-date = "red"
 # today-bg = "yellow"
