@@ -190,23 +190,23 @@ func (m projectModel) View() string {
 	output.WriteString(titleStyle.Render("Projects"))
 	output.WriteString("\n\n")
 
-	// Find max width needed across ALL projects
-	maxWidth := 0
+	// Find max width needed for project names
+	maxNameWidth := 0
 	for _, prj := range m.projects {
-		contentWidth := len(prj.Name)
-		if prj.HasNotes {
-			contentWidth += 3
-		}
-		if prj.HasTodos {
-			contentWidth += 3
-		}
-		if contentWidth > maxWidth {
-			maxWidth = contentWidth
+		if len(prj.Name) > maxNameWidth {
+			maxNameWidth = len(prj.Name)
 		}
 	}
 
-	// Add padding for spacing between columns
-	columnWidth := maxWidth + 3
+	// Calculate column width with fixed icon spacing
+	iconWidth := 0
+	if m.projects[0].HasNotes {
+		iconWidth += 3
+	}
+	if m.projects[0].HasTodos {
+		iconWidth += 3
+	}
+	columnWidth := maxNameWidth + iconWidth + 6 // 2 for selector + 3 for padding + 1 for spacing
 
 	visibleRows := m.height - 6
 	if visibleRows < 1 {
@@ -225,44 +225,51 @@ func (m projectModel) View() string {
 		for col := 0; col < m.columns; col++ {
 			idx := row*m.columns + col
 			if idx >= len(m.projects) {
+				// Fill empty space to maintain alignment
+				if col > 0 {
+					output.WriteString(strings.Repeat(" ", columnWidth))
+				}
 				break
 			}
 
 			prj := m.projects[idx]
 			isSelected := idx == m.selectedIndex
 
-			// Build the content
-			var content string
-			var displayWidth int
+			// Build the content with fixed width
+			var namePart string
 			if isSelected {
-				// Selected: solid block cursor + project name
 				cursorStyle := colors.selectorStyle
-				content = cursorStyle.Render("█") + " "
-
 				highlightStyle := colors.highlightStyle
-				content += highlightStyle.Render(prj.Name)
-				displayWidth = 2 + len(prj.Name) // block + space + name
+				namePart = cursorStyle.Render("█") + " " + highlightStyle.Render(prj.Name)
 			} else {
-				// Normal: space + project name
 				projectStyle := colors.projectStyle
-				content = "  " + projectStyle.Render(prj.Name)
-				displayWidth = 2 + len(prj.Name) // 2 spaces + name
+				namePart = "  " + projectStyle.Render(prj.Name)
 			}
 
+			// Pad name to consistent width
+			namePadding := maxNameWidth - len(prj.Name)
+			namePart += strings.Repeat(" ", namePadding)
+
+			// Add icons with fixed positioning
+			var iconPart string
 			if prj.HasNotes {
 				notesStyle := colors.grayStyle
-				content += " " + notesStyle.Render("📝")
-				displayWidth += 3
+				iconPart += " " + notesStyle.Render("📝")
+			} else {
+				iconPart += "  " // Space for missing note icon
 			}
 			if prj.HasTodos {
 				todoStyle := colors.highlightStyle
-				content += " " + todoStyle.Render("☑️")
-				displayWidth += 3
+				iconPart += " " + todoStyle.Render("☑️")
+			} else {
+				iconPart += "  " // Space for missing todo icon
 			}
 
-			// Pad to column width
-			if displayWidth < columnWidth {
-				content += strings.Repeat(" ", columnWidth-displayWidth)
+			// Combine parts and pad to column width
+			content := namePart + iconPart
+			contentWidth := lipgloss.Width(content)
+			if contentWidth < columnWidth {
+				content += strings.Repeat(" ", columnWidth-contentWidth)
 			}
 
 			output.WriteString(content)
