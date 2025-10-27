@@ -29,6 +29,7 @@ type ColorScheme struct {
 	activeColor        lipgloss.Style
 	inProgressColor    lipgloss.Style
 	completedColor     lipgloss.Style
+	somedayColor       lipgloss.Style
 	taskColor          lipgloss.Style
 	completedTaskColor lipgloss.Style
 	specialTagColor    lipgloss.Style
@@ -49,6 +50,7 @@ func InitializeColors(cfg *config.Config) {
 		activeColor:        lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ActiveColor)),
 		inProgressColor:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.InProgressColor)),
 		completedColor:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CompletedColor)),
+		somedayColor:       lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.SomedayColor)),
 		taskColor:          lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TaskColor)),
 		completedTaskColor: lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CompletedTaskColor)),
 		tagColor:           lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TagColor)).Background(lipgloss.Color(cfg.Colors.TagBgColor)),
@@ -94,6 +96,9 @@ func (i taskItem) renderWithSelection(isSelected bool) string {
 		titleStyle = colors.taskColor
 	} else if i.task.IsInProgress(i.config) {
 		parts = append(parts, colors.inProgressColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
+		titleStyle = colors.taskColor
+	} else if i.task.IsSomeday(i.config) {
+		parts = append(parts, colors.somedayColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
 		titleStyle = colors.taskColor
 	} else {
 		parts = append(parts, colors.completedColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
@@ -438,27 +443,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		tasks, err := task.ListTasks(m.config, m.project, m.config.Todo.ShowCompleted)
 		if err == nil {
 			m.tasks = tasks
-			// Sort tasks: by priority first, then by project name
-			sort.Slice(m.tasks, func(i, j int) bool {
-				getPriority := func(t *task.Task) int {
-					if t.IsActive(m.config) {
-						return 0
-					} else if t.IsInProgress(m.config) {
-						return 1
-					}
-					return 2
+			// Sort tasks by priority: InProgress -> Active -> Someday -> Completed
+			task.SortByPriority(m.tasks, m.config)
+			// Secondary sort by project name within same priority
+			sort.SliceStable(m.tasks, func(i, j int) bool {
+				if m.tasks[i].Priority(m.config) == m.tasks[j].Priority(m.config) {
+					return m.tasks[i].Project < m.tasks[j].Project
 				}
-
-				priorityI := getPriority(m.tasks[i])
-				priorityJ := getPriority(m.tasks[j])
-
-				// First sort by priority
-				if priorityI != priorityJ {
-					return priorityI < priorityJ
-				}
-
-				// Within same priority, sort by project name
-				return m.tasks[i].Project < m.tasks[j].Project
+				return false
 			})
 			m.projectColWidth = calculateProjectColWidth(m.tasks)
 			m.keywordColWidth = calculateKeywordColWidth(m.tasks)
@@ -488,27 +480,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		if msg.err == nil {
 			m.tasks = msg.tasks
-			// Sort tasks: by priority first, then by project name
-			sort.Slice(m.tasks, func(i, j int) bool {
-				getPriority := func(t *task.Task) int {
-					if t.IsActive(m.config) {
-						return 0
-					} else if t.IsInProgress(m.config) {
-						return 1
-					}
-					return 2
+			// Sort tasks by priority: InProgress -> Active -> Someday -> Completed
+			task.SortByPriority(m.tasks, m.config)
+			// Secondary sort by project name within same priority
+			sort.SliceStable(m.tasks, func(i, j int) bool {
+				if m.tasks[i].Priority(m.config) == m.tasks[j].Priority(m.config) {
+					return m.tasks[i].Project < m.tasks[j].Project
 				}
-
-				priorityI := getPriority(m.tasks[i])
-				priorityJ := getPriority(m.tasks[j])
-
-				// First sort by priority
-				if priorityI != priorityJ {
-					return priorityI < priorityJ
-				}
-
-				// Within same priority, sort by project name
-				return m.tasks[i].Project < m.tasks[j].Project
+				return false
 			})
 
 			m.projectColWidth = calculateProjectColWidth(m.tasks)
@@ -535,27 +514,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.tasks = tasks
 
-		// Sort tasks: by priority first, then by project name
-		sort.Slice(m.tasks, func(i, j int) bool {
-			getPriority := func(t *task.Task) int {
-				if t.IsActive(m.config) {
-					return 0
-				} else if t.IsInProgress(m.config) {
-					return 1
-				}
-				return 2
+		// Sort tasks by priority: InProgress -> Active -> Someday -> Completed
+		task.SortByPriority(m.tasks, m.config)
+		// Secondary sort by project name within same priority
+		sort.SliceStable(m.tasks, func(i, j int) bool {
+			if m.tasks[i].Priority(m.config) == m.tasks[j].Priority(m.config) {
+				return m.tasks[i].Project < m.tasks[j].Project
 			}
-
-			priorityI := getPriority(m.tasks[i])
-			priorityJ := getPriority(m.tasks[j])
-
-			// First sort by priority
-			if priorityI != priorityJ {
-				return priorityI < priorityJ
-			}
-
-			// Within same priority, sort by project name
-			return m.tasks[i].Project < m.tasks[j].Project
+			return false
 		})
 
 		m.projectColWidth = calculateProjectColWidth(m.tasks)
@@ -891,24 +857,14 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		sort.Slice(tasks, func(i, j int) bool {
-			getPriority := func(t *task.Task) int {
-				if t.IsActive(config) {
-					return 0
-				} else if t.IsInProgress(config) {
-					return 1
-				}
-				return 2
+		// Sort tasks by priority: InProgress -> Active -> Someday -> Completed
+		task.SortByPriority(tasks, config)
+		// Secondary sort by project name within same priority
+		sort.SliceStable(tasks, func(i, j int) bool {
+			if tasks[i].Priority(config) == tasks[j].Priority(config) {
+				return tasks[i].Project < tasks[j].Project
 			}
-
-			priorityI := getPriority(tasks[i])
-			priorityJ := getPriority(tasks[j])
-
-			if priorityI != priorityJ {
-				return priorityI < priorityJ
-			}
-
-			return tasks[i].Project < tasks[j].Project
+			return false
 		})
 		printTasksPlain(config, tasks)
 	case "projects":
@@ -1033,29 +989,14 @@ func showInteractiveTUI(config *config.Config, project string) {
 		log.Printf("Warning: Could not create file watcher: %v", err)
 	}
 
-	// Sort tasks: pending first, in-progress second, completed last
-	// Within each group, sort by project name
-	sort.Slice(tasks, func(i, j int) bool {
-		// Assign priority: pending=0, in-progress=1, completed=2
-		getPriority := func(t *task.Task) int {
-			if t.IsActive(config) {
-				return 0
-			} else if t.IsInProgress(config) {
-				return 1
-			}
-			return 2
+	// Sort tasks by priority: InProgress -> Active -> Someday -> Completed
+	task.SortByPriority(tasks, config)
+	// Secondary sort by project name within same priority
+	sort.SliceStable(tasks, func(i, j int) bool {
+		if tasks[i].Priority(config) == tasks[j].Priority(config) {
+			return tasks[i].Project < tasks[j].Project
 		}
-
-		priorityI := getPriority(tasks[i])
-		priorityJ := getPriority(tasks[j])
-
-		// First sort by priority
-		if priorityI != priorityJ {
-			return priorityI < priorityJ
-		}
-
-		// Within same priority, sort by project name
-		return tasks[i].Project < tasks[j].Project
+		return false
 	})
 
 	projectColWidth := calculateProjectColWidth(tasks)

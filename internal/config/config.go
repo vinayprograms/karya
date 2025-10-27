@@ -57,6 +57,7 @@ type ColorScheme struct {
 	ActiveColor        string `toml:"active"`
 	InProgressColor    string `toml:"inprogress"`
 	CompletedColor     string `toml:"completed"`
+	SomedayColor       string `toml:"someday"`
 	TaskColor          string `toml:"description"`
 	CompletedTaskColor string `toml:"completed-description"`
 	TagColor           string `toml:"tag"`
@@ -85,6 +86,7 @@ type Todo struct {
 	Active        []string `toml:"active"`
 	InProgress    []string `toml:"inprogress"`
 	Completed     []string `toml:"completed"`
+	Someday       []string `toml:"someday"`
 	SpecialTags   []string `toml:"special-tags"`
 }
 type GeneralConfig struct {
@@ -173,6 +175,11 @@ func Load() (*Config, error) {
 			"ARCHIVED", "CANCELED", "DELETED", "DONE", "COMPLETED", "CLOSED",
 		}
 	}
+	if len(cfg.Todo.Someday) == 0 {
+		cfg.Todo.Someday = []string{
+			"SOMEDAY", "MAYBE", "LATER", "WISHLIST",
+		}
+	}
 
 	// Initialize colors with defaults
 	cfg.initializeColors()
@@ -182,6 +189,7 @@ func Load() (*Config, error) {
 	cfg.Colors.ActiveColor = resolveColorValue(cfg.Colors.ActiveColor)
 	cfg.Colors.InProgressColor = resolveColorValue(cfg.Colors.InProgressColor)
 	cfg.Colors.CompletedColor = resolveColorValue(cfg.Colors.CompletedColor)
+	cfg.Colors.SomedayColor = resolveColorValue(cfg.Colors.SomedayColor)
 	cfg.Colors.TaskColor = resolveColorValue(cfg.Colors.TaskColor)
 	cfg.Colors.CompletedTaskColor = resolveColorValue(cfg.Colors.CompletedTaskColor)
 	cfg.Colors.TagColor = resolveColorValue(cfg.Colors.TagColor)
@@ -235,6 +243,9 @@ func (c *Config) initializeColors() {
 		}
 		if c.Colors.CompletedColor == "" {
 			c.Colors.CompletedColor = string(themeColorCache["gray"])
+		}
+		if c.Colors.SomedayColor == "" {
+			c.Colors.SomedayColor = string(themeColorCache["white"])
 		}
 		if c.Colors.TaskColor == "" {
 			c.Colors.TaskColor = string(themeColorCache["white"])
@@ -292,6 +303,9 @@ func (c *Config) initializeColors() {
 		}
 		if c.Colors.CompletedColor == "" {
 			c.Colors.CompletedColor = "8"  // ANSI bright black (gray)
+		}
+		if c.Colors.SomedayColor == "" {
+			c.Colors.SomedayColor = "7"  // ANSI white - neutral for tasks not yet under consideration
 		}
 		if c.Colors.TaskColor == "" {
 			c.Colors.TaskColor = ""  // Empty = terminal default foreground

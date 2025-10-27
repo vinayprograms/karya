@@ -50,6 +50,10 @@
 # completed = [
 #     "ARCHIVED", "CANCELED", "DELETED", "DONE", "COMPLETED", "CLOSED"
 # ]
+#
+# someday = [
+#     "SOMEDAY", "MAYBE", "LATER", "WISHLIST"
+# ]
 
 # -----------------------------------------------
 # Color customization for TUI
@@ -74,6 +78,7 @@
 # active            = "yellow"                # Color name example
 # inprogress        = "6"                     # ANSI number example (cyan)
 # completed         = "gray"                  # Alias for bright-black
+# someday           = "7"                     # Someday/maybe tasks (neutral, not under consideration)
 # description       = "#E8F4F8"               # Hex colors are supported
 # completed-description = "gray"              # Completed task text (faded)
 # tag               = "bright-white"         # Tag badge text
