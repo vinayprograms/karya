@@ -222,28 +222,8 @@ func (c *Config) Validate() error {
 }
 
 func (c *Config) initializeColors() {
-	// Default colors when no theme is set
-	defaults := ColorScheme{
-		ProjectColor:       "2",  // Green
-		ActiveColor:        "3",  // Yellow
-		InProgressColor:    "6",  // Cyan
-		CompletedColor:     "8",  // Bright black (faded)
-		TaskColor:          "15", // White
-		CompletedTaskColor: "8",  // Bright black (faded)
-		TagColor:           "0",  // Black text
-		TagBgColor:         "14", // Light blue background
-		SpecialTagColor:    "15", // White text
-		SpecialTagBgColor:  "5",  // Magenta background
-		DateColor:          "0",  // Black text
-		DateBgColor:        "12", // Light blue background
-		PastDateColor:      "0",  // Black text
-		PastDateBgColor:    "1",  // Red background
-		TodayDateColor:     "0",  // Black text
-		TodayDateBgColor:   "11", // Yellow background
-		AssigneeColor:      "15", // White text
-		AssigneeBgColor:    "8",  // Light gray background
-	}
-
+	// When no theme is set and no custom colors specified,
+	// leave colors empty so terminal's native ANSI colors are used
 	if themeColorCache != nil {
 		if c.Colors.ProjectColor == "" {
 			c.Colors.ProjectColor = string(themeColorCache["green"])
@@ -300,59 +280,61 @@ func (c *Config) initializeColors() {
 			c.Colors.AssigneeBgColor = string(themeColorCache["gray"])
 		}
 	} else {
+		// No theme set - use terminal's native ANSI colors by setting color names only
+		// This allows the terminal emulator to use its own color scheme (light/dark)
 		if c.Colors.ProjectColor == "" {
-			c.Colors.ProjectColor = defaults.ProjectColor
+			c.Colors.ProjectColor = "2"  // ANSI green - terminal decides actual color
 		}
 		if c.Colors.ActiveColor == "" {
-			c.Colors.ActiveColor = defaults.ActiveColor
+			c.Colors.ActiveColor = "3"  // ANSI yellow
 		}
 		if c.Colors.InProgressColor == "" {
-			c.Colors.InProgressColor = defaults.InProgressColor
+			c.Colors.InProgressColor = "6"  // ANSI cyan
 		}
 		if c.Colors.CompletedColor == "" {
-			c.Colors.CompletedColor = defaults.CompletedColor
+			c.Colors.CompletedColor = "8"  // ANSI bright black (gray)
 		}
 		if c.Colors.TaskColor == "" {
-			c.Colors.TaskColor = defaults.TaskColor
+			c.Colors.TaskColor = ""  // Empty = terminal default foreground
 		}
 		if c.Colors.CompletedTaskColor == "" {
-			c.Colors.CompletedTaskColor = defaults.CompletedTaskColor
+			c.Colors.CompletedTaskColor = "8"  // ANSI bright black (gray)
 		}
 		if c.Colors.TagColor == "" {
-			c.Colors.TagColor = defaults.TagColor
+			c.Colors.TagColor = ""  // Empty = terminal default foreground
 		}
 		if c.Colors.TagBgColor == "" {
-			c.Colors.TagBgColor = defaults.TagBgColor
+			c.Colors.TagBgColor = "6"  // ANSI cyan
 		}
 		if c.Colors.SpecialTagColor == "" {
-			c.Colors.SpecialTagColor = defaults.SpecialTagColor
+			c.Colors.SpecialTagColor = ""  // Empty = terminal default foreground
 		}
 		if c.Colors.SpecialTagBgColor == "" {
-			c.Colors.SpecialTagBgColor = defaults.SpecialTagBgColor
+			c.Colors.SpecialTagBgColor = "5"  // ANSI magenta
 		}
 		if c.Colors.DateColor == "" {
-			c.Colors.DateColor = defaults.DateColor
+			c.Colors.DateColor = ""  // Empty = terminal default foreground
 		}
 		if c.Colors.DateBgColor == "" {
-			c.Colors.DateBgColor = defaults.DateBgColor
+			c.Colors.DateBgColor = "4"  // ANSI blue
 		}
 		if c.Colors.PastDateColor == "" {
-			c.Colors.PastDateColor = defaults.PastDateColor
+			c.Colors.PastDateColor = ""  // Empty = terminal default foreground
 		}
 		if c.Colors.PastDateBgColor == "" {
-			c.Colors.PastDateBgColor = defaults.PastDateBgColor
+			c.Colors.PastDateBgColor = "1"  // ANSI red
 		}
 		if c.Colors.TodayDateColor == "" {
-			c.Colors.TodayDateColor = defaults.TodayDateColor
+			c.Colors.TodayDateColor = "0"  // ANSI black
 		}
 		if c.Colors.TodayDateBgColor == "" {
-			c.Colors.TodayDateBgColor = defaults.TodayDateBgColor
+			c.Colors.TodayDateBgColor = "3"  // ANSI yellow
 		}
 		if c.Colors.AssigneeColor == "" {
-			c.Colors.AssigneeColor = defaults.AssigneeColor
+			c.Colors.AssigneeColor = ""  // Empty = terminal default foreground
 		}
 		if c.Colors.AssigneeBgColor == "" {
-			c.Colors.AssigneeBgColor = defaults.AssigneeBgColor
+			c.Colors.AssigneeBgColor = "8"  // ANSI bright black (gray)
 		}
 	}
 
