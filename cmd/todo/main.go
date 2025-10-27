@@ -134,11 +134,11 @@ func (i taskItem) renderWithSelection(isSelected bool) string {
 	}
 	// Display date types with prefixes
 	if i.task.ScheduledAt != "" {
-		dateStyle := getDateStyle(i.task.ScheduledAt)
+		dateStyle := getDateStyle(i.task.ScheduledAt, false)
 		parts = append(parts, dateStyle.Render(fmt.Sprintf(" S:%s ", i.task.ScheduledAt)))
 	}
 	if i.task.DueAt != "" {
-		dateStyle := getDateStyle(i.task.DueAt)
+		dateStyle := getDateStyle(i.task.DueAt, true)
 		parts = append(parts, dateStyle.Render(fmt.Sprintf(" D:%s ", i.task.DueAt)))
 	}
 	if i.task.Assignee != "" {
@@ -199,11 +199,11 @@ func (i taskItem) Title() string {
 	}
 	// Display date types with prefixes
 	if i.task.ScheduledAt != "" {
-		dateStyle := getDateStyle(i.task.ScheduledAt)
+		dateStyle := getDateStyle(i.task.ScheduledAt, false)
 		parts = append(parts, dateStyle.Render(fmt.Sprintf(" S:%s ", i.task.ScheduledAt)))
 	}
 	if i.task.DueAt != "" {
-		dateStyle := getDateStyle(i.task.DueAt)
+		dateStyle := getDateStyle(i.task.DueAt, true)
 		parts = append(parts, dateStyle.Render(fmt.Sprintf(" D:%s ", i.task.DueAt)))
 	}
 	if i.task.Assignee != "" {
@@ -215,7 +215,7 @@ func (i taskItem) Title() string {
 
 func (i taskItem) Description() string { return "" }
 
-func getDateStyle(dateStr string) lipgloss.Style {
+func getDateStyle(dateStr string, isDeadline bool) lipgloss.Style {
 	if dateStr == "" {
 		return colors.dateColor
 	}
@@ -252,6 +252,14 @@ func getDateStyle(dateStr string) lipgloss.Style {
 		return colors.pastDateColor
 	} else if taskDate.Equal(today) {
 		return colors.todayDateColor
+	} else if taskDate.After(today) {
+		// For deadlines, apply today's color if within 7 days
+		if isDeadline {
+			sevenDaysFromNow := today.AddDate(0, 0, 7)
+			if taskDate.Before(sevenDaysFromNow) || taskDate.Equal(sevenDaysFromNow) {
+				return colors.todayDateColor
+			}
+		}
 	}
 	return colors.dateColor
 }
