@@ -280,6 +280,14 @@ func (d taskDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 	fmt.Fprint(w, content)
 }
 
+type noResultsItem struct{}
+
+func (i noResultsItem) FilterValue() string { return "" }
+
+func (i noResultsItem) Title() string { return "No results found" }
+
+func (i noResultsItem) Description() string { return "" }
+
 type model struct {
 	list            list.Model
 	tasks           []*task.Task
@@ -295,6 +303,7 @@ type model struct {
 	allItems        []list.Item
 	structuredMode  bool
 	loading         bool
+	searchTerm      string  // Track search term for editor highlighting
 }
 
 func (m model) Init() tea.Cmd {
@@ -413,6 +422,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+			// Start fulltext search or edit existing fulltext search
+			if msg.String() == "*" {
+				m.filtering = true
+				// If we're already in fulltext search mode, keep the existing search term for editing
+				if !strings.HasPrefix(m.customFilter, "*") {
+					// Not in fulltext search mode, start fresh
+					m.customFilter = "*"
+				}
+				// If we're already in fulltext search mode, keep m.customFilter as is for editing
+				return m, nil
+			}
+
 			// Switch to structured mode
 			if msg.String() == "s" {
 				if !m.structuredMode {
@@ -441,7 +462,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if !m.filtering {
 					if i, ok := m.list.SelectedItem().(taskItem); ok {
 						m.savedFilter = m.customFilter
-						return m, openEditorCmd(m.config, i.task)
+						return m, openEditorCmd(m.config, i.task, m.searchTerm)
 					}
 				}
 			}
@@ -563,7 +584,47 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *model) applyCustomFilter() {
 	if m.customFilter == "" {
 		m.list.SetItems(m.allItems)
+		m.searchTerm = ""  // Clear search term
 		return
+	}
+
+	// Check if this is a fulltext search (starts with "*")
+	if strings.HasPrefix(m.customFilter, "*") {
+		// Extract search term (everything after "*")
+		searchTerm := strings.TrimSpace(m.customFilter[1:])
+		m.searchTerm = searchTerm  // Store search term for editor
+		if searchTerm == "" {
+			m.list.SetItems(m.allItems)
+			return
+		}
+
+		// Perform fulltext search across all task files
+		results, err := task.SearchTasks(m.config, m.project, searchTerm)
+		if err != nil {
+			// On error, show all items
+			m.list.SetItems(m.allItems)
+			return
+		}
+
+		// Convert search results to task items for display
+		var searchResultItems []list.Item
+		for _, result := range results {
+			// Create a pseudo-task to display the search result
+			pseudoTask := &task.Task{
+				Keyword:  "",  // Leave keyword empty
+				Title:    result.Line,  // Don't include project name in brackets
+				Project:  result.Project,
+				Zettel:   result.ZettelID,
+				FilePath: result.Path,
+			}
+			item := NewTaskItem(m.config, pseudoTask, m.projectColWidth, m.keywordColWidth, m.config.GeneralConfig.Verbose)
+			searchResultItems = append(searchResultItems, item)
+		}
+
+		m.list.SetItems(searchResultItems)
+		return
+	} else {
+		m.searchTerm = ""  // Clear search term for non-fulltext search
 	}
 
 	// Extract tasks from all items
@@ -589,6 +650,11 @@ func (m *model) applyCustomFilter() {
 	}
 
 	m.list.SetItems(filteredItems)
+
+	// If no items match the filter, show a message
+	if len(filteredItems) == 0 {
+		m.list.SetItems([]list.Item{list.Item(&noResultsItem{})})
+	}
 }
 
 func (m model) View() string {
@@ -636,9 +702,19 @@ func (m model) View() string {
 	if m.filtering || m.customFilter != "" {
 		var filterText string
 		if m.filtering {
-			filterText = fmt.Sprintf("Filter: %s▓", m.customFilter) // Show cursor when actively typing
+			if strings.HasPrefix(m.customFilter, "*") {
+				searchTerm := strings.TrimSpace(m.customFilter[1:])
+				filterText = fmt.Sprintf("Fulltext search: %s▓", searchTerm)
+			} else {
+				filterText = fmt.Sprintf("Filter: %s▓", m.customFilter) // Show cursor when actively typing
+			}
 		} else if m.customFilter != "" {
-			filterText = fmt.Sprintf("Filter: %s", m.customFilter)
+			if strings.HasPrefix(m.customFilter, "*") {
+				searchTerm := strings.TrimSpace(m.customFilter[1:])
+				filterText = fmt.Sprintf("Fulltext search: %s", searchTerm)
+			} else {
+				filterText = fmt.Sprintf("Filter: %s", m.customFilter)
+			}
 		}
 
 		filterInfo := lipgloss.NewStyle().
@@ -667,7 +743,7 @@ func loadTasksCmd(cfg *config.Config, project string) tea.Cmd {
 	}
 }
 
-func openEditorCmd(cfg *config.Config, t *task.Task) tea.Cmd {
+func openEditorCmd(cfg *config.Config, t *task.Task, searchTerm string) tea.Cmd {
 	var filePath string
 	if cfg.Todo.Structured {
 		// Structured mode: construct path from project/zettel
@@ -703,26 +779,42 @@ func openEditorCmd(cfg *config.Config, t *task.Task) tea.Cmd {
 	editorCmd := editorParts[0]
 	editorArgs := editorParts[1:]
 
-	// Get the base name of the editor to determine line number syntax
+	// Get the base name of the editor to determine syntax
 	editorBase := filepath.Base(editorCmd)
 
-	var args []string
-	args = append(args, editorArgs...) // Add any existing args from EDITOR
-
-	if strings.Contains(editorBase, "vim") || strings.Contains(editorBase, "nvim") {
-		args = append(args, fmt.Sprintf("+%d", lineNum), filePath)
-	} else if strings.Contains(editorBase, "emacs") {
-		args = append(args, fmt.Sprintf("+%d", lineNum), filePath)
-	} else if strings.Contains(editorBase, "nano") {
-		args = append(args, fmt.Sprintf("+%d", lineNum), filePath)
-	} else if strings.Contains(editorBase, "code") {
-		args = append(args, "-g", fmt.Sprintf("%s:%d", filePath, lineNum))
-	} else {
-		// Unknown editor, just pass the file
-		args = append(args, filePath)
+	// Handle search term if provided (similar to note command)
+	if searchTerm != "" {
+		switch editorBase {
+		case "vim", "nvim", "vi":
+			editorArgs = append(editorArgs, fmt.Sprintf("+/%s", searchTerm))
+		case "emacs":
+			editorArgs = append(editorArgs, "--eval", fmt.Sprintf("(progn (goto-char (point-min)) (search-forward \"%s\" nil t))", searchTerm))
+		}
 	}
 
-	c := exec.Command(editorCmd, args...)
+	// Handle line number navigation
+	if strings.Contains(editorBase, "vim") || strings.Contains(editorBase, "nvim") {
+		if searchTerm == "" {
+			// Only add line number if no search term
+			editorArgs = append(editorArgs, fmt.Sprintf("+%d", lineNum))
+		}
+		editorArgs = append(editorArgs, filePath)
+	} else if strings.Contains(editorBase, "emacs") {
+		if searchTerm == "" {
+			// Only add line number if no search term
+			editorArgs = append(editorArgs, fmt.Sprintf("+%d", lineNum))
+		}
+		editorArgs = append(editorArgs, filePath)
+	} else if strings.Contains(editorBase, "nano") {
+		editorArgs = append(editorArgs, fmt.Sprintf("+%d", lineNum), filePath)
+	} else if strings.Contains(editorBase, "code") {
+		editorArgs = append(editorArgs, "-g", fmt.Sprintf("%s:%d", filePath, lineNum))
+	} else {
+		// Unknown editor, just pass the file
+		editorArgs = append(editorArgs, filePath)
+	}
+
+	c := exec.Command(editorCmd, editorArgs...)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		return editorFinishedMsg{err: err}
 	})
@@ -1044,6 +1136,10 @@ func showInteractiveTUI(config *config.Config, project string) {
 				key.WithHelp("/", "filter"),
 			),
 			key.NewBinding(
+				key.WithKeys("*"),
+				key.WithHelp("*", "fulltext search"),
+			),
+			key.NewBinding(
 				key.WithKeys("s"),
 				key.WithHelp("s", "structured"),
 			),
@@ -1117,6 +1213,7 @@ func showInteractiveTUI(config *config.Config, project string) {
 		keywordColWidth: keywordColWidth,
 		allItems:        items,
 		structuredMode:  config.Todo.Structured,
+		searchTerm:      "",  // Initialize search term
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())

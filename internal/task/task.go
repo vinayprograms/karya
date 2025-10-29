@@ -585,3 +585,122 @@ func filterByAnyField(tasks []*Task, searchTerm string) []*Task {
 	}
 	return filtered
 }
+
+// SearchResult represents a search result from file content
+type SearchResult struct {
+	ZettelID string
+	Title    string
+	LineNum  int
+	Line     string
+	Path     string
+	Project  string
+}
+
+// SearchInFile searches for a term within a file and returns matching lines
+func SearchInFile(filePath, searchTerm string) []SearchResult {
+	var results []SearchResult
+
+	file, err := os.Open(filePath)
+	if err != nil {
+		return results
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	lineNum := 0
+	for scanner.Scan() {
+		lineNum++
+		line := scanner.Text()
+		if strings.Contains(strings.ToLower(line), strings.ToLower(searchTerm)) {
+			// Extract zettel ID from path if possible
+			dir := filepath.Dir(filePath)
+			zetID := filepath.Base(dir)
+
+			results = append(results, SearchResult{
+				ZettelID: zetID,
+				LineNum:  lineNum,
+				Line:     line,
+				Path:     filePath,
+			})
+		}
+	}
+	return results
+}
+
+// SearchTasks searches for a term across all task files
+func SearchTasks(c *config.Config, project string, searchTerm string) ([]SearchResult, error) {
+	files, err := FindFiles(c, project)
+	if err != nil {
+		return nil, err
+	}
+
+	var allResults []SearchResult
+	for _, file := range files {
+		results := SearchInFile(file, searchTerm)
+		if len(results) > 0 {
+			// Add project and title information to results
+			for i := range results {
+				// Extract project from path
+				relPath, _ := filepath.Rel(c.Directories.Projects, file)
+				if relPath != "" {
+					parts := strings.Split(relPath, string(filepath.Separator))
+					if len(parts) > 0 {
+						results[i].Project = parts[0]
+					}
+				}
+				
+				// Get title if possible
+				if c.Todo.Structured {
+					// For structured mode, try to get the zettel title
+					if results[i].ZettelID != "" && IsValidZettelID(results[i].ZettelID) {
+						notesDir := filepath.Join(c.Directories.Projects, results[i].Project, "notes")
+						title, err := GetZettelTitle(notesDir, results[i].ZettelID)
+						if err == nil {
+							results[i].Title = title
+						}
+					}
+				} else {
+					// For unstructured mode, use filename as title
+					filename := filepath.Base(file)
+					results[i].Title = strings.TrimSuffix(filename, filepath.Ext(filename))
+				}
+			}
+			allResults = append(allResults, results...)
+		}
+	}
+
+	return allResults, nil
+}
+
+// IsValidZettelID checks if a string is a valid zettel ID
+func IsValidZettelID(id string) bool {
+	if len(id) != 14 {
+		return false
+	}
+	for _, c := range id {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// GetZettelTitle gets the title of a zettel from its README.md file
+func GetZettelTitle(zetDir, zetID string) (string, error) {
+	readmePath := filepath.Join(zetDir, zetID, "README.md")
+	file, err := os.Open(readmePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	if scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "# ") {
+			return strings.TrimSpace(line[2:]), nil
+		}
+	}
+
+	return "", fmt.Errorf("no title found")
+}
