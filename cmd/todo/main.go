@@ -105,14 +105,16 @@ func (i taskItem) renderWithSelection(isSelected bool) string {
 		titleStyle = colors.completedTaskColor
 	}
 
+	// Render task title with markdown formatting
+	formattedTitle := task.RenderMarkdownDescription(i.task.Title, titleStyle)
 	if isSelected {
 		indicator := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("13")).
 			Bold(true).
 			Render("█ ")
-		parts = append(parts, indicator+titleStyle.Render(fmt.Sprintf("%-40s", i.task.Title)))
+		parts = append(parts, indicator+fmt.Sprintf("%-40s", formattedTitle))
 	} else {
-		parts = append(parts, "  "+titleStyle.Render(fmt.Sprintf("%-40s", i.task.Title)))
+		parts = append(parts, "  "+fmt.Sprintf("%-40s", formattedTitle))
 	}
 
 	// Render tag with special color if it's in special tags. Special tags either contain
@@ -176,7 +178,9 @@ func (i taskItem) Title() string {
 		titleStyle = colors.completedTaskColor
 	}
 
-	parts = append(parts, titleStyle.Render(fmt.Sprintf("%-40s", i.task.Title)))
+	// Render task title with markdown formatting
+	formattedTitle := task.RenderMarkdownDescription(i.task.Title, titleStyle)
+	parts = append(parts, fmt.Sprintf("%-40s", formattedTitle))
 
 	// Render tag with special color if it's in special tags. Special tags either contain
 	// that exact text or start with that text followed by a colon.
@@ -1229,13 +1233,26 @@ func showInteractiveTUI(config *config.Config, project string) {
 
 func printTasksPlain(config *config.Config, tasks []*task.Task) {
 	projectColWidth := calculateProjectColWidth(tasks)
+	taskColor := lipgloss.NewStyle()
+	completedTaskColor := lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // Gray for completed tasks
+	
 	for _, t := range tasks {
+		var titleStyle lipgloss.Style
+		if t.IsActive(config) || t.IsInProgress(config) || t.IsSomeday(config) {
+			titleStyle = taskColor
+		} else {
+			titleStyle = completedTaskColor
+		}
+		
+		// Render task title with markdown formatting
+		formattedTitle := task.RenderMarkdownDescription(t.Title, titleStyle)
+		
 		if config.GeneralConfig.Verbose {
 			fmt.Printf("%-*s %-16s %-12s %-40s",
-				projectColWidth, t.Project, t.Zettel, t.Keyword, t.Title)
+				projectColWidth, t.Project, t.Zettel, t.Keyword, formattedTitle)
 		} else {
 			fmt.Printf("%-*s %-12s %-40s",
-				projectColWidth, t.Project, t.Keyword, t.Title)
+				projectColWidth, t.Project, t.Keyword, formattedTitle)
 		}
 		if t.Tag != "" {
 			fmt.Printf(" #%s", t.Tag)

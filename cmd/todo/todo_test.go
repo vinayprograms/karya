@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/vinayprograms/karya/internal/config"
@@ -229,5 +230,45 @@ func TestListTasks(t *testing.T) {
 	}
 	if len(tasks) != 0 {
 		t.Errorf("Expected 0 tasks, got %d", len(tasks))
+	}
+}
+
+func TestTaskItemMarkdownRendering(t *testing.T) {
+	cfg := createTestConfig()
+	
+	// Initialize colors
+	InitializeColors(cfg)
+	
+	task := &task.Task{
+		Keyword: "TODO",
+		Title:   "This is **bold** and *italic* text with `code` and ~~strikethrough~~",
+		Project: "test",
+		Zettel:  "12345678901234",
+	}
+	
+	item := taskItem{
+		config:          cfg,
+		task:            task,
+		projectColWidth: 10,
+		keywordColWidth: 10,
+		verbose:         false,
+	}
+	
+	// Test Title rendering
+	title := item.Title()
+	
+	// Check that markdown syntax is not present in the output
+	if strings.Contains(title, "**") || strings.Contains(title, "*") || 
+	   strings.Contains(title, "~~") || strings.Contains(title, "`") {
+		t.Errorf("Title() should remove markdown syntax, got %v", title)
+	}
+	
+	// Test renderWithSelection
+	rendered := item.renderWithSelection(false)
+	
+	// Check that markdown syntax is not present in the output
+	if strings.Contains(rendered, "**") || strings.Contains(rendered, "*") || 
+	   strings.Contains(rendered, "~~") || strings.Contains(rendered, "`") {
+		t.Errorf("renderWithSelection() should remove markdown syntax, got %v", rendered)
 	}
 }
