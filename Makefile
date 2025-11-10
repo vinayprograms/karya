@@ -11,5 +11,9 @@ build:
 	mkdir -p bin
 	for cmd in cmd/*; do cmd_name=$$(basename $$cmd); $(MAKE) bin/$$cmd_name; done
 
+# Use `go install` to install commands
+install: clean
+	for cmd in cmd/*; do cmd_name=$$(basename $$cmd); go install ./cmd/$$cmd_name; done
+
 clean:
 	rm -rf bin
