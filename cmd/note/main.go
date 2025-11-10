@@ -60,25 +60,80 @@ func InitializeColors(cfg *config.Config) {
 }
 
 type Project struct {
-	Name     string
-	Path     string
-	HasNotes bool
-	HasTodos bool
+	Name      string
+	Path      string
+	HasNotes  bool
+	HasTodos  bool
+	NoteCount int
+	TodoCount int
 }
 
 type projectModel struct {
+	list          list.Model
 	projects      []Project
 	prjDir        string
 	quitting      bool
 	editor        string
 	verbose       bool
-	selectedIndex int
-	width         int
-	height        int
-	columns       int
-	scrollOffset  int
 	launchProject string
 	cfg           *config.Config
+}
+
+type projectItem struct {
+	project Project
+}
+
+func (i projectItem) FilterValue() string {
+	return i.project.Name
+}
+
+func (i projectItem) renderWithSelection(isSelected bool) string {
+	var parts []string
+
+	// Name line
+	if isSelected {
+		parts = append(parts, colors.selectorStyle.Render("█ ")+i.project.Name)
+	} else {
+		parts = append(parts, "  "+i.project.Name)
+	}
+
+	// Stats line
+	stats := fmt.Sprintf("  %d notes • %d todos", i.project.NoteCount, i.project.TodoCount)
+	if isSelected {
+		statsStyle := colors.highlightStyle
+		parts = append(parts, statsStyle.Render(stats))
+	} else {
+		statsStyle := colors.grayStyle
+		parts = append(parts, statsStyle.Render(stats))
+	}
+
+	// Add extra blank line for spacing
+	parts = append(parts, "")
+
+	return strings.Join(parts, "\n")
+}
+
+func (i projectItem) Title() string {
+	return i.project.Name
+}
+
+func (i projectItem) Description() string {
+	return fmt.Sprintf("%d notes • %d todos", i.project.NoteCount, i.project.TodoCount)
+}
+
+type projectDelegate struct {
+	list.DefaultDelegate
+}
+
+func (d projectDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	projectItem, ok := item.(projectItem)
+	if !ok {
+		return
+	}
+
+	isSelected := index == m.Index()
+	content := projectItem.renderWithSelection(isSelected)
+	fmt.Fprint(w, content)
 }
 
 func (m projectModel) Init() tea.Cmd {
@@ -88,196 +143,58 @@ func (m projectModel) Init() tea.Cmd {
 func (m projectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" || msg.String() == "q" {
+		if msg.String() == "ctrl+c" {
+			m.quitting = true
+			return m, tea.Quit
+		}
+
+		if msg.String() == "q" {
 			m.quitting = true
 			return m, tea.Quit
 		}
 
 		if msg.String() == "enter" {
-			if m.selectedIndex >= 0 && m.selectedIndex < len(m.projects) {
-				m.launchProject = m.projects[m.selectedIndex].Name
+			if i, ok := m.list.SelectedItem().(projectItem); ok {
+				m.launchProject = i.project.Name
 				m.quitting = true
 				return m, tea.Quit
 			}
 		}
-
-		// Navigation
-		switch msg.String() {
-		case "left", "h":
-			if m.selectedIndex > 0 {
-				m.selectedIndex--
-				m.adjustScroll()
-			}
-		case "right", "l":
-			if m.selectedIndex < len(m.projects)-1 {
-				m.selectedIndex++
-				m.adjustScroll()
-			}
-		case "up", "k":
-			if m.selectedIndex >= m.columns {
-				m.selectedIndex -= m.columns
-				m.adjustScroll()
-			}
-		case "down", "j":
-			if m.selectedIndex+m.columns < len(m.projects) {
-				m.selectedIndex += m.columns
-				m.adjustScroll()
-			}
-		case "g":
-			m.selectedIndex = 0
-			m.scrollOffset = 0
-		case "G":
-			m.selectedIndex = len(m.projects) - 1
-			m.adjustScroll()
-		}
-
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.calculateColumns()
-		m.adjustScroll()
+		m.list.SetWidth(msg.Width)
+		m.list.SetHeight(msg.Height - 3) // Reduce by 3 for title and help lines
 	}
 
-	return m, nil
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
 }
 
-func (m *projectModel) calculateColumns() {
-	avgCardWidth := 25
-	gap := 0
-	m.columns = (m.width - 4) / (avgCardWidth + gap)
-	if m.columns < 1 {
-		m.columns = 1
-	}
-	if m.columns > 6 {
-		m.columns = 6
-	}
-}
-
-func (m *projectModel) adjustScroll() {
-	if m.columns == 0 {
-		return
-	}
-
-	visibleRows := m.height - 6
-	if visibleRows < 1 {
-		visibleRows = 1
-	}
-
-	selectedRow := m.selectedIndex / m.columns
-
-	if selectedRow < m.scrollOffset {
-		m.scrollOffset = selectedRow
-	} else if selectedRow >= m.scrollOffset+visibleRows {
-		m.scrollOffset = selectedRow - visibleRows + 1
-	}
-}
+// Remove unused functions
 
 func (m projectModel) View() string {
 	if m.quitting {
 		return ""
 	}
-
-	if len(m.projects) == 0 {
-		return "No projects found\n"
-	}
-
-	var output strings.Builder
-
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("13")).
-		MarginBottom(1)
-	output.WriteString(titleStyle.Render("Projects"))
-	output.WriteString("\n\n")
-
-	// Find max width needed for project names
-	maxNameWidth := 0
-	for _, prj := range m.projects {
-		if len(prj.Name) > maxNameWidth {
-			maxNameWidth = len(prj.Name)
-		}
-	}
-
-	// Calculate consistent column width
-	// Format: "  ProjectName 📝 ☑️" (2 spaces + name + up to 2 icons with spaces)
-	maxIconsWidth := 6 // Space for up to 2 icons with spacing: " 📝 ☑️"
-	columnWidth := 2 + maxNameWidth + maxIconsWidth + 2 // selector + name + icons + padding
-
-	visibleRows := m.height - 6
-	if visibleRows < 1 {
-		visibleRows = 1
-	}
-
-	startRow := m.scrollOffset
-	endRow := m.scrollOffset + visibleRows
-	totalRows := (len(m.projects) + m.columns - 1) / m.columns
-	if endRow > totalRows {
-		endRow = totalRows
-	}
-
-	for row := startRow; row < endRow; row++ {
-		output.WriteString("  ")
-		for col := 0; col < m.columns; col++ {
-			idx := row*m.columns + col
-			if idx >= len(m.projects) {
+	
+	view := m.list.View()
+	
+	// Customize the status bar to show "projects" instead of "items"
+	lines := strings.Split(view, "\n")
+	if len(lines) > 0 {
+		// Look for the status line (usually contains "item" or "items")
+		for i, line := range lines {
+			if strings.Contains(line, "item") || strings.Contains(line, "Item") {
+				// Replace "item(s)" with "project(s)"
+				lines[i] = strings.Replace(line, "item", "project", -1)
+				lines[i] = strings.Replace(lines[i], "Item", "Project", -1)
 				break
 			}
-
-			prj := m.projects[idx]
-			isSelected := idx == m.selectedIndex
-
-			// Build the content with fixed structure
-			var contentBuilder strings.Builder
-			
-			// Selector part
-			if isSelected {
-				cursorStyle := colors.selectorStyle
-				contentBuilder.WriteString(cursorStyle.Render("█") + " ")
-			} else {
-				contentBuilder.WriteString("  ")
-			}
-
-			// Project name
-			if isSelected {
-				highlightStyle := colors.highlightStyle
-				contentBuilder.WriteString(highlightStyle.Render(prj.Name))
-			} else {
-				projectStyle := colors.projectStyle
-				contentBuilder.WriteString(projectStyle.Render(prj.Name))
-			}
-			
-			// Pad name to max width
-			namePadding := maxNameWidth - len(prj.Name)
-			contentBuilder.WriteString(strings.Repeat(" ", namePadding))
-
-			// Icons on the right side
-			if prj.HasNotes {
-				notesStyle := colors.grayStyle
-				contentBuilder.WriteString(" " + notesStyle.Render("📝"))
-			}
-			if prj.HasTodos {
-				todoStyle := colors.highlightStyle
-				contentBuilder.WriteString(" " + todoStyle.Render("☑️"))
-			}
-
-			// Pad to column width
-			content := contentBuilder.String()
-			actualWidth := lipgloss.Width(content)
-			if actualWidth < columnWidth {
-				content += strings.Repeat(" ", columnWidth-actualWidth)
-			}
-
-			output.WriteString(content)
 		}
-		output.WriteString("\n")
+		view = strings.Join(lines, "\n")
 	}
-
-	navStyle := colors.navStyle.MarginTop(1)
-	helpLine := navStyle.Render(" ↑↓←→/hjkl:navigate • g/G:top/bottom • Enter:open project • q:quit")
-	output.WriteString("\n")
-	output.WriteString(helpLine)
-
-	return output.String()
+	
+	return view
 }
 
 type zettelItem struct {
@@ -938,11 +855,31 @@ func listProjects(prjDir string, cfg *config.Config) ([]Project, error) {
 				}
 			}
 
+			// Count notes
+			noteCount := 0
+			if hasNotes {
+				notes, err := zet.ListZettels(notesPath)
+				if err == nil {
+					noteCount = len(notes)
+				}
+			}
+
+			// Count todos
+			todoCount := 0
+			if hasTodos {
+				tasks, err := task.ListTasks(cfg, entry.Name(), false)
+				if err == nil {
+					todoCount = len(tasks)
+				}
+			}
+
 			projects = append(projects, Project{
-				Name:     entry.Name(),
-				Path:     prjPath,
-				HasNotes: hasNotes,
-				HasTodos: hasTodos,
+				Name:      entry.Name(),
+				Path:      prjPath,
+				HasNotes:  hasNotes,
+				HasTodos:  hasTodos,
+				NoteCount: noteCount,
+				TodoCount: todoCount,
 			})
 		}
 	}
@@ -1000,14 +937,106 @@ func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 			return
 		}
 
+		// Convert projects to items
+		items := make([]list.Item, len(projects))
+		for i, prj := range projects {
+			items[i] = projectItem{project: prj}
+		}
+
+		// Create delegate
+		delegate := projectDelegate{DefaultDelegate: list.NewDefaultDelegate()}
+		delegate.ShowDescription = true // Show description for stats
+		delegate.SetHeight(3) // Three lines per item (name, stats, blank)
+		delegate.SetSpacing(0) // No extra spacing since we're adding blank line manually
+
+		// Create list
+		l := list.New(items, delegate, 0, 0)
+		l.Title = "Projects"
+		l.SetShowTitle(true)
+		l.SetShowStatusBar(true) // Show status bar for pagination info
+		l.SetFilteringEnabled(false)
+		l.KeyMap.Quit.SetKeys("q")
+		l.KeyMap.ForceQuit.SetKeys("ctrl+c")
+		
+		// Set initial height
+		l.SetHeight(15) // Will be updated on window resize
+
+		// Match vim-style keybindings
+		l.KeyMap.NextPage.SetKeys("pgdown", "ctrl+f", "ctrl+d")
+		l.KeyMap.PrevPage.SetKeys("pgup", "ctrl+b", "ctrl+u")
+		l.KeyMap.GoToStart.SetKeys("g")  // Jump to top
+		l.KeyMap.GoToEnd.SetKeys("G")    // Jump to bottom
+
+		// Add help keys
+		l.AdditionalShortHelpKeys = func() []key.Binding {
+			return []key.Binding{
+				key.NewBinding(
+					key.WithKeys("enter"),
+					key.WithHelp("enter", "open"),
+				),
+				key.NewBinding(
+					key.WithKeys("j"),
+					key.WithHelp("j", "down"),
+				),
+				key.NewBinding(
+					key.WithKeys("k"),
+					key.WithHelp("k", "up"),
+				),
+			}
+		}
+
+		l.AdditionalFullHelpKeys = func() []key.Binding {
+			return []key.Binding{
+				key.NewBinding(
+					key.WithKeys("enter"),
+					key.WithHelp("enter", "open selected project"),
+				),
+				key.NewBinding(
+					key.WithKeys("j", "down"),
+					key.WithHelp("j/↓", "down"),
+				),
+				key.NewBinding(
+					key.WithKeys("k", "up"),
+					key.WithHelp("k/↑", "up"),
+				),
+				key.NewBinding(
+					key.WithKeys("g"),
+					key.WithHelp("g", "jump to top"),
+				),
+				key.NewBinding(
+					key.WithKeys("G"),
+					key.WithHelp("G", "jump to bottom"),
+				),
+				key.NewBinding(
+					key.WithKeys("ctrl+d"),
+					key.WithHelp("ctrl+d", "page down"),
+				),
+				key.NewBinding(
+					key.WithKeys("ctrl+u"),
+					key.WithHelp("ctrl+u", "page up"),
+				),
+				key.NewBinding(
+					key.WithKeys("pgdown"),
+					key.WithHelp("pgdn", "page down"),
+				),
+				key.NewBinding(
+					key.WithKeys("pgup"),
+					key.WithHelp("pgup", "page up"),
+				),
+				key.NewBinding(
+					key.WithKeys("q"),
+					key.WithHelp("q", "quit"),
+				),
+			}
+		}
+
 		m := projectModel{
+			list:          l,
 			projects:      projects,
 			prjDir:        prjDir,
 			editor:        editor,
 			verbose:       verbose,
-			selectedIndex: 0,
-			columns:       3,
-			scrollOffset:  0,
+			launchProject: "",
 			cfg:           cfg,
 		}
 
@@ -1034,7 +1063,7 @@ func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 						log.Fatal(err)
 					}
 				} else {
-					log.Fatal("Cannot capture notes! Exiting.")
+					continue // Go back to project list instead of exiting
 				}
 			}
 
@@ -1052,7 +1081,7 @@ func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 						log.Fatal(err)
 					}
 				} else {
-					log.Fatal("Cannot capture notes! Exiting.")
+					continue // Go back to project list instead of exiting
 				}
 			}
 
