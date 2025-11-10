@@ -208,6 +208,18 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
+// GetInboxFilePath returns the absolute path to the inbox file based on configuration
+func (c *Config) GetInboxFilePath() string {
+	if c.Directories.Karya != "" {
+		// Use configured karya directory if set
+		return filepath.Join(c.Directories.Karya, "inbox.md")
+	}
+
+	// Default to home directory
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, "inbox.md")
+}
+
 func expandEnv(s string) string {
 	if s == "" {
 		return s
@@ -293,61 +305,61 @@ func (c *Config) initializeColors() {
 		// No theme set - use terminal's native ANSI colors by setting color names only
 		// This allows the terminal emulator to use its own color scheme (light/dark)
 		if c.Colors.ProjectColor == "" {
-			c.Colors.ProjectColor = "2"  // ANSI green - terminal decides actual color
+			c.Colors.ProjectColor = "2" // ANSI green - terminal decides actual color
 		}
 		if c.Colors.ActiveColor == "" {
-			c.Colors.ActiveColor = "3"  // ANSI yellow
+			c.Colors.ActiveColor = "3" // ANSI yellow
 		}
 		if c.Colors.InProgressColor == "" {
-			c.Colors.InProgressColor = "6"  // ANSI cyan
+			c.Colors.InProgressColor = "6" // ANSI cyan
 		}
 		if c.Colors.CompletedColor == "" {
-			c.Colors.CompletedColor = "8"  // ANSI bright black (gray)
+			c.Colors.CompletedColor = "8" // ANSI bright black (gray)
 		}
 		if c.Colors.SomedayColor == "" {
-			c.Colors.SomedayColor = "7"  // ANSI white - neutral for tasks not yet under consideration
+			c.Colors.SomedayColor = "7" // ANSI white - neutral for tasks not yet under consideration
 		}
 		if c.Colors.TaskColor == "" {
-			c.Colors.TaskColor = ""  // Empty = terminal default foreground
+			c.Colors.TaskColor = "" // Empty = terminal default foreground
 		}
 		if c.Colors.CompletedTaskColor == "" {
-			c.Colors.CompletedTaskColor = "8"  // ANSI bright black (gray)
+			c.Colors.CompletedTaskColor = "8" // ANSI bright black (gray)
 		}
 		if c.Colors.TagColor == "" {
-			c.Colors.TagColor = ""  // Empty = terminal default foreground
+			c.Colors.TagColor = "" // Empty = terminal default foreground
 		}
 		if c.Colors.TagBgColor == "" {
-			c.Colors.TagBgColor = "6"  // ANSI cyan
+			c.Colors.TagBgColor = "6" // ANSI cyan
 		}
 		if c.Colors.SpecialTagColor == "" {
-			c.Colors.SpecialTagColor = ""  // Empty = terminal default foreground
+			c.Colors.SpecialTagColor = "" // Empty = terminal default foreground
 		}
 		if c.Colors.SpecialTagBgColor == "" {
-			c.Colors.SpecialTagBgColor = "5"  // ANSI magenta
+			c.Colors.SpecialTagBgColor = "5" // ANSI magenta
 		}
 		if c.Colors.DateColor == "" {
-			c.Colors.DateColor = ""  // Empty = terminal default foreground
+			c.Colors.DateColor = "" // Empty = terminal default foreground
 		}
 		if c.Colors.DateBgColor == "" {
-			c.Colors.DateBgColor = "4"  // ANSI blue
+			c.Colors.DateBgColor = "4" // ANSI blue
 		}
 		if c.Colors.PastDateColor == "" {
-			c.Colors.PastDateColor = ""  // Empty = terminal default foreground
+			c.Colors.PastDateColor = "" // Empty = terminal default foreground
 		}
 		if c.Colors.PastDateBgColor == "" {
-			c.Colors.PastDateBgColor = "1"  // ANSI red
+			c.Colors.PastDateBgColor = "1" // ANSI red
 		}
 		if c.Colors.TodayDateColor == "" {
-			c.Colors.TodayDateColor = "0"  // ANSI black
+			c.Colors.TodayDateColor = "0" // ANSI black
 		}
 		if c.Colors.TodayDateBgColor == "" {
-			c.Colors.TodayDateBgColor = "3"  // ANSI yellow
+			c.Colors.TodayDateBgColor = "3" // ANSI yellow
 		}
 		if c.Colors.AssigneeColor == "" {
-			c.Colors.AssigneeColor = ""  // Empty = terminal default foreground
+			c.Colors.AssigneeColor = "" // Empty = terminal default foreground
 		}
 		if c.Colors.AssigneeBgColor == "" {
-			c.Colors.AssigneeBgColor = "8"  // ANSI bright black (gray)
+			c.Colors.AssigneeBgColor = "8" // ANSI bright black (gray)
 		}
 	}
 

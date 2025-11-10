@@ -473,7 +473,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case fileChangedMsg:
 		// Reload tasks when files change
-		tasks, err := task.ListTasks(m.config, m.project, m.config.Todo.ShowCompleted)
+		tasks, err := loadTaskWithInbox(m.config, m.project, m.config.Todo.ShowCompleted)
 		if err == nil {
 			m.tasks = tasks
 			// Sort tasks by priority: InProgress -> Active -> Someday -> Completed
@@ -957,7 +957,7 @@ func main() {
 		if len(args) > 1 {
 			project = args[1]
 		}
-		tasks, err := task.ListTasks(config, project, config.Todo.ShowCompleted)
+		tasks, err := loadTaskWithInbox(config, project, config.Todo.ShowCompleted)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -1091,6 +1091,12 @@ func showInteractiveTUI(config *config.Config, project string) {
 	watcher, err := setupWatcher(config, project)
 	if err != nil {
 		log.Printf("Warning: Could not create file watcher: %v", err)
+	}
+
+	// Load tasks including inbox tasks
+	tasks, err = loadTaskWithInbox(config, project, config.Todo.ShowCompleted)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	// Sort tasks by priority: InProgress -> Active -> Someday -> Completed
@@ -1302,4 +1308,50 @@ func printProjectsList(summary map[string]int) {
 	for _, p := range projects {
 		fmt.Printf("%-20s %5d\n", p, summary[p])
 	}
+}
+
+// loadTaskWithInbox loads tasks from both regular files and the inbox file
+func loadTaskWithInbox(c *config.Config, project string, showCompleted bool) ([]*task.Task, error) {
+	// First get the regular tasks
+	regularTasks, err := task.ListTasks(c, project, showCompleted)
+	if err != nil {
+		return nil, err
+	}
+
+	// Load tasks from inbox file
+	inboxFilePath := c.GetInboxFilePath()
+	inboxTasks, err := readInboxFile(inboxFilePath, c)
+	if err != nil {
+		// If inbox file doesn't exist, just return regular tasks
+		if os.IsNotExist(err) {
+			return regularTasks, nil
+		}
+		return nil, err
+	}
+
+	// Merge the tasks - regular tasks first, then inbox tasks
+	allTasks := append(regularTasks, inboxTasks...)
+
+	return allTasks, nil
+}
+
+// readInboxFile reads tasks from the inbox file
+func readInboxFile(inboxPath string, c *config.Config) ([]*task.Task, error) {
+	file, err := os.Open(inboxPath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var tasks []*task.Task
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		task := task.ParseLine(c, line, "inbox", "inbox", inboxPath)
+		if task != nil {
+			tasks = append(tasks, task)
+		}
+	}
+	
+	return tasks, scanner.Err()
 }
