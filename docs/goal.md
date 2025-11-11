@@ -51,12 +51,50 @@ goal
 
 ### Key Commands in TUI
 
+**Main View:**
 - `n` - Create new goal
-- `e` - Edit selected goal
+- `e` or `Enter` - Edit selected goal
 - `r` - Refresh goal list
+- `1-5` - Switch between horizons (monthly, quarterly, yearly, short-term, long-term)
 - `?` - Toggle help
 - `q` - Quit
-- `esc` - Back to main view
+- `Esc` - Back to main view
+
+**Goal Creation Form:**
+- `TAB` - Switch between Title and Period fields
+- `c` or `e` - Enable editing of Period field (when focused on it)
+- `Enter` - Create goal and return to list
+- `Shift+Enter` - Create goal and open in editor
+- `Esc` - Cancel and return to list
+
+## Creating Goals
+
+### Interactive Goal Creation
+
+When you press `n` to create a new goal, an interactive form appears with two fields:
+
+1. **Title**: The name of your goal
+2. **Period**: The time period for the goal (pre-filled with the next logical period)
+
+#### Workflow:
+
+1. **Enter Goal Title**: Start typing your goal title
+2. **Switch to Period Field** (optional): Press `TAB` to move to the period field
+3. **Edit Period** (optional): Press `c` or `e` to enable editing, then modify the period as needed
+4. **Create Goal**:
+   - Press `Enter` to create the goal and return to the list
+   - Press `Shift+Enter` to create the goal and immediately open it in your configured editor
+
+The period field is automatically populated based on your horizon and fiscal year configuration:
+- **Monthly**: Next month (e.g., `2025-12`)
+- **Quarterly**: Next quarter with fiscal year (e.g., `2026-Q3` if December 2025 with June fiscal year start)
+- **Yearly**: Next fiscal year (e.g., `2026`)
+- **Short-term**: Current year to 3 years out (e.g., `2025-2028`)
+- **Long-term**: Current year to 10 years out (e.g., `2025-2035`)
+
+**Note:** For quarterly goals, the year represents the fiscal year, not the calendar year. See the Fiscal Year and Quarter Configuration section for details.
+
+You can edit the period to target a different time frame if needed.
 
 ## Goal File Format
 
@@ -113,10 +151,18 @@ If not configured, the system defaults to "January" as the fiscal year start mon
 
 When creating quarterly goals, the system automatically assumes the next quarter as the default period. This is calculated based on the configured fiscal year start date.
 
+**Important:** The year component in quarterly periods represents the **fiscal year**, not the calendar year. This follows common business practices where quarters are labeled with the fiscal year they belong to.
+
 **Example:** If fiscal year starts in "June":
+- Fiscal year 2026 runs from June 2025 to May 2026
 - Quarters are: Q1 (Jun-Aug), Q2 (Sep-Nov), Q3 (Dec-Feb), Q4 (Mar-May)
-- Current date is April → Current quarter is Q4 → Next goal created for Q1
-- Current date is July → Current quarter is Q1 → Next goal created for Q2
+- December 2025 is labeled as `2026-Q3` (fiscal year 2026, quarter 3)
+- April 2025 is labeled as `2025-Q4` (fiscal year 2025, quarter 4)
+
+**Concrete examples:**
+- Current date: April 2025 → Current quarter: 2025-Q4 → Next goal: `2025-Q1` (June-Aug 2025)
+- Current date: July 2025 → Current quarter: 2026-Q1 → Next goal: `2026-Q2` (Sep-Nov 2025)
+- Current date: December 2025 → Current quarter: 2026-Q3 → Next goal: `2026-Q4` (Mar-May 2026)
 
 ### Yearly Goal Creation
 
