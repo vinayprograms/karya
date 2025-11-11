@@ -208,10 +208,14 @@ type Model struct {
 	editor      string
 	creatingGoal bool
 	goalTitle   string
+	goalPeriod  string // The period string (e.g., "2025-11", "2025-Q1", "2025")
+	focusedField int   // 0 = title, 1 = period
+	editingPeriod bool // Whether period field is being edited
 	creatingFeedback string
 	cfg         *config.Config
 	termWidth   int
 	termHeight  int
+	openAfterCreate bool // Whether to open in editor after creating
 }
 
 // NewModel creates a new TUI model
@@ -393,32 +397,78 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.creatingGoal {
+			// Handle special keys first (non-printable)
 			switch msg.String() {
-			case "ctrl+c", "q":
+			case "ctrl+c":
 				m.quitting = true
 				return m, tea.Quit
 			case "esc":
 				m.creatingGoal = false
 				m.goalTitle = ""
+				m.goalPeriod = ""
+				m.focusedField = 0
+				m.editingPeriod = false
+				m.openAfterCreate = false
 				m.creatingFeedback = ""
 				return m, nil
+			case "tab":
+				// Cycle between title and period fields
+				m.focusedField = (m.focusedField + 1) % 2
+				return m, nil
 			case "backspace":
-				if len(m.goalTitle) > 0 {
-					m.goalTitle = m.goalTitle[:len(m.goalTitle)-1]
+				if m.focusedField == 0 {
+					// Editing title
+					if len(m.goalTitle) > 0 {
+						m.goalTitle = m.goalTitle[:len(m.goalTitle)-1]
+					}
+				} else if m.editingPeriod {
+					// Editing period
+					if len(m.goalPeriod) > 0 {
+						m.goalPeriod = m.goalPeriod[:len(m.goalPeriod)-1]
+					}
 				}
-			case "enter":
+				return m, nil
+			case "shift+enter":
+				// Create goal and open in editor
 				if m.goalTitle != "" {
-					return m, m.createGoal(m.currentHorizon, m.goalTitle)
+					m.openAfterCreate = true
+					return m, m.createGoal(m.currentHorizon, m.goalTitle, m.goalPeriod)
+				}
+				return m, nil
+			case "enter":
+				// Create goal
+				if m.goalTitle != "" {
+					m.openAfterCreate = false
+					return m, m.createGoal(m.currentHorizon, m.goalTitle, m.goalPeriod)
 				} else {
 					m.creatingGoal = false
 					m.goalTitle = ""
+					m.goalPeriod = ""
+					m.focusedField = 0
+					m.editingPeriod = false
 					m.creatingFeedback = ""
 				}
-			default:
-				if len(msg.Runes) > 0 && msg.Runes[0] >= 32 && msg.Runes[0] <= 126 {
+				return m, nil
+			}
+			
+			// Handle single character keys
+			// Check if this is "c" or "e" pressed on period field to enable editing
+			if m.focusedField == 1 && !m.editingPeriod && (msg.String() == "c" || msg.String() == "e") {
+				m.editingPeriod = true
+				return m, nil
+			}
+			
+			// Handle normal text input for both fields
+			if len(msg.Runes) > 0 && msg.Runes[0] >= 32 && msg.Runes[0] <= 126 {
+				if m.focusedField == 0 {
+					// Editing title - accept all printable characters
 					m.goalTitle += string(msg.Runes[0])
+				} else if m.editingPeriod {
+					// Editing period - accept all printable characters
+					m.goalPeriod += string(msg.Runes[0])
 				}
 			}
+			
 			return m, nil
 		}
 
@@ -442,6 +492,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "n":
 			m.creatingGoal = true
 			m.goalTitle = ""
+			m.goalPeriod = m.getDefaultPeriod(m.currentHorizon)
+			m.focusedField = 0 // Start with title field
+			m.editingPeriod = false
+			m.openAfterCreate = false
 			m.creatingFeedback = ""
 			return m, nil
 		case "e", "enter":
@@ -494,7 +548,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Close the creation form
 		m.creatingGoal = false
 		m.goalTitle = ""
+		m.goalPeriod = ""
+		m.focusedField = 0
+		m.editingPeriod = false
+		m.openAfterCreate = false
 		m.creatingFeedback = ""
+		
+		// If user pressed Shift+Enter, open the goal in editor
+		if msg.openInEditor {
+			return m, m.openGoalInEditor(msg.goalPath)
+		}
+		
 		return m, nil
 
 	case errMsg:
@@ -584,23 +648,48 @@ func (m Model) View() string {
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color(m.cfg.Colors.ProjectColor)).
 			Padding(1, 2).
-			Width(60)
+			Width(70)
 
 		titleStyle := colors.primaryColor.Copy().Bold(true)
 		title := titleStyle.Render(fmt.Sprintf("New %s Goal", m.currentHorizon))
 
-		prompt := fmt.Sprintf("Title: %s", m.goalTitle)
+		// Render title field with cursor/focus indicator
+		titleLabel := "Title: "
+		titleValue := m.goalTitle
+		if m.focusedField == 0 {
+			titleValue = titleValue + "█" // Show cursor
+			titleLabel = lipgloss.NewStyle().Bold(true).Render(titleLabel)
+		}
+		titleLine := titleLabel + titleValue
+
+		// Render period field with cursor/focus indicator
+		periodLabel := "Period: "
+		periodValue := m.goalPeriod
+		var periodHint string
+		if m.focusedField == 1 {
+			if m.editingPeriod {
+				periodValue = periodValue + "█" // Show cursor when editing
+			} else {
+				periodHint = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("8")).
+					Render(" (press 'c' or 'e' to edit)")
+			}
+			periodLabel = lipgloss.NewStyle().Bold(true).Render(periodLabel)
+		}
+		periodLine := periodLabel + periodValue + periodHint
+
+		// Help text
+		helpText := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(
+			"TAB: switch fields • Enter: create • Shift+Enter: create and edit • Esc: cancel")
 		
 		var content string
 		if m.creatingFeedback != "" {
 			feedback := lipgloss.NewStyle().
 				Foreground(lipgloss.Color("1")).
 				Render(m.creatingFeedback)
-			content = dialogBox.Render(title + "\n\n" + prompt + "\n\n" + feedback + "\n\n" + 
-				lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("Enter to confirm • Esc to cancel"))
+			content = dialogBox.Render(title + "\n\n" + titleLine + "\n" + periodLine + "\n\n" + feedback + "\n\n" + helpText)
 		} else {
-			content = dialogBox.Render(title + "\n\n" + prompt + "\n\n" + 
-				lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("Enter to confirm • Esc to cancel"))
+			content = dialogBox.Render(title + "\n\n" + titleLine + "\n" + periodLine + "\n\n" + helpText)
 		}
 
 		// Overlay the dialog on top of the list view
@@ -617,47 +706,33 @@ func (m Model) View() string {
 }
 
 type goalCreatedMsg struct {
-	horizon goal.Horizon
+	horizon   goal.Horizon
+	goalPath  string
+	openInEditor bool
 }
 
-func (m *Model) createGoal(horizon goal.Horizon, title string) tea.Cmd {
+func (m *Model) createGoal(horizon goal.Horizon, title string, period string) tea.Cmd {
 	return func() tea.Msg {
-		var currentPeriod string
-		
-		// Get the configured year start month
-		yearStart := "January"
-		if m.cfg.Goals.YearStart != "" {
-			yearStart = m.cfg.Goals.YearStart
-		}
-		
-		switch horizon {
-		case goal.HorizonMonthly:
-			currentPeriod = "2025-11"
-		case goal.HorizonQuarterly:
-			// Simple: always generate next quarter
-			nextPeriod := getNextQuarterPeriod(yearStart)
-			currentPeriod = nextPeriod
-		case goal.HorizonYearly:
-			// Generate next year based on fiscal year (year start month)
-			nextYear := getNextYear(yearStart)
-			currentPeriod = fmt.Sprintf("%d", nextYear)
-		case goal.HorizonShortTerm:
-			currentPeriod = "2025-2027"
-		case goal.HorizonLongTerm:
-			currentPeriod = "2025-2035"
-		}
-
-		err := m.goalManager.CreateGoal(horizon, currentPeriod, title)
+		// Use the provided period directly
+		err := m.goalManager.CreateGoal(horizon, period, title)
 		if err != nil {
 			return errMsg(err)
 		}
 
-		return goalCreatedMsg{horizon: horizon}
+		// Get the path to the created goal
+		goalPath := m.goalManager.GetGoalPathForHorizon(horizon, period, title)
+
+		return goalCreatedMsg{
+			horizon:      horizon,
+			goalPath:     goalPath,
+			openInEditor: m.openAfterCreate,
+		}
 	}
 }
 
 // getNextQuarterPeriod returns the next quarter in "YYYY-QN" format
 // based on the configured fiscal year start month
+// The year component represents the fiscal year, not calendar year
 func getNextQuarterPeriod(yearStart string) string {
 	// Map month names to numbers for easier calculation
 	monthMap := map[string]int{
@@ -676,6 +751,16 @@ func getNextQuarterPeriod(yearStart string) string {
 	currentYear := now.Year()
 	currentMonth := int(now.Month())
 	
+	// First, determine the current fiscal year
+	// If we're before the fiscal year start month, we're in the previous fiscal year
+	var fiscalYear int
+	if currentMonth < startMonth {
+		fiscalYear = currentYear
+	} else {
+		// We're at or after the fiscal year start, so we're in next fiscal year
+		fiscalYear = currentYear + 1
+	}
+	
 	// Calculate which quarter (0-3) we're currently in based on the start month
 	// In the sequence:
 	// Q1: startMonth to (startMonth + 2) % 12
@@ -690,15 +775,18 @@ func getNextQuarterPeriod(yearStart string) string {
 	// Convert to 1-based quarter numbers
 	quarter := quarterIndex + 1
 	
-	// Get the next quarter in sequence with year wraparound
+	// Get the next quarter in sequence
 	nextQuarter := quarter + 1
+	nextFiscalYear := fiscalYear
+	
 	if nextQuarter > 4 {
+		// Wrapped to next fiscal year
 		nextQuarter = 1
-		currentYear++
+		nextFiscalYear++
 	}
 	
-	// Return the full period string
-	return fmt.Sprintf("%d-Q%d", currentYear, nextQuarter)
+	// Return the full period string with fiscal year
+	return fmt.Sprintf("%d-Q%d", nextFiscalYear, nextQuarter)
 }
 
 // getNextYear returns the next fiscal year based on the configured fiscal year start month
@@ -739,6 +827,65 @@ func getNextYear(yearStart string) int {
 	
 	// The next fiscal year is simply fiscalYear + 1
 	return fiscalYear + 1
+}
+
+// getDefaultPeriod returns the default period string for the given horizon
+func (m *Model) getDefaultPeriod(horizon goal.Horizon) string {
+	// Get the configured year start month
+	yearStart := "January"
+	if m.cfg.Goals.YearStart != "" {
+		yearStart = m.cfg.Goals.YearStart
+	}
+	
+	switch horizon {
+	case goal.HorizonMonthly:
+		// Next month
+		now := time.Now()
+		nextMonth := now.AddDate(0, 1, 0)
+		return fmt.Sprintf("%d-%02d", nextMonth.Year(), nextMonth.Month())
+	case goal.HorizonQuarterly:
+		// Next quarter
+		return getNextQuarterPeriod(yearStart)
+	case goal.HorizonYearly:
+		// Next year
+		nextYear := getNextYear(yearStart)
+		return fmt.Sprintf("%d", nextYear)
+	case goal.HorizonShortTerm:
+		// 3 years from now
+		now := time.Now()
+		endYear := now.Year() + 3
+		return fmt.Sprintf("%d-%d", now.Year(), endYear)
+	case goal.HorizonLongTerm:
+		// 10 years from now
+		now := time.Now()
+		endYear := now.Year() + 10
+		return fmt.Sprintf("%d-%d", now.Year(), endYear)
+	}
+	return ""
+}
+
+// openGoalInEditor opens the specified goal file in the configured editor
+func (m *Model) openGoalInEditor(goalPath string) tea.Cmd {
+	editor := m.editor
+	if strings.HasPrefix(editor, "~/") {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			editor = filepath.Join(home, editor[2:])
+		}
+	}
+
+	editorParts := strings.Fields(editor)
+	editorCmd := editorParts[0]
+	editorArgs := editorParts[1:]
+	editorArgs = append(editorArgs, goalPath)
+
+	c := exec.Command(editorCmd, editorArgs...)
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		if err != nil {
+			return errMsg(err)
+		}
+		return nil
+	})
 }
 
 func (m *Model) editGoal() tea.Cmd {
