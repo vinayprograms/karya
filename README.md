@@ -154,6 +154,7 @@ Karya provides a suite of commands for different workflows. Below is a quick ove
 - **[`todo`](./docs/todo.md)** - Task management with interactive TUI, live file monitoring, and powerful filtering
 - **[`zet`](./docs/zet.md)** - Zettelkasten notes with git integration and markdown rendering
 - **[`note`](./docs/note.md)** - Project-specific notes (wrapper around `zet`)
+- **[`goal`](./docs/goal.md)** - Goal management for monthly, quarterly, yearly, short-term, and long-term goals
 
 ### Quick Reference
 
@@ -171,6 +172,9 @@ zet ? "search"          # Search content
 # Project Notes
 note myproject new "Title"  # Create project note
 note myproject ls           # List project notes
+
+# Goals
+goal                    # Interactive goal management TUI
 ```
 
 ## Directory Structure
@@ -180,7 +184,6 @@ Karya expects the following directory structure:
 ```text
 $PROJECTS/
 ├── project1/
-│   ├── goals.md
 │   ├── thots.md
 │   └── notes/
 │       ├── 20240115120000/
