@@ -90,3 +90,41 @@ The command implements a multi-form TUI workflow:
 4. **Month Display**: Month numbers are replaced with actual month names in tree view
 
 The implementation ensures that title is displayed at the top with static positioning, and a tab selection system is provided for navigation between different horizons.
+
+## Fiscal Year and Quarter Configuration
+
+The goal system supports configurable fiscal year boundaries to accommodate different organizational calendars.
+
+### Configurable Fiscal Year Start
+
+Users can configure the fiscal year start month in `config.toml`:
+
+```toml
+[goals]
+year-start = "June"
+```
+
+Supported values are: "January", "February", "March", "April", "May", "June", 
+"July", "August", "September", "October", "November", "December"
+
+If not configured, the system defaults to "January" as the fiscal year start month.
+
+### Quarterly Goal Creation
+
+When creating quarterly goals, the system automatically assumes the next quarter as the default period. This is calculated based on the configured fiscal year start date.
+
+**Example:** If fiscal year starts in "June":
+- Quarters are: Q1 (Jun-Aug), Q2 (Sep-Nov), Q3 (Dec-Feb), Q4 (Mar-May)
+- Current date is April → Current quarter is Q4 → Next goal created for Q1
+- Current date is July → Current quarter is Q1 → Next goal created for Q2
+
+### Yearly Goal Creation
+
+Yearly goals respect the configured fiscal year start month as the year boundary.
+
+**Example:** If fiscal year starts in "June":
+- Fiscal year starts in June (not January)
+- Current date is April 2025 → In fiscal year 2024 (started June 2024) → Next goal created for 2025
+- Current date is July 2025 → In fiscal year 2025 (started June 2025) → Next goal created for 2026
+
+This approach provides more natural goal creation for users with non-calendar fiscal years.
