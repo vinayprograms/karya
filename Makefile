@@ -1,4 +1,4 @@
-.PHONY: all clean
+.PHONY: all clean build install
 
 all: build
 
@@ -6,7 +6,6 @@ all: build
 bin/%: cmd/%/main.go
 	go build -o $@ $<
 
-# use pattern rule to build all commands in cmd/
 build:
 	mkdir -p bin
 	for cmd in cmd/*; do cmd_name=$$(basename $$cmd); $(MAKE) bin/$$cmd_name; done
