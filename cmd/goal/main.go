@@ -210,6 +210,8 @@ type Model struct {
 	goalTitle   string
 	creatingFeedback string
 	cfg         *config.Config
+	termWidth   int
+	termHeight  int
 }
 
 // NewModel creates a new TUI model
@@ -264,6 +266,8 @@ func NewModel() (Model, error) {
 		creatingGoal:     false,
 		creatingFeedback: "",
 		cfg:              cfg,
+		termWidth:        0,
+		termHeight:       0,
 	}, nil
 }
 
@@ -428,6 +432,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				goal.HorizonLongTerm,
 			} {
 				*m.goalLists[hor] = NewGoalList(hor, m.goalManager)
+				// Restore the terminal dimensions to the refreshed list
+				if m.termWidth > 0 && m.termHeight > 0 {
+					m.goalLists[hor].SetWidth(m.termWidth)
+					m.goalLists[hor].SetHeight(m.termHeight - 3)
+				}
 			}
 			return m, nil
 		case "n":
@@ -455,6 +464,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.WindowSizeMsg:
+		// Store terminal dimensions
+		m.termWidth = msg.Width
+		m.termHeight = msg.Height
+		
 		// Update all lists with new dimensions
 		for _, hor := range []goal.Horizon{
 			goal.HorizonMonthly,
@@ -473,6 +486,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case goalCreatedMsg:
 		// Refresh the goal list for the horizon
 		*m.goalLists[msg.horizon] = NewGoalList(msg.horizon, m.goalManager)
+		// Restore the terminal dimensions to the refreshed list
+		if m.termWidth > 0 && m.termHeight > 0 {
+			m.goalLists[msg.horizon].SetWidth(m.termWidth)
+			m.goalLists[msg.horizon].SetHeight(m.termHeight - 3)
+		}
 		// Close the creation form
 		m.creatingGoal = false
 		m.goalTitle = ""
@@ -605,13 +623,24 @@ type goalCreatedMsg struct {
 func (m *Model) createGoal(horizon goal.Horizon, title string) tea.Cmd {
 	return func() tea.Msg {
 		var currentPeriod string
+		
+		// Get the configured year start month
+		yearStart := "January"
+		if m.cfg.Goals.YearStart != "" {
+			yearStart = m.cfg.Goals.YearStart
+		}
+		
 		switch horizon {
 		case goal.HorizonMonthly:
 			currentPeriod = "2025-11"
 		case goal.HorizonQuarterly:
-			currentPeriod = "2025-Q1" 
+			// Simple: always generate next quarter
+			nextPeriod := getNextQuarterPeriod(yearStart)
+			currentPeriod = nextPeriod
 		case goal.HorizonYearly:
-			currentPeriod = "2025"
+			// Generate next year based on fiscal year (year start month)
+			nextYear := getNextYear(yearStart)
+			currentPeriod = fmt.Sprintf("%d", nextYear)
 		case goal.HorizonShortTerm:
 			currentPeriod = "2025-2027"
 		case goal.HorizonLongTerm:
@@ -625,6 +654,91 @@ func (m *Model) createGoal(horizon goal.Horizon, title string) tea.Cmd {
 
 		return goalCreatedMsg{horizon: horizon}
 	}
+}
+
+// getNextQuarterPeriod returns the next quarter in "YYYY-QN" format
+// based on the configured fiscal year start month
+func getNextQuarterPeriod(yearStart string) string {
+	// Map month names to numbers for easier calculation
+	monthMap := map[string]int{
+		"January":   1, "February":  2, "March":     3,
+		"April":     4, "May":       5, "June":      6,
+		"July":      7, "August":    8, "September": 9,
+		"October":  10, "November": 11, "December": 12,
+	}
+
+	startMonth, ok := monthMap[yearStart]
+	if !ok {
+		startMonth = 1 // Default to January
+	}
+
+	now := time.Now()
+	currentYear := now.Year()
+	currentMonth := int(now.Month())
+	
+	// Calculate which quarter (0-3) we're currently in based on the start month
+	// In the sequence:
+	// Q1: startMonth to (startMonth + 2) % 12
+	// Q2: startMonth+3 to (startMonth + 5) % 12
+	// Q3: startMonth+6 to (startMonth + 8) % 12
+	// Q4: startMonth+9 to (startMonth + 11) % 12
+	
+	// Get offset from start month and compute (with proper cycle wraparound)  
+	monthOffset := (currentMonth - startMonth + 12) % 12
+	quarterIndex := monthOffset / 3 // 0 for Q1, 1 for Q2, 2 for Q3, 3 for Q4
+	
+	// Convert to 1-based quarter numbers
+	quarter := quarterIndex + 1
+	
+	// Get the next quarter in sequence with year wraparound
+	nextQuarter := quarter + 1
+	if nextQuarter > 4 {
+		nextQuarter = 1
+		currentYear++
+	}
+	
+	// Return the full period string
+	return fmt.Sprintf("%d-Q%d", currentYear, nextQuarter)
+}
+
+// getNextYear returns the next fiscal year based on the configured fiscal year start month
+// For example, if year start is June and current date is April 2025,
+// we are in fiscal year 2024 (which started in June 2024), so next year is 2025
+// If current date is July 2025, we are in fiscal year 2025 (started June 2025), so next year is 2026
+func getNextYear(yearStart string) int {
+	// Map month names to numbers
+	monthMap := map[string]int{
+		"January":   1, "February":  2, "March":     3,
+		"April":     4, "May":       5, "June":      6,
+		"July":      7, "August":    8, "September": 9,
+		"October":  10, "November": 11, "December": 12,
+	}
+
+	startMonth, ok := monthMap[yearStart]
+	if !ok {
+		startMonth = 1 // Default to January
+	}
+
+	now := time.Now()
+	currentYear := now.Year()
+	currentMonth := int(now.Month())
+	
+	// Determine the fiscal year we're currently in
+	// If the quarter/year starts in June (month 6):
+	// - Months Jan-May (1-5) belong to the previous fiscal year
+	// - Months Jun-Dec (6-12) belong to the current fiscal year
+	
+	var fiscalYear int
+	if currentMonth < startMonth {
+		// We're before the fiscal year start, so we're in the previous fiscal year
+		fiscalYear = currentYear - 1
+	} else {
+		// We're at or after the fiscal year start, so we're in the current fiscal year
+		fiscalYear = currentYear
+	}
+	
+	// The next fiscal year is simply fiscalYear + 1
+	return fiscalYear + 1
 }
 
 func (m *Model) editGoal() tea.Cmd {

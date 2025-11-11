@@ -56,6 +56,12 @@
 # ]
 
 # -----------------------------------------------
+# Settings specific to 'goal' tool
+#[goals]
+# Fiscal year start month (defaults to January). Supported values: "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"
+# year-start = "June"
+
+# -----------------------------------------------
 # Color customization for TUI
 # You can specify colors using three different methods:
 #   1. Color names (ANSI 16-color palette) - recommended for readability

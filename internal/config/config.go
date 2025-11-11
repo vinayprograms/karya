@@ -89,6 +89,10 @@ type Todo struct {
 	Someday       []string `toml:"someday"`
 	SpecialTags   []string `toml:"special-tags"`
 }
+
+type Goals struct {
+	YearStart string `toml:"year-start"`
+}
 type GeneralConfig struct {
 	EDITOR  string `toml:"editor"`
 	Verbose bool   `toml:"verbose"`
@@ -98,6 +102,7 @@ type Config struct {
 	GeneralConfig GeneralConfig `toml:"general"`
 	Directories   Directories   `toml:"directories"`
 	Todo          Todo          `toml:"todo"`
+	Goals         Goals         `toml:"goals"`
 	Colors        ColorScheme   `toml:"colors"`
 }
 
