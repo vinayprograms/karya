@@ -77,6 +77,10 @@ type projectModel struct {
 	verbose       bool
 	launchProject string
 	cfg           *config.Config
+	filtering     bool
+	filterMode    string
+	customFilter  string
+	allItems      []list.Item
 }
 
 type projectItem struct {
@@ -148,6 +152,49 @@ func (m projectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+		if m.filtering {
+			switch msg.String() {
+			case "esc":
+				m.filtering = false
+				m.customFilter = ""
+				m.list.SetItems(m.allItems)
+				return m, nil
+			case "enter":
+				m.filtering = false
+				return m, nil
+			case "backspace":
+				if len(m.customFilter) > 0 {
+					m.customFilter = m.customFilter[:len(m.customFilter)-1]
+					m.applyProjectFilter()
+				} else {
+					m.filtering = false
+					m.list.SetItems(m.allItems)
+				}
+				return m, nil
+			default:
+				if len(msg.Runes) > 0 && msg.Runes[0] >= 32 && msg.Runes[0] <= 126 {
+					m.customFilter += string(msg.Runes[0])
+					m.applyProjectFilter()
+					return m, nil
+				}
+				return m, nil
+			}
+		}
+
+		if msg.String() == "/" {
+			m.filtering = true
+			m.filterMode = "project"
+			m.customFilter = ""
+			return m, nil
+		}
+
+		if msg.String() == "*" {
+			m.filtering = true
+			m.filterMode = "fulltext"
+			m.customFilter = ""
+			return m, nil
+		}
+
 		if msg.String() == "q" {
 			m.quitting = true
 			return m, tea.Quit
@@ -179,6 +226,33 @@ func (m projectModel) View() string {
 	
 	view := m.list.View()
 	
+	// Add filter line if filtering
+	if m.filtering || m.customFilter != "" {
+		lines := strings.Split(view, "\n")
+		if len(lines) > 0 {
+			header := []string{lines[0]}
+			
+			var filterText string
+			modeLabel := "Filter projects"
+			if m.filterMode == "fulltext" {
+				modeLabel = "Fulltext search"
+			}
+			if m.filtering {
+				filterText = fmt.Sprintf("%s: %s▓", modeLabel, m.customFilter)
+			} else {
+				filterText = fmt.Sprintf("%s: %s", modeLabel, m.customFilter)
+			}
+			filterLine := colors.filterStyle.
+				Padding(0, 1).
+				Render(filterText)
+			header = append(header, filterLine)
+			
+			result := header
+			result = append(result, lines[1:]...)
+			view = strings.Join(result, "\n")
+		}
+	}
+	
 	// Customize the status bar to show "projects" instead of "items"
 	lines := strings.Split(view, "\n")
 	if len(lines) > 0 {
@@ -195,6 +269,57 @@ func (m projectModel) View() string {
 	}
 	
 	return view
+}
+
+func (m *projectModel) applyProjectFilter() {
+	if m.customFilter == "" {
+		m.list.SetItems(m.allItems)
+		return
+	}
+
+	filterLower := strings.ToLower(m.customFilter)
+	var filteredItems []list.Item
+
+	if m.filterMode == "fulltext" {
+		// Search across all notes in all projects
+		for _, item := range m.allItems {
+			if prjItem, ok := item.(projectItem); ok {
+				notesPath := filepath.Join(prjItem.project.Path, "notes")
+				if _, err := os.Stat(notesPath); err == nil {
+					// Check if this project has any matching notes
+					if hasMatchingNotes(notesPath, filterLower) {
+						filteredItems = append(filteredItems, item)
+					}
+				}
+			}
+		}
+	} else {
+		// Filter by project name
+		for _, item := range m.allItems {
+			if prjItem, ok := item.(projectItem); ok {
+				if strings.Contains(strings.ToLower(prjItem.project.Name), filterLower) {
+					filteredItems = append(filteredItems, item)
+				}
+			}
+		}
+	}
+
+	m.list.SetItems(filteredItems)
+}
+
+func hasMatchingNotes(notesPath, searchTerm string) bool {
+	zettels, err := zet.ListZettels(notesPath)
+	if err != nil {
+		return false
+	}
+
+	for _, z := range zettels {
+		results := zet.SearchInFile(z.Path, searchTerm)
+		if len(results) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 type zettelItem struct {
@@ -420,13 +545,23 @@ func (m zettelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if msg.String() == "/" {
-			m.filtering = true
-			m.filterMode = "title"
+			if m.projectName != "" {
+				// If in a project, treat as title search
+				m.filtering = true
+				m.customFilter = ""
+				m.filterMode = "title"
+			} else {
+				// If in project list, filter projects
+				m.filtering = true
+				m.customFilter = ""
+				m.filterMode = "project"
+			}
 			return m, nil
 		}
 
 		if msg.String() == "*" {
 			m.filtering = true
+			m.customFilter = ""
 			m.filterMode = "fulltext"
 			return m, nil
 		}
@@ -536,6 +671,8 @@ func (m zettelModel) View() string {
 			modeLabel := "Search by title"
 			if m.filterMode == "fulltext" {
 				modeLabel = "Fulltext search"
+			} else if m.filterMode == "project" {
+				modeLabel = "Search projects"
 			}
 			if m.filtering {
 				filterText = fmt.Sprintf("%s: %s▓", modeLabel, m.customFilter)
@@ -582,7 +719,7 @@ func (m zettelModel) View() string {
 		navStyle := colors.navStyle
 
 		line1 := commandStyle.Render(" Commands: n:new • l:last • d:delete • T:toc • c:count")
-		line2 := navStyle.Render(" ↑↓/jk • g/G:top/bottom • Ctrl+d/u:page • /:title search • *:fulltext search • s:sort order • Enter:edit • q/esc:back • ?:more help ")
+		line2 := navStyle.Render(" ↑↓/jk • g/G:top/bottom • Ctrl+d/u:page • /:project filter • *:fulltext search • s:sort order • Enter:edit • q/esc:back • ?:more help ")
 
 		lines = append(lines, line1, line2, "")
 		view = strings.Join(lines, "\n")
@@ -661,23 +798,33 @@ func (m *zettelModel) applyFilter() {
 		m.searchResults = make(map[string][]SearchResult)
 	}
 
-	for _, item := range m.allItems {
-		if zetItem, ok := item.(zettelItem); ok {
-			if m.filterMode == "title" {
-				if strings.Contains(strings.ToLower(zetItem.zettel.ID), filterLower) ||
-					strings.Contains(strings.ToLower(zetItem.zettel.Title), filterLower) {
+	if m.filterMode == "project" {
+		for _, item := range m.allItems {
+			if prjItem, ok := item.(projectItem); ok {
+				if strings.Contains(strings.ToLower(prjItem.project.Name), filterLower) {
 					filteredItems = append(filteredItems, item)
 				}
-			} else if m.filterMode == "fulltext" {
-				results := m.searchInFile(zetItem.zettel.Path, filterLower)
-				if len(results) > 0 {
-					m.searchResults[zetItem.zettel.ID] = results
-					newItem := zettelItem{
-						zettel:        zetItem.zettel,
-						verbose:       zetItem.verbose,
-						searchResults: results,
+			}
+		}
+	} else {
+		for _, item := range m.allItems {
+			if zetItem, ok := item.(zettelItem); ok {
+				if m.filterMode == "title" {
+					if strings.Contains(strings.ToLower(zetItem.zettel.ID), filterLower) ||
+						strings.Contains(strings.ToLower(zetItem.zettel.Title), filterLower) {
+						filteredItems = append(filteredItems, item)
 					}
-					filteredItems = append(filteredItems, newItem)
+				} else if m.filterMode == "fulltext" {
+					results := m.searchInFile(zetItem.zettel.Path, filterLower)
+					if len(results) > 0 {
+						m.searchResults[zetItem.zettel.ID] = results
+						newItem := zettelItem{
+							zettel:        zetItem.zettel,
+							verbose:       zetItem.verbose,
+							searchResults: results,
+						}
+						filteredItems = append(filteredItems, newItem)
+					}
 				}
 			}
 		}
@@ -926,6 +1073,9 @@ func getNotesDir(prjDir, prjName string) string {
 }
 
 func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
+	var savedFilterMode string
+	var savedFilter string
+	
 	for {
 		projects, err := listProjects(prjDir, cfg)
 		if err != nil {
@@ -975,6 +1125,14 @@ func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 					key.WithHelp("enter", "open"),
 				),
 				key.NewBinding(
+					key.WithKeys("/"),
+					key.WithHelp("/", "filter"),
+				),
+				key.NewBinding(
+					key.WithKeys("*"),
+					key.WithHelp("*", "search"),
+				),
+				key.NewBinding(
 					key.WithKeys("j"),
 					key.WithHelp("j", "down"),
 				),
@@ -990,6 +1148,14 @@ func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 				key.NewBinding(
 					key.WithKeys("enter"),
 					key.WithHelp("enter", "open selected project"),
+				),
+				key.NewBinding(
+					key.WithKeys("/"),
+					key.WithHelp("/", "filter projects"),
+				),
+				key.NewBinding(
+					key.WithKeys("*"),
+					key.WithHelp("*", "fulltext search across all notes"),
 				),
 				key.NewBinding(
 					key.WithKeys("j", "down"),
@@ -1038,6 +1204,14 @@ func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 			verbose:       verbose,
 			launchProject: "",
 			cfg:           cfg,
+			allItems:      items,
+			filterMode:    savedFilterMode,
+			customFilter:  savedFilter,
+		}
+		
+		// Restore filter if it was active
+		if savedFilter != "" {
+			m.applyProjectFilter()
 		}
 
 		p := tea.NewProgram(m, tea.WithAltScreen())
@@ -1047,6 +1221,10 @@ func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 		}
 
 		if finalModel, ok := finalModel.(projectModel); ok && finalModel.launchProject != "" {
+			// Save filter state before launching project
+			savedFilterMode = finalModel.filterMode
+			savedFilter = finalModel.customFilter
+			
 			projectName := finalModel.launchProject
 
 			exists, err := checkProjectDir(prjDir, projectName)
@@ -1143,6 +1321,14 @@ func showZettelTUI(zetDir, projectName, editor string, verbose bool) bool {
 				key.WithHelp("enter", "edit"),
 			),
 			key.NewBinding(
+				key.WithKeys("/"),
+				key.WithHelp("/", "filter"),
+			),
+			key.NewBinding(
+				key.WithKeys("*"),
+				key.WithHelp("*", "search"),
+			),
+			key.NewBinding(
 				key.WithKeys("s"),
 				key.WithHelp("s", "sort"),
 			),
@@ -1166,6 +1352,14 @@ func showZettelTUI(zetDir, projectName, editor string, verbose bool) bool {
 			key.NewBinding(
 				key.WithKeys("enter"),
 				key.WithHelp("enter", "edit selected note"),
+			),
+			key.NewBinding(
+				key.WithKeys("/"),
+				key.WithHelp("/", "filter by title"),
+			),
+			key.NewBinding(
+				key.WithKeys("*"),
+				key.WithHelp("*", "fulltext search"),
 			),
 			key.NewBinding(
 				key.WithKeys("s"),
@@ -1287,8 +1481,8 @@ INTERACTIVE MODE (Notes):
     Ctrl+f / Ctrl+b     Page down / up (emacs-style)
     PgDn / PgUp         Page down / up
     s                   Toggle sort (newest first / oldest first)
-    /                   Start filtering (substring match on ID and title)
-    *                   Start fulltext search
+    /                   Filter project names or note titles
+    *                   Start fulltext search across all notes
     Enter               Edit selected note / Exit filter mode
     Esc                 Exit filter mode or clear filter
     q, Ctrl+C           Quit
