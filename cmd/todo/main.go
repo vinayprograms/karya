@@ -540,8 +540,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			log.Printf("Editor error: %v", msg.err)
 		}
-		// Reload tasks after editing
-		tasks, err := task.ListTasks(m.config, m.project, m.config.Todo.ShowCompleted)
+		// Reload tasks after editing (including inbox)
+		tasks, err := loadTaskWithInbox(m.config, m.project, m.config.Todo.ShowCompleted)
 		if err != nil {
 			return m, tea.Quit
 		}
@@ -749,7 +749,10 @@ func loadTasksCmd(cfg *config.Config, project string) tea.Cmd {
 
 func openEditorCmd(cfg *config.Config, t *task.Task, searchTerm string) tea.Cmd {
 	var filePath string
-	if cfg.Todo.Structured {
+	if t.Project == "inbox" {
+		// Inbox tasks are in the inbox.md file directly
+		filePath = cfg.GetInboxFilePath()
+	} else if cfg.Todo.Structured {
 		// Structured mode: construct path from project/zettel
 		filePath = filepath.Join(cfg.Directories.Projects, t.Project, "notes", t.Zettel, "README.md")
 	} else {
