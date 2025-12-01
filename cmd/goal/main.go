@@ -296,15 +296,15 @@ func (d goalDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 func NewGoalList(horizon goal.Horizon, goalManager *goal.GoalManager) list.Model {
 	goals, err := goalManager.ListGoalsByHorizon(horizon)
 	if err != nil {
-		goals = make(map[string][]goal.GoalInfo)
+		goals = make(map[string][]string)
 	}
 
 	var items []list.Item
-	for period, goalInfos := range goals {
-		for _, info := range goalInfos {
+	for period, goalTitles := range goals {
+		for _, title := range goalTitles {
 			g := Goal{
-				ID:      info.ID,    // Filename without .md (for file path)
-				Title:   info.Title, // Display title from file content
+				ID:      title,
+				Title:   title,
 				Period:  period,
 				Horizon: horizon,
 			}
@@ -895,7 +895,7 @@ func (m *Model) editGoal() tea.Cmd {
 	}
 
 	if goalItem, ok := item.(GoalItem); ok {
-		goalPath := m.goalManager.GetGoalPathForHorizon(m.currentHorizon, goalItem.goal.Period, goalItem.goal.ID)
+		goalPath := m.goalManager.GetGoalPathForHorizon(m.currentHorizon, goalItem.goal.Period, goalItem.goal.Title)
 		
 		editor := m.editor
 		if strings.HasPrefix(editor, "~/") {
