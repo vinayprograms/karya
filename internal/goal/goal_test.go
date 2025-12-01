@@ -100,22 +100,22 @@ func TestGetGoalPathForHorizon(t *testing.T) {
 	gm := NewGoalManager(tempDir)
 
 	// Test various horizon periods
-	// goalID is the filename without .md extension (not the display title)
 	testCases := []struct {
 		horizon Horizon
 		period  string
-		goalID  string
+		title   string
 	}{
-		{HorizonMonthly, "2025-11", "Test_Goal"},
-		{HorizonQuarterly, "2025-Q1", "Quarterly_Goal"},
-		{HorizonYearly, "2025", "Yearly_Goal"},
-		{HorizonShortTerm, "2025-2027", "Short_Term_Goal"},
-		{HorizonLongTerm, "2025-2035", "Long_Term_Goal"},
+		{HorizonMonthly, "2025-11", "Test Goal"},
+		{HorizonQuarterly, "2025-Q1", "Quarterly Goal"},
+		{HorizonYearly, "2025", "Yearly Goal"},
+		{HorizonShortTerm, "2025-2027", "Short Term Goal"},
+		{HorizonLongTerm, "2025-2035", "Long Term Goal"},
 	}
 
 	for _, tc := range testCases {
-		path := gm.GetGoalPathForHorizon(tc.horizon, tc.period, tc.goalID)
-		expectedPath := filepath.Join(tempDir, string(tc.horizon), tc.period, tc.goalID+".md")
+		path := gm.GetGoalPathForHorizon(tc.horizon, tc.period, tc.title)
+		expectedFilename := sanitizeFilename(tc.title) + ".md"
+		expectedPath := filepath.Join(tempDir, string(tc.horizon), tc.period, expectedFilename)
 
 		if path != expectedPath {
 			t.Errorf("Expected path %s, got %s", expectedPath, path)
