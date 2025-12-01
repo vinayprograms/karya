@@ -146,22 +146,28 @@ func (gm *GoalManager) ListGoals() (map[Horizon]map[string][]string, error) {
 	return goals, nil
 }
 
+// GoalInfo contains both the filename (ID) and the display title
+type GoalInfo struct {
+	ID    string // The filename without .md extension (used for file path)
+	Title string // The display title extracted from the file content
+}
+
 // ListGoalsByHorizon returns all goals for a specific horizon
-func (gm *GoalManager) ListGoalsByHorizon(horizon Horizon) (map[string][]string, error) {
+func (gm *GoalManager) ListGoalsByHorizon(horizon Horizon) (map[string][]GoalInfo, error) {
 	horizonPath := gm.GetHorizonPath(horizon)
 	horizons, err := os.ReadDir(horizonPath)
 	if err != nil {
 		return nil, err
 	}
 	
-	goals := make(map[string][]string)
+	goals := make(map[string][]GoalInfo)
 	for _, horizonDir := range horizons {
 		if !horizonDir.IsDir() {
 			continue
 		}
 		
 		period := horizonDir.Name()
-		goals[period] = []string{}
+		goals[period] = []GoalInfo{}
 		
 		periodPath := filepath.Join(horizonPath, period)
 		goalFiles, err := os.ReadDir(periodPath)
@@ -171,12 +177,15 @@ func (gm *GoalManager) ListGoalsByHorizon(horizon Horizon) (map[string][]string,
 		
 		for _, file := range goalFiles {
 			if !file.IsDir() && strings.HasSuffix(file.Name(), ".md") {
+				// Get the filename without .md extension as ID
+				filename := strings.TrimSuffix(file.Name(), ".md")
 				// Read the title from the file content
 				filePath := filepath.Join(periodPath, file.Name())
 				goalTitle := extractTitleFromFile(filePath)
-				if goalTitle != "" {
-					goals[period] = append(goals[period], goalTitle)
+				if goalTitle == "" {
+					goalTitle = filename // Fallback to filename if no title found
 				}
+				goals[period] = append(goals[period], GoalInfo{ID: filename, Title: goalTitle})
 			}
 		}
 	}
@@ -184,9 +193,10 @@ func (gm *GoalManager) ListGoalsByHorizon(horizon Horizon) (map[string][]string,
 	return goals, nil
 }
 
-// GetGoalPathForHorizon returns the file path for a goal at a given horizon, period, and title
-func (gm *GoalManager) GetGoalPathForHorizon(horizon Horizon, period string, title string) string {
-	// Sanitize the title to create a valid filename
-	goalPath := gm.GetGoalPath(horizon, period, title)
-	return goalPath
+// GetGoalPathForHorizon returns the file path for a goal at a given horizon, period, and goalID
+// The goalID should be the original filename (without .md), not the display title
+func (gm *GoalManager) GetGoalPathForHorizon(horizon Horizon, period string, goalID string) string {
+	horizonPath := gm.GetHorizonPath(horizon)
+	periodPath := filepath.Join(horizonPath, period)
+	return filepath.Join(periodPath, fmt.Sprintf("%s.md", goalID))
 }
