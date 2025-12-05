@@ -1332,6 +1332,17 @@ func loadTaskWithInbox(c *config.Config, project string, showCompleted bool) ([]
 		return nil, err
 	}
 
+	// Filter inbox tasks if showCompleted is false
+	if !showCompleted {
+		var filtered []*task.Task
+		for _, t := range inboxTasks {
+			if !t.IsCompleted(c) {
+				filtered = append(filtered, t)
+			}
+		}
+		inboxTasks = filtered
+	}
+
 	// Merge the tasks - regular tasks first, then inbox tasks
 	allTasks := append(regularTasks, inboxTasks...)
 
