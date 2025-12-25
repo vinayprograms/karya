@@ -144,29 +144,24 @@ func GetLastZettelID(zetDir string) (string, error) {
 		return "", err
 	}
 
-	// Get the HEAD reference
-	ref, err := repo.Head()
+	// Iterate through commits to find the last one that touched a zettel
+	commitIter, err := repo.Log(&git.LogOptions{})
 	if err != nil {
 		return "", err
 	}
+	defer commitIter.Close()
 
-	// Get the commit object
-	commit, err := repo.CommitObject(ref.Hash())
-	if err != nil {
-		return "", err
-	}
+	var zetID string
+	err = commitIter.ForEach(func(commit *object.Commit) error {
+		// Get the diff for this commit
+		stats, err := commit.Stats()
+		if err != nil {
+			return nil // Skip this commit, try next
+		}
 
-	// Get the tree
-	tree, err := commit.Tree()
-	if err != nil {
-		return "", err
-	}
-
-	// Find zettel IDs in the tree
-	zetID := ""
-	tree.Files().ForEach(func(f *object.File) error {
-		if strings.Contains(f.Name, "/") {
-			parts := strings.Split(f.Name, "/")
+		// Check each changed file
+		for _, stat := range stats {
+			parts := strings.Split(stat.Name, "/")
 			if len(parts) > 0 && IsValidZettelID(parts[0]) {
 				zetID = parts[0]
 				return fmt.Errorf("found") // Stop iteration
@@ -175,8 +170,13 @@ func GetLastZettelID(zetDir string) (string, error) {
 		return nil
 	})
 
+	// "found" error is expected - it's how we stop iteration
+	if err != nil && err.Error() != "found" {
+		return "", err
+	}
+
 	if zetID == "" {
-		return "", fmt.Errorf("could not determine zettel ID from last commit")
+		return "", fmt.Errorf("could not determine zettel ID from git history")
 	}
 
 	return zetID, nil
