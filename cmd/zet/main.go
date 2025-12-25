@@ -202,7 +202,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.deleteConfirmSelection = 0
 
 					// Reload zettels
-					zettels, err := zet.ListZettels(m.zetDir)
+					zettels, err := zet.ListZettelsFromIndex(m.zetDir)
 					if err == nil {
 						m.zettels = zettels
 						items := make([]list.Item, len(m.zettels))
@@ -891,7 +891,7 @@ func main() {
 			}
 		}
 	case "ls", "list":
-		zettels, err := zet.ListZettels(zetDir)
+		zettels, err := zet.ListZettelsFromIndex(zetDir)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -1006,7 +1006,7 @@ ENVIRONMENT VARIABLES:
 }
 
 func showInteractiveTUI(zetDir, editor string, verbose bool) {
-	zettels, err := zet.ListZettels(zetDir)
+	zettels, err := zet.ListZettelsFromIndex(zetDir)
 	if err != nil {
 		log.Fatal(err)
 	}
