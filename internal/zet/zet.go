@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/vinayprograms/karya/internal/parallel"
 )
 
 type Zettel struct {
@@ -53,53 +55,75 @@ func ListZettels(zetDir string) ([]Zettel, error) {
 		return []Zettel{}, nil
 	}
 
-	numWorkers := len(validDirs)
-	maxWorkers := 8
-	if numWorkers > maxWorkers {
-		numWorkers = maxWorkers
-	}
-	if numWorkers < 1 {
-		numWorkers = 1
-	}
-
-	jobs := make(chan string, len(validDirs))
-	results := make(chan Zettel, len(validDirs))
-
-	for w := 0; w < numWorkers; w++ {
-		go func() {
-			for zetID := range jobs {
-				readmePath := filepath.Join(zetDir, zetID, "README.md")
-				title, err := GetZettelTitle(zetDir, zetID)
-				if err != nil {
-					continue
-				}
-				results <- Zettel{
-					ID:    zetID,
-					Title: title,
-					Path:  readmePath,
-				}
-			}
-		}()
-	}
-
-	for _, zetID := range validDirs {
-		jobs <- zetID
-	}
-	close(jobs)
-
-	var zettels []Zettel
-	for i := 0; i < len(validDirs); i++ {
-		select {
-		case z := <-results:
-			zettels = append(zettels, z)
-		case <-time.After(5 * time.Second):
-			break
+	zettels := parallel.Collect(validDirs, func(zetID string) (Zettel, bool) {
+		title, err := GetZettelTitle(zetDir, zetID)
+		if err != nil {
+			return Zettel{}, false
 		}
-	}
+		return Zettel{
+			ID:    zetID,
+			Title: title,
+			Path:  filepath.Join(zetDir, zetID, "README.md"),
+		}, true
+	})
 
 	sort.Slice(zettels, func(i, j int) bool {
 		return zettels[i].ID > zettels[j].ID
 	})
+
+	return zettels, nil
+}
+
+// ListZettelsFromIndex reads the zettel list from the root README.md index file.
+// This is much faster than ListZettels as it reads a single file instead of
+// opening each zettel's README.md. Falls back to ListZettels if index is missing.
+func ListZettelsFromIndex(zetDir string) ([]Zettel, error) {
+	readmePath := filepath.Join(zetDir, "README.md")
+	file, err := os.Open(readmePath)
+	if err != nil {
+		// Fall back to slow method if index doesn't exist
+		return ListZettels(zetDir)
+	}
+	defer file.Close()
+
+	var zettels []Zettel
+	scanner := bufio.NewScanner(file)
+
+	// Index format: * [ID](./ID/README.md) - Title
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "* [") {
+			continue
+		}
+
+		// Parse: * [ID](./ID/README.md) - Title
+		closeBracket := strings.Index(line, "]")
+		if closeBracket == -1 {
+			continue
+		}
+		id := line[3:closeBracket]
+
+		dashIdx := strings.Index(line, " - ")
+		if dashIdx == -1 {
+			continue
+		}
+		title := line[dashIdx+3:]
+
+		zettels = append(zettels, Zettel{
+			ID:    id,
+			Title: title,
+			Path:  filepath.Join(zetDir, id, "README.md"),
+		})
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	// If index was empty or malformed, fall back to slow method
+	if len(zettels) == 0 {
+		return ListZettels(zetDir)
+	}
 
 	return zettels, nil
 }
