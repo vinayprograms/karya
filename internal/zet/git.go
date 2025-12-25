@@ -44,7 +44,6 @@ func GitCommit(zetDir, zetID, title string) error {
 	}
 
 	if status.IsClean() {
-		fmt.Println("No changes to commit")
 		return nil
 	}
 
@@ -62,7 +61,6 @@ func GitCommit(zetDir, zetID, title string) error {
 	// Check for remotes
 	remotes, err := repo.Remotes()
 	if err != nil || len(remotes) == 0 {
-		fmt.Println("No remotes for this repository")
 		return nil
 	}
 
