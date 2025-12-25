@@ -317,3 +317,19 @@ func SearchInFile(filePath, searchTerm string) []SearchResult {
 func GenerateZettelID() string {
 	return time.Now().UTC().Format("20060102150405")
 }
+
+// ReadZettelContent reads the full content of a zettel
+func ReadZettelContent(zetDir, zetID string) (string, error) {
+	readmePath := filepath.Join(zetDir, zetID, "README.md")
+	content, err := os.ReadFile(readmePath)
+	if err != nil {
+		return "", err
+	}
+	return string(content), nil
+}
+
+// WriteZettelContent writes content to a zettel
+func WriteZettelContent(zetDir, zetID, content string) error {
+	readmePath := filepath.Join(zetDir, zetID, "README.md")
+	return os.WriteFile(readmePath, []byte(content), 0644)
+}
