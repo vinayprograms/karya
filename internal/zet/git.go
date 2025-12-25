@@ -171,8 +171,12 @@ func GetLastZettelID(zetDir string) (string, error) {
 		for _, stat := range stats {
 			parts := strings.Split(stat.Name, "/")
 			if len(parts) > 0 && IsValidZettelID(parts[0]) {
-				zetID = parts[0]
-				return fmt.Errorf("found") // Stop iteration
+				// Verify zettel still exists (skip deleted zettels)
+				zetPath := filepath.Join(zetDir, parts[0])
+				if _, err := os.Stat(zetPath); err == nil {
+					zetID = parts[0]
+					return fmt.Errorf("found") // Stop iteration
+				}
 			}
 		}
 		return nil
