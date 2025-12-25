@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -919,6 +920,13 @@ func main() {
 		if err := cmd.Run(); err != nil {
 			log.Fatal(err)
 		}
+	case "mcp":
+		// Start MCP server on stdio
+		mcpServer := zet.NewMCPServer(zetDir)
+		ctx := context.Background()
+		if err := mcpServer.Run(ctx); err != nil {
+			log.Fatal(err)
+		}
 	default:
 		fmt.Printf("Unknown subcommand: %s\n", subcommand)
 		printHelp()
@@ -947,6 +955,7 @@ COMMANDS:
     d, todo             Find all tasks across zettels
     last                Edit the most recently modified zettel
     toc                 Edit the table of contents (README.md)
+    mcp                 Start MCP server (stdio) for AI agent integration
     -h, --help, help    Show this help message
 
 INTERACTIVE MODE:
@@ -983,6 +992,7 @@ EXAMPLES:
     zet todo                      # List all unchecked todo items
     zet last                      # Edit most recent zettel
     zet count                     # Show total zettel count
+    zet mcp                       # Start MCP server for AI agents
 
 CONFIGURATION:
     Set zettelkasten directory in ~/.config/karya/config.toml:

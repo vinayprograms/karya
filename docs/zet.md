@@ -130,3 +130,55 @@ zettelkasten = "$HOME/Documents/zet"
 - Use `zet t?` when you remember part of the title
 - Keep your TOC (`zet toc`) organized with categories or themes
 - The `zet todo` command helps track action items across all your notes
+
+## MCP Server Integration
+
+The `zet mcp` command starts an MCP (Model Context Protocol) server that allows AI agents to interact with your zettelkasten. This enables AI assistants to create, read, search, and manage your notes programmatically.
+
+### Starting the MCP Server
+
+```bash
+zet mcp
+```
+
+This starts a stdio-based MCP server that can be registered with AI agents like Claude Desktop, Cursor, or other MCP-compatible clients.
+
+### Available Tools
+
+The MCP server exposes the following tools:
+
+| Tool | Description |
+|------|-------------|
+| `create_zettel` | Create a new zettel with an optional title |
+| `list_zettels` | List all zettels (optionally with limit) |
+| `get_zettel` | Get full content of a zettel by ID |
+| `search_zettels` | Search across all zettel contents |
+| `search_titles` | Search in zettel titles only |
+| `count_zettels` | Get total count of zettels |
+| `delete_zettel` | Delete a zettel by ID |
+| `update_zettel` | Update a zettel's content |
+| `get_last_zettel` | Get the most recently modified zettel |
+| `find_todos` | Find all TODO items across zettels |
+
+### Configuration Example (Claude Desktop)
+
+Add to your Claude Desktop config (`~/.config/claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "zet": {
+      "command": "/path/to/zet",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+### Example Usage
+
+Once configured, you can ask your AI assistant to:
+- "Create a new zettel about machine learning"
+- "Search my zettels for notes about Go programming"
+- "Show me my most recent zettel"
+- "Find all TODO items in my zettelkasten"
