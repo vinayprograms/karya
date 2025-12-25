@@ -8,9 +8,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/vinayprograms/karya/internal/config"
+	"github.com/vinayprograms/karya/internal/parallel"
 )
 
 // Task represents a parsed task from a line
@@ -302,58 +302,26 @@ func ListTasks(c *config.Config, project string, showCompleted bool) ([]*Task, e
 		return nil, err
 	}
 
-	// Use concurrent processing for better performance
-	// Choose between basic or adaptive worker calculation
-	numWorkers := calculateAdaptiveWorkers(len(files), "file-processing")
-	if numWorkers == 0 {
+	if len(files) == 0 {
 		return []*Task{}, nil
 	}
 
-	// Channel for file paths
-	fileChan := make(chan string, len(files))
-	// Channel for results
-	resultChan := make(chan []*Task, len(files))
-	// WaitGroup for workers
-	var wg sync.WaitGroup
-
-	// Start workers
-	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for file := range fileChan {
-				tasks, err := ProcessFile(c, file)
-				if err != nil {
-					// Skip files with errors
-					continue
-				}
-				resultChan <- tasks
-			}
-		}()
-	}
-
-	// Send files to workers
-	go func() {
-		for _, file := range files {
-			fileChan <- file
+	// Use parallel processing with the shared parallel package
+	taskSlices := parallel.Process(files, func(file string) *[]*Task {
+		tasks, err := ProcessFile(c, file)
+		if err != nil {
+			return nil
 		}
-		close(fileChan)
-	}()
+		return &tasks
+	})
 
-	// Close result channel when all workers done
-	go func() {
-		wg.Wait()
-		close(resultChan)
-	}()
-
-	// Collect results
+	// Flatten results
 	var allTasks []*Task
-	for tasks := range resultChan {
-		allTasks = append(allTasks, tasks...)
+	for _, tasksPtr := range taskSlices {
+		allTasks = append(allTasks, *tasksPtr...)
 	}
 
 	if !showCompleted {
-		// Exclude completed tasks
 		var filtered []*Task
 		for _, t := range allTasks {
 			if !t.IsCompleted(c) {
@@ -380,63 +348,38 @@ func SummarizeProjects(c *config.Config) (map[string]int, error) {
 		return nil, err
 	}
 
-	// Use concurrent processing
-	numWorkers := calculateOptimalWorkers(len(files), "file-processing")
-	if numWorkers == 0 {
+	if len(files) == 0 {
 		return make(map[string]int), nil
 	}
 
-	type result struct {
+	type projectCount struct {
 		project string
 		count   int
 	}
 
-	fileChan := make(chan string, len(files))
-	resultChan := make(chan result, len(files))
-	var wg sync.WaitGroup
-
-	// Start workers
-	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for file := range fileChan {
-				tasks, err := ProcessFile(c, file)
-				if err != nil {
-					continue
-				}
-				parts := strings.Split(file, string(filepath.Separator))
-				project := parts[len(parts)-4]
-				activeCount := 0
-				for _, t := range tasks {
-					if t.IsActive(c) {
-						activeCount++
-					}
-				}
-				if activeCount > 0 {
-					resultChan <- result{project: project, count: activeCount}
-				}
-			}
-		}()
-	}
-
-	// Send files to workers
-	go func() {
-		for _, file := range files {
-			fileChan <- file
+	// Use parallel processing with the shared parallel package
+	results := parallel.Collect(files, func(file string) (projectCount, bool) {
+		tasks, err := ProcessFile(c, file)
+		if err != nil {
+			return projectCount{}, false
 		}
-		close(fileChan)
-	}()
+		parts := strings.Split(file, string(filepath.Separator))
+		project := parts[len(parts)-4]
+		activeCount := 0
+		for _, t := range tasks {
+			if t.IsActive(c) {
+				activeCount++
+			}
+		}
+		if activeCount > 0 {
+			return projectCount{project: project, count: activeCount}, true
+		}
+		return projectCount{}, false
+	})
 
-	// Close result channel when all workers done
-	go func() {
-		wg.Wait()
-		close(resultChan)
-	}()
-
-	// Collect results
+	// Aggregate results
 	summary := make(map[string]int)
-	for res := range resultChan {
+	for _, res := range results {
 		summary[res.project] += res.count
 	}
 
