@@ -91,19 +91,27 @@ func GitDeleteZettel(zetDir, zetID, title string) error {
 		return err
 	}
 
-	// Remove the zettel directory
+	// Remove the zettel directory if it still exists
 	zetPath := filepath.Join(zetDir, zetID)
-	if err := os.RemoveAll(zetPath); err != nil {
-		return err
+	if _, err := os.Stat(zetPath); err == nil {
+		if err := os.RemoveAll(zetPath); err != nil {
+			return err
+		}
 	}
 
-	// Stage the deletion
-	if _, err := w.Remove(zetID); err != nil {
-		// If remove fails, just add the README.md
-		w.Add("README.md")
-	} else {
-		w.Add("README.md")
+	// Stage the deletion - use Add with glob to stage all changes
+	// This works whether files were deleted before or by us
+	if _, err := w.Add(zetID); err != nil {
+		// Zettel dir already deleted, stage via status
+		status, err := w.Status()
+		if err != nil {
+			return err
+		}
+		for path := range status {
+			w.Add(path)
+		}
 	}
+	w.Add("README.md")
 
 	// Commit the deletion
 	commitMsg := fmt.Sprintf("Delete zettel '%s'", title)
