@@ -73,6 +73,72 @@ func TestListZettels(t *testing.T) {
 	}
 }
 
+func TestListZettelsFromIndex(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	zettels := []struct {
+		id    string
+		title string
+	}{
+		{"20231001120000", "First Zettel"},
+		{"20231002130000", "Second Zettel"},
+		{"20231003140000", "Third Zettel"},
+	}
+
+	for _, z := range zettels {
+		err := CreateZettel(tmpDir, z.id, z.title)
+		if err != nil {
+			t.Fatalf("Failed to create zettel: %v", err)
+		}
+	}
+
+	// Create the index README
+	err := UpdateReadme(tmpDir)
+	if err != nil {
+		t.Fatalf("UpdateReadme failed: %v", err)
+	}
+
+	list, err := ListZettelsFromIndex(tmpDir)
+	if err != nil {
+		t.Fatalf("ListZettelsFromIndex failed: %v", err)
+	}
+
+	if len(list) != len(zettels) {
+		t.Errorf("ListZettelsFromIndex returned %d zettels, want %d", len(list), len(zettels))
+	}
+
+	// Index is sorted newest first (same as ListZettels)
+	for i, z := range list {
+		expectedIdx := len(zettels) - 1 - i
+		if z.ID != zettels[expectedIdx].id {
+			t.Errorf("Zettel %d ID = %s, want %s", i, z.ID, zettels[expectedIdx].id)
+		}
+		if z.Title != zettels[expectedIdx].title {
+			t.Errorf("Zettel %d Title = %s, want %s", i, z.Title, zettels[expectedIdx].title)
+		}
+	}
+}
+
+func TestListZettelsFromIndex_FallbackNoIndex(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a zettel but don't create the index
+	err := CreateZettel(tmpDir, "20231001120000", "Test Zettel")
+	if err != nil {
+		t.Fatalf("Failed to create zettel: %v", err)
+	}
+
+	// Should fall back to ListZettels
+	list, err := ListZettelsFromIndex(tmpDir)
+	if err != nil {
+		t.Fatalf("ListZettelsFromIndex failed: %v", err)
+	}
+
+	if len(list) != 1 {
+		t.Errorf("ListZettelsFromIndex returned %d zettels, want 1", len(list))
+	}
+}
+
 func TestCountZettels(t *testing.T) {
 	tmpDir := t.TempDir()
 
