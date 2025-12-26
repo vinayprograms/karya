@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/vinayprograms/karya/internal/config"
+	kgit "github.com/vinayprograms/karya/internal/git"
 	"github.com/vinayprograms/karya/internal/task"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -292,6 +293,16 @@ func (i noResultsItem) Title() string { return "No results found" }
 
 func (i noResultsItem) Description() string { return "" }
 
+// keywordItem represents a keyword in the status selector popup
+type keywordItem struct {
+	keyword  string
+	category string
+}
+
+func (i keywordItem) FilterValue() string { return strings.ToLower(i.keyword) }
+func (i keywordItem) Title() string       { return i.keyword }
+func (i keywordItem) Description() string { return i.category }
+
 type model struct {
 	list            list.Model
 	tasks           []*task.Task
@@ -307,7 +318,14 @@ type model struct {
 	allItems        []list.Item
 	structuredMode  bool
 	loading         bool
-	searchTerm      string  // Track search term for editor highlighting
+	searchTerm      string // Track search term for editor highlighting
+
+	// Status selector state
+	showingStatusSelector bool
+	statusSelectorList    list.Model
+	selectedTask          *task.Task
+	statusMessage         string
+	statusMessageTimer    int
 }
 
 func (m model) Init() tea.Cmd {
@@ -321,6 +339,13 @@ type loadingDoneMsg struct {
 	tasks []*task.Task
 	err   error
 }
+
+type statusUpdateMsg struct {
+	err     error
+	message string
+}
+
+type clearStatusMsg struct{}
 
 func waitForFileChange(watcher *fsnotify.Watcher) tea.Cmd {
 	return func() tea.Msg {
@@ -357,6 +382,89 @@ func waitForFileChange(watcher *fsnotify.Watcher) tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Handle status selector mode - forward all messages to it
+	if m.showingStatusSelector {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			if msg.String() == "ctrl+c" {
+				m.quitting = true
+				if m.watcher != nil {
+					m.watcher.Close()
+				}
+				return m, tea.Quit
+			}
+
+			// Check if the list is in filtering mode
+			isFiltering := m.statusSelectorList.FilterState() == list.Filtering
+			filterApplied := m.statusSelectorList.FilterState() == list.FilterApplied
+
+			switch msg.String() {
+			case "esc":
+				if isFiltering || filterApplied {
+					// Let the list handle esc to cancel/clear filtering
+					var cmd tea.Cmd
+					m.statusSelectorList, cmd = m.statusSelectorList.Update(msg)
+					return m, cmd
+				}
+				// Close the selector
+				m.showingStatusSelector = false
+				m.selectedTask = nil
+				return m, nil
+			case "q":
+				if isFiltering {
+					// Let the list handle q as a filter character
+					var cmd tea.Cmd
+					m.statusSelectorList, cmd = m.statusSelectorList.Update(msg)
+					return m, cmd
+				}
+				// Close the selector
+				m.showingStatusSelector = false
+				m.selectedTask = nil
+				return m, nil
+			case "enter":
+				if isFiltering {
+					// Let the list handle enter to confirm filter
+					var cmd tea.Cmd
+					m.statusSelectorList, cmd = m.statusSelectorList.Update(msg)
+					return m, cmd
+				}
+				// Apply the selected status (works for both unfiltered and filter-applied states)
+				if i, ok := m.statusSelectorList.SelectedItem().(keywordItem); ok {
+					return m, updateTaskStatusCmd(m.selectedTask, i.keyword)
+				}
+				m.showingStatusSelector = false
+				return m, nil
+			default:
+				// Let the list handle navigation and filtering
+				var cmd tea.Cmd
+				m.statusSelectorList, cmd = m.statusSelectorList.Update(msg)
+				return m, cmd
+			}
+		case tea.WindowSizeMsg:
+			m.statusSelectorList.SetWidth(msg.Width / 2)
+			m.statusSelectorList.SetHeight(msg.Height / 2)
+			return m, nil
+		case statusUpdateMsg:
+			// Handle status update result - close selector and show message
+			m.showingStatusSelector = false
+			m.selectedTask = nil
+			if msg.err != nil {
+				m.statusMessage = fmt.Sprintf("Error: %v", msg.err)
+			} else {
+				m.statusMessage = msg.message
+			}
+			// Clear status message after 3 seconds
+			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+				return clearStatusMsg{}
+			})
+		default:
+			// Forward other messages to the list
+			var cmd tea.Cmd
+			m.statusSelectorList, cmd = m.statusSelectorList.Update(msg)
+			return m, cmd
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		// Handle quit keys before list processes them
@@ -469,6 +577,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, openEditorCmd(m.config, i.task, m.searchTerm)
 					}
 				}
+			case "t":
+				// Open status selector for the current task
+				if !m.filtering {
+					if i, ok := m.list.SelectedItem().(taskItem); ok {
+						m.selectedTask = i.task
+						m.showingStatusSelector = true
+						m.statusSelectorList = createStatusSelectorList(m.config, i.task.Keyword)
+						return m, nil
+					}
+				}
 			}
 		}
 	case fileChangedMsg:
@@ -575,6 +693,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.list.ResetSelected()
 
 		return m, nil
+	case statusUpdateMsg:
+		m.showingStatusSelector = false
+		m.selectedTask = nil
+		if msg.err != nil {
+			m.statusMessage = fmt.Sprintf("Error: %v", msg.err)
+		} else {
+			m.statusMessage = msg.message
+		}
+		// Clear status message after 3 seconds
+		return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+			return clearStatusMsg{}
+		})
+	case clearStatusMsg:
+		m.statusMessage = ""
+		return m, nil
 	case tea.WindowSizeMsg:
 		m.list.SetWidth(msg.Width)
 		m.list.SetHeight(msg.Height - 2)
@@ -665,6 +798,12 @@ func (m model) View() string {
 	if m.quitting {
 		return ""
 	}
+
+	// Show status selector overlay if active
+	if m.showingStatusSelector {
+		return m.renderStatusSelector()
+	}
+
 	view := m.list.View()
 
 	// Add custom pagination info at the top, right after the title (only if multiple pages)
@@ -729,10 +868,114 @@ func (m model) View() string {
 		view = filterInfo + "\n" + view
 	}
 
+	// Show status message if present
+	if m.statusMessage != "" {
+		statusInfo := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("10")).
+			Background(lipgloss.Color("0")).
+			Padding(0, 1).
+			Render(m.statusMessage)
+		view = view + "\n" + statusInfo
+	}
+
 	return view
 }
 
+// renderStatusSelector renders the status selector popup
+func (m model) renderStatusSelector() string {
+	// Style for the popup box
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("62")).
+		Padding(1, 2)
+
+	// Build the content
+	var content strings.Builder
+
+	if m.selectedTask != nil {
+		taskInfo := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("241")).
+			Render(fmt.Sprintf("Task: %s", m.selectedTask.Title))
+		content.WriteString(taskInfo)
+		content.WriteString("\n\n")
+	}
+
+	content.WriteString(m.statusSelectorList.View())
+
+	// Add help text
+	helpStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("241")).
+		MarginTop(1)
+	help := helpStyle.Render("↑/↓: navigate • enter: select • esc: cancel • /: filter")
+	content.WriteString("\n")
+	content.WriteString(help)
+
+	return boxStyle.Render(content.String())
+}
+
 type editorFinishedMsg struct{ err error }
+
+// createStatusSelectorList creates a list.Model for the status selector popup
+func createStatusSelectorList(cfg *config.Config, currentKeyword string) list.Model {
+	keywords := task.GetAllKeywordsFlat(cfg)
+	items := make([]list.Item, 0, len(keywords))
+
+	// Find which item to select (the one matching current keyword)
+	selectedIdx := 0
+	idx := 0
+	for _, entry := range keywords {
+		items = append(items, keywordItem{
+			keyword:  entry.Keyword,
+			category: entry.Category,
+		})
+		if entry.Keyword == currentKeyword {
+			selectedIdx = idx
+		}
+		idx++
+	}
+
+	delegate := list.NewDefaultDelegate()
+	delegate.ShowDescription = true
+	delegate.SetHeight(2)
+	delegate.SetSpacing(0)
+
+	l := list.New(items, delegate, 40, 20)
+	l.Title = "Select Status"
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(true)
+	l.Select(selectedIdx)
+
+	return l
+}
+
+// updateTaskStatusCmd creates a command that updates the task status
+func updateTaskStatusCmd(t *task.Task, newKeyword string) tea.Cmd {
+	return func() tea.Msg {
+		if t == nil {
+			return statusUpdateMsg{err: fmt.Errorf("no task selected")}
+		}
+
+		oldKeyword := t.Keyword
+
+		// Update the task status in the file
+		if err := task.UpdateTaskStatus(t, newKeyword); err != nil {
+			return statusUpdateMsg{err: err}
+		}
+
+		// Commit the change if in a git repo
+		commitMsg := fmt.Sprintf("Update task status: %s -> %s", oldKeyword, newKeyword)
+		if err := kgit.CommitFile(t.FilePath, commitMsg, true); err != nil {
+			// Don't fail the whole operation if git commit fails
+			return statusUpdateMsg{
+				message: fmt.Sprintf("Status updated to %s (git commit failed: %v)", newKeyword, err),
+			}
+		}
+
+		return statusUpdateMsg{
+			message: fmt.Sprintf("Status updated: %s → %s", oldKeyword, newKeyword),
+		}
+	}
+}
 
 func reloadTasksCmd() tea.Cmd {
 	return func() tea.Msg {
@@ -1025,6 +1268,7 @@ INTERACTIVE MODE:
     ACTIONS:
     Type '/' to filter  Filter tasks list (See FILTERING below)
     Enter               Edit selected task at specific line / Exit filter mode
+    t                   Change task status (opens keyword selector)
     s                   Switch to structured mode (zettelkasten format)
     u                   Switch to unstructured mode (all .md files)
     q                   Quit
@@ -1145,6 +1389,10 @@ func showInteractiveTUI(config *config.Config, project string) {
 				key.WithHelp("enter/tab", "edit"),
 			),
 			key.NewBinding(
+				key.WithKeys("t"),
+				key.WithHelp("t", "change status"),
+			),
+			key.NewBinding(
 				key.WithKeys("/"),
 				key.WithHelp("/", "filter"),
 			),
@@ -1168,6 +1416,10 @@ func showInteractiveTUI(config *config.Config, project string) {
 			key.NewBinding(
 				key.WithKeys("enter", "tab"),
 				key.WithHelp("enter/tab", "edit selected task"),
+			),
+			key.NewBinding(
+				key.WithKeys("t"),
+				key.WithHelp("t", "change task status"),
 			),
 			key.NewBinding(
 				key.WithKeys("/"),
