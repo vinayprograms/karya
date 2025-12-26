@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -1229,6 +1230,13 @@ func main() {
 			log.Fatal(err)
 		}
 		printProjectsList(summary)
+	case "mcp":
+		// Start MCP server on stdio
+		mcpServer := task.NewMCPServer(config)
+		ctx := context.Background()
+		if err := mcpServer.Run(ctx); err != nil {
+			log.Fatal(err)
+		}
 	default:
 		// Project name - show interactive TUI for that project
 		showInteractiveTUI(config, subcommand)
@@ -1249,6 +1257,7 @@ COMMANDS:
     ls [PROJECT]        List tasks in plain text format (for scripting)
     projects            Show project summary table with task counts
     pl                  Show project list in plain text format
+    mcp                 Start MCP server (stdio) for AI agent integration
     <project-name>      Show interactive TUI filtered to specific project
     -h, --help, help    Show this help message
 
@@ -1291,6 +1300,7 @@ EXAMPLES:
     todo -v myproject              # Show tasks for myproject with details
     todo projects                  # Show project summary table
     todo pl                        # Show project list (plain text)
+    todo mcp                       # Start MCP server for AI agents
     SHOW_COMPLETED=true todo       # Show completed tasks in TUI
     STRUCTURED=false todo          # Use unstructured mode (all .md files)
     
