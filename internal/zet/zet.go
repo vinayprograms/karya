@@ -137,7 +137,11 @@ func CountZettels(zetDir string) (int, error) {
 	count := 0
 	for _, entry := range entries {
 		if entry.IsDir() && IsValidZettelID(entry.Name()) {
-			count++
+			// Only count if README.md exists (consistent with ListZettels)
+			readmePath := filepath.Join(zetDir, entry.Name(), "README.md")
+			if _, err := os.Stat(readmePath); err == nil {
+				count++
+			}
 		}
 	}
 
