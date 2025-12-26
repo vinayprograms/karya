@@ -647,3 +647,85 @@ func GetZettelTitle(zetDir, zetID string) (string, error) {
 
 	return "", fmt.Errorf("no title found")
 }
+
+// UpdateTaskStatus updates the keyword of a task in its source file.
+// It finds the line matching the task and replaces the keyword with the new one.
+// Returns the updated line number, or an error if the task was not found.
+func UpdateTaskStatus(t *Task, newKeyword string) error {
+	if t.FilePath == "" {
+		return fmt.Errorf("task has no file path")
+	}
+
+	// Read the file
+	content, err := os.ReadFile(t.FilePath)
+	if err != nil {
+		return fmt.Errorf("failed to read file: %w", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	found := false
+
+	// Build the search pattern: "KEYWORD: title" (with optional metadata after title)
+	searchPrefix := fmt.Sprintf("%s: %s", t.Keyword, t.Title)
+
+	for i, line := range lines {
+		// Check if this line starts with our task's keyword and title
+		if strings.HasPrefix(line, searchPrefix) {
+			// Replace the old keyword with the new one
+			newLine := newKeyword + line[len(t.Keyword):]
+			lines[i] = newLine
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("task not found in file: %s: %s", t.Keyword, t.Title)
+	}
+
+	// Write the file back
+	newContent := strings.Join(lines, "\n")
+	if err := os.WriteFile(t.FilePath, []byte(newContent), 0644); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	// Update the task's keyword in memory
+	t.Keyword = newKeyword
+
+	return nil
+}
+
+// GetAllKeywords returns all configured keywords grouped by category
+func GetAllKeywords(c *config.Config) map[string][]string {
+	return map[string][]string{
+		"Active":     c.Todo.Active,
+		"InProgress": c.Todo.InProgress,
+		"Completed":  c.Todo.Completed,
+		"Someday":    c.Todo.Someday,
+	}
+}
+
+// GetAllKeywordsFlat returns all configured keywords as a flat slice with category labels
+type KeywordEntry struct {
+	Keyword  string
+	Category string
+}
+
+func GetAllKeywordsFlat(c *config.Config) []KeywordEntry {
+	var entries []KeywordEntry
+
+	for _, kw := range c.Todo.Active {
+		entries = append(entries, KeywordEntry{Keyword: kw, Category: "Active"})
+	}
+	for _, kw := range c.Todo.InProgress {
+		entries = append(entries, KeywordEntry{Keyword: kw, Category: "InProgress"})
+	}
+	for _, kw := range c.Todo.Completed {
+		entries = append(entries, KeywordEntry{Keyword: kw, Category: "Completed"})
+	}
+	for _, kw := range c.Todo.Someday {
+		entries = append(entries, KeywordEntry{Keyword: kw, Category: "Someday"})
+	}
+
+	return entries
+}

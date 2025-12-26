@@ -1,6 +1,7 @@
 package task
 
 import (
+	"os"
 	"testing"
 
 	"github.com/vinayprograms/karya/internal/config"
@@ -212,5 +213,165 @@ func TestTaskSorting(t *testing.T) {
 		if tasks[i].Keyword != expectedKeyword {
 			t.Errorf("After sorting, task %d should be %s, got %s", i, expectedKeyword, tasks[i].Keyword)
 		}
+	}
+}
+
+func TestUpdateTaskStatus(t *testing.T) {
+	cfg := createTestConfig()
+
+	// Create a temporary file with a task
+	tmpFile, err := os.CreateTemp("", "task_test_*.md")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	// Write initial content
+	content := `# Test File
+
+TODO: Write tests for the feature
+DOING: Implement the API
+DONE: Review the documentation
+`
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("Failed to write to temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	// Create a task
+	task := &Task{
+		Keyword:  "TODO",
+		Title:    "Write tests for the feature",
+		FilePath: tmpFile.Name(),
+	}
+
+	// Update the task status
+	err = UpdateTaskStatus(task, "DOING")
+	if err != nil {
+		t.Fatalf("UpdateTaskStatus() error = %v", err)
+	}
+
+	// Verify the task keyword was updated in memory
+	if task.Keyword != "DOING" {
+		t.Errorf("Task.Keyword = %v, want DOING", task.Keyword)
+	}
+
+	// Verify the file was updated
+	updatedContent, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("Failed to read updated file: %v", err)
+	}
+
+	expectedContent := `# Test File
+
+DOING: Write tests for the feature
+DOING: Implement the API
+DONE: Review the documentation
+`
+	if string(updatedContent) != expectedContent {
+		t.Errorf("File content = %q, want %q", string(updatedContent), expectedContent)
+	}
+
+	// Test that task is now considered in-progress
+	if !task.IsInProgress(cfg) {
+		t.Error("Task should be in-progress after status update")
+	}
+}
+
+func TestUpdateTaskStatus_TaskNotFound(t *testing.T) {
+	// Create a temporary file without the task
+	tmpFile, err := os.CreateTemp("", "task_test_*.md")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	// Write content without the task
+	content := `# Test File
+
+TODO: Different task
+`
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("Failed to write to temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	// Create a task that doesn't exist in the file
+	task := &Task{
+		Keyword:  "TODO",
+		Title:    "Non-existent task",
+		FilePath: tmpFile.Name(),
+	}
+
+	// Update the task status - should fail
+	err = UpdateTaskStatus(task, "DOING")
+	if err == nil {
+		t.Error("UpdateTaskStatus() should return error for non-existent task")
+	}
+}
+
+func TestUpdateTaskStatus_NoFilePath(t *testing.T) {
+	task := &Task{
+		Keyword: "TODO",
+		Title:   "Test task",
+	}
+
+	err := UpdateTaskStatus(task, "DOING")
+	if err == nil {
+		t.Error("UpdateTaskStatus() should return error when FilePath is empty")
+	}
+}
+
+func TestGetAllKeywords(t *testing.T) {
+	cfg := createTestConfig()
+
+	keywords := GetAllKeywords(cfg)
+
+	if len(keywords["Active"]) != 6 {
+		t.Errorf("Expected 6 active keywords, got %d", len(keywords["Active"]))
+	}
+	if len(keywords["InProgress"]) != 5 {
+		t.Errorf("Expected 5 in-progress keywords, got %d", len(keywords["InProgress"]))
+	}
+	if len(keywords["Completed"]) != 6 {
+		t.Errorf("Expected 6 completed keywords, got %d", len(keywords["Completed"]))
+	}
+	if len(keywords["Someday"]) != 4 {
+		t.Errorf("Expected 4 someday keywords, got %d", len(keywords["Someday"]))
+	}
+}
+
+func TestGetAllKeywordsFlat(t *testing.T) {
+	cfg := createTestConfig()
+
+	entries := GetAllKeywordsFlat(cfg)
+
+	// Should have all keywords
+	expectedTotal := 6 + 5 + 6 + 4 // Active + InProgress + Completed + Someday
+	if len(entries) != expectedTotal {
+		t.Errorf("Expected %d keyword entries, got %d", expectedTotal, len(entries))
+	}
+
+	// Check that categories are correctly assigned
+	activeCategoryCount := 0
+	for _, entry := range entries {
+		if entry.Category == "Active" {
+			activeCategoryCount++
+		}
+	}
+	if activeCategoryCount != 6 {
+		t.Errorf("Expected 6 entries with Active category, got %d", activeCategoryCount)
+	}
+
+	// Check that TODO is in the list
+	foundTodo := false
+	for _, entry := range entries {
+		if entry.Keyword == "TODO" && entry.Category == "Active" {
+			foundTodo = true
+			break
+		}
+	}
+	if !foundTodo {
+		t.Error("Expected to find TODO keyword with Active category")
 	}
 }
