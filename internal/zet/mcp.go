@@ -125,7 +125,9 @@ func NewMCPServer(zetDir string) *MCPServer {
 	s.server = mcp.NewServer(&mcp.Implementation{
 		Name:    "zet",
 		Version: "1.0.0",
-	}, nil)
+	}, &mcp.ServerOptions{
+		Instructions: "Manage freeform zettels (notes not tied to any project). For project-specific notes, use the 'note' MCP server instead.",
+	})
 
 	s.registerTools()
 	return s
