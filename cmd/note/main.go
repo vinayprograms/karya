@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -12,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/vinayprograms/karya/internal/config"
+	"github.com/vinayprograms/karya/internal/note"
 	"github.com/vinayprograms/karya/internal/task"
 	"github.com/vinayprograms/karya/internal/zet"
 
@@ -1455,6 +1457,7 @@ OPTIONS:
 
 COMMANDS:
     (no project)        Show interactive list of projects
+    mcp                 Start MCP server (stdio) for AI agent integration
     <project>           Manage notes for the specified project
     <project> count     Count total number of notes in project
     <project> n, new    Create a new note (optionally with title)
@@ -1502,6 +1505,7 @@ EXAMPLES:
     note myproject n              # Create new note (prompt for title)
     note myproject ? "golang"     # Search for "golang" in all notes
     note myproject count          # Show total note count
+    note mcp                      # Start MCP server for AI agents
 
 CONFIGURATION:
     Set projects directory in ~/.config/karya/config.toml:
@@ -1736,6 +1740,16 @@ func main() {
 
 	if args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		printHelp()
+		return
+	}
+
+	if args[0] == "mcp" {
+		// Start MCP server on stdio
+		mcpServer := note.NewMCPServer(cfg)
+		ctx := context.Background()
+		if err := mcpServer.Run(ctx); err != nil {
+			log.Fatal(err)
+		}
 		return
 	}
 
