@@ -5,10 +5,55 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
+
+// getSignature returns a git signature using the user's configured git identity.
+// It checks local repo config first, then global config, falling back to defaults.
+func getSignature(repo *git.Repository) *object.Signature {
+	name := "Karya"
+	email := "karya@local"
+
+	// Try local repo config first
+	if repo != nil {
+		if cfg, err := repo.Config(); err == nil {
+			if cfg.User.Name != "" {
+				name = cfg.User.Name
+			}
+			if cfg.User.Email != "" {
+				email = cfg.User.Email
+			}
+			// If we got both from local config, we're done
+			if cfg.User.Name != "" && cfg.User.Email != "" {
+				return &object.Signature{
+					Name:  name,
+					Email: email,
+					When:  time.Now(),
+				}
+			}
+		}
+	}
+
+	// Try global config
+	if globalCfg, err := config.LoadConfig(config.GlobalScope); err == nil {
+		if globalCfg.User.Name != "" && name == "Karya" {
+			name = globalCfg.User.Name
+		}
+		if globalCfg.User.Email != "" && email == "karya@local" {
+			email = globalCfg.User.Email
+		}
+	}
+
+	return &object.Signature{
+		Name:  name,
+		Email: email,
+		When:  time.Now(),
+	}
+}
 
 func GitCommit(zetDir, zetID, title string) error {
 	gitDir := filepath.Join(zetDir, ".git")
@@ -49,10 +94,7 @@ func GitCommit(zetDir, zetID, title string) error {
 
 	// Commit the changes
 	_, err = w.Commit(title, &git.CommitOptions{
-		Author: &object.Signature{
-			Name:  "Karya",
-			Email: "karya@local",
-		},
+		Author: getSignature(repo),
 	})
 	if err != nil {
 		return err
@@ -116,10 +158,7 @@ func GitDeleteZettel(zetDir, zetID, title string) error {
 	// Commit the deletion
 	commitMsg := fmt.Sprintf("Delete zettel '%s'", title)
 	_, err = w.Commit(commitMsg, &git.CommitOptions{
-		Author: &object.Signature{
-			Name:  "Karya",
-			Email: "karya@local",
-		},
+		Author: getSignature(repo),
 	})
 	if err != nil {
 		return err
@@ -221,10 +260,7 @@ func GitInitAndCommit(path, message string) error {
 
 	// Make initial commit
 	_, err = w.Commit(message, &git.CommitOptions{
-		Author: &object.Signature{
-			Name:  "Karya",
-			Email: "karya@local",
-		},
+		Author: getSignature(repo),
 	})
 
 	return err
