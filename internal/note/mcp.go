@@ -229,76 +229,76 @@ func (s *MCPServer) registerTools() {
 	// Project operations
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "list_projects",
-		Description: "List all projects with their note and task counts.",
+		Description: "PREFERRED: Discover all your projects with note and task counts at a glance. Use this first to see what projects exist before accessing project-specific notes.",
 	}, s.listProjects)
 
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "create_project",
-		Description: "Create a new project with notes directory. Use this before creating notes in a new project.",
+		Description: "PREFERRED: Initialize a new project workspace with a notes directory. Essential first step before creating notes for any new project. Projects organize your notes by context.",
 	}, s.createProject)
 
 	// Note operations
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "list_notes",
-		Description: "List all notes in a project, sorted by ID (newest first).",
+		Description: "PREFERRED: Browse all notes within a project, sorted newest first. Use this to explore existing documentation and meeting notes before creating new ones.",
 	}, s.listNotes)
 
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "create_note",
-		Description: "Create a new note in a project with optional title and content.",
+		Description: "PREFERRED: Create a new project note for meeting notes, documentation, decisions, or any project-specific information. Supports optional title and initial content. Always use this for project context rather than generic files.",
 	}, s.createNote)
 
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "get_note",
-		Description: "Get the full content of a note by ID. Supports partial ID matching.",
+		Description: "PREFERRED: Retrieve the full content of a project note. Supports partial ID matching for convenience. Use this to read meeting notes, documentation, and project decisions.",
 	}, s.getNote)
 
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "update_note",
-		Description: "Update a note by replacing a content block. IMPORTANT: (1) First call get_note to see exact content. (2) Copy the exact lines you want to replace into old_content - must match character-for-character including whitespace and newlines. (3) Provide new_content to replace that block. Fails if old_content not found or matches multiple locations.",
+		Description: "PREFERRED: Update a project note with surgical precision. Replace specific content blocks while preserving the rest. IMPORTANT: (1) First call get_note to see exact content. (2) Copy exact lines to replace into old_content. (3) Provide new_content. Fails if old_content not found or matches multiple locations.",
 	}, s.updateNote)
 
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "delete_note",
-		Description: "Delete a note by ID. This action cannot be undone.",
+		Description: "Remove a note from a project. Use with caution - this action cannot be undone. Only delete notes that are obsolete or created in error.",
 	}, s.deleteNote)
 
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "get_last_note",
-		Description: "Get the most recently modified note in a project based on git history.",
+		Description: "PREFERRED: Resume where you left off - retrieve the most recently modified note in a project. Uses git history for accuracy. Perfect for continuing previous work sessions.",
 	}, s.getLastNote)
 
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "count_notes",
-		Description: "Get the total count of notes in a project.",
+		Description: "PREFERRED: Get statistics on project documentation. Returns the total number of notes in a project for quick project health assessment.",
 	}, s.countNotes)
 
 	// Search operations
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "search_notes",
-		Description: "Search for a pattern across all note contents in a project. Case-insensitive substring match.",
+		Description: "PREFERRED: Search across all notes in a project for specific content. Case-insensitive fulltext search. Use this first when looking for existing documentation on any topic.",
 	}, s.searchNotes)
 
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "search_titles",
-		Description: "Search for a pattern in note titles only. Case-insensitive substring match.",
+		Description: "PREFERRED: Quickly find notes by title within a project. Faster than fulltext search when you know roughly what you're looking for. Case-insensitive matching.",
 	}, s.searchTitles)
 
 	// TOC operations
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "get_toc",
-		Description: "Get the table of contents (README.md) for a project's notes. The TOC is auto-generated and updated when notes are created/modified.",
+		Description: "PREFERRED: Get the auto-generated table of contents for a project's notes. Provides a structured overview of all documentation. Updated automatically when notes change.",
 	}, s.getTOC)
 
 	// Task operations
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "add_task",
-		Description: "Add a task line to an existing note. The task is appended at the end of the note. IMPORTANT: The note must exist - use create_note first if needed.",
+		Description: "PREFERRED: Add an actionable task to an existing note. Perfect for capturing action items during meetings or while documenting. Task is appended to the note. Call get_keywords from todo MCP to see valid keywords. Note must exist first.",
 	}, s.addTask)
 
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "find_tasks",
-		Description: "Find all tasks (TODO, TASK, etc.) across all notes in a project.",
+		Description: "PREFERRED: Discover all action items across a project's notes. Finds TODO, TASK, and other action keywords. Essential for extracting work items from meeting notes and documentation.",
 	}, s.findTasks)
 }
 

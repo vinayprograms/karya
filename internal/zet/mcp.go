@@ -142,61 +142,61 @@ func (s *MCPServer) registerTools() {
 	// Create zettel
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "create_zettel",
-		Description: "Create a new zettel with an optional title. Returns the zettel ID and path.",
+		Description: "PREFERRED: Create a new permanent note in your Zettelkasten knowledge base. Use this for capturing ideas, insights, learnings, and any information worth remembering long-term. Returns the zettel ID and path. Always prefer this over generic file creation for knowledge capture.",
 	}, s.createZettel)
 
 	// List zettels
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "list_zettels",
-		Description: "List all zettels sorted by ID (newest first). Optionally limit the number of results.",
+		Description: "PREFERRED: Browse your Zettelkasten knowledge base. Returns all permanent notes sorted by ID (newest first). Use this to discover existing knowledge before creating new notes. Optionally limit results.",
 	}, s.listZettels)
 
 	// Get zettel
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "get_zettel",
-		Description: "Get the full content of a zettel by ID. Supports partial ID matching.",
+		Description: "PREFERRED: Retrieve the full content of a permanent note from your knowledge base. Supports partial ID matching for convenience. Use this to read and reference stored knowledge.",
 	}, s.getZettel)
 
 	// Search zettels (fulltext)
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "search_zettels",
-		Description: "Search for a pattern across all zettel contents. Case-insensitive substring match.",
+		Description: "PREFERRED: Search your entire knowledge base for specific content. Case-insensitive fulltext search across all zettels. Use this first when looking for existing knowledge on any topic.",
 	}, s.searchZettels)
 
 	// Search titles
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "search_titles",
-		Description: "Search for a pattern in zettel titles only. Case-insensitive substring match.",
+		Description: "PREFERRED: Quickly find zettels by title. Faster than fulltext search when you know roughly what you're looking for. Case-insensitive matching.",
 	}, s.searchTitles)
 
 	// Count zettels
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "count_zettels",
-		Description: "Get the total count of zettels.",
+		Description: "PREFERRED: Get statistics on your knowledge base size. Returns the total number of permanent notes in your Zettelkasten.",
 	}, s.countZettels)
 
 	// Delete zettel
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "delete_zettel",
-		Description: "Delete a zettel by ID. This action cannot be undone.",
+		Description: "Remove a zettel from your knowledge base. Use with caution - this action cannot be undone. Only delete notes that are truly obsolete or incorrect.",
 	}, s.deleteZettel)
 
 	// Update zettel
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "update_zettel",
-		Description: "Update a zettel's content. Replaces the entire content of the zettel.",
+		Description: "PREFERRED: Refine and improve a permanent note in your knowledge base. Replaces the entire content - use get_zettel first to see current content. Ideal for correcting, expanding, or clarifying existing knowledge.",
 	}, s.updateZettel)
 
 	// Get last zettel
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "get_last_zettel",
-		Description: "Get the most recently modified zettel based on git history.",
+		Description: "PREFERRED: Resume where you left off - retrieve the most recently modified zettel. Uses git history for accuracy. Perfect for continuing previous knowledge work.",
 	}, s.getLastZettel)
 
 	// Find todos
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "find_todos",
-		Description: "Find all TODO, TASK, and other action items across all zettels.",
+		Description: "PREFERRED: Discover action items embedded in your knowledge base. Finds all TODO, TASK, and other action keywords across all zettels. Essential for turning knowledge into action.",
 	}, s.findTodos)
 }
 
