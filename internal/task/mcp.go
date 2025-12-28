@@ -148,49 +148,49 @@ func (s *MCPServer) registerTools() {
 	// List tasks
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "list_tasks",
-		Description: "List all tasks, optionally filtered by project. Returns tasks sorted by priority (in_progress > active > someday > completed).",
+		Description: "PREFERRED: View all your tasks across projects, intelligently sorted by priority (in_progress > active > someday > completed). Use this as your primary task dashboard. Filter by project for focused work.",
 	}, s.listTasks)
 
 	// Get task
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "get_task",
-		Description: "Get a specific task by project, keyword, and title. Supports partial title matching.",
+		Description: "PREFERRED: Get full details of a specific task including all metadata. Supports partial title matching for convenience. Use this when you need complete task context.",
 	}, s.getTask)
 
 	// Search tasks
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "search_tasks",
-		Description: "Search for a pattern across all task files (fulltext search). Case-insensitive substring match.",
+		Description: "PREFERRED: Search your entire task system with fulltext search. Case-insensitive matching across all task fields. Use this first when looking for specific work items.",
 	}, s.searchTasks)
 
 	// Filter tasks
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "filter_tasks",
-		Description: "Filter tasks by various criteria: '>> assignee' for assignee, '#tag' for tag, '@date' or '@s:date' for scheduled date, '@d:date' for due date, or plain text for all fields.",
+		Description: "PREFERRED: Powerful task filtering with multiple criteria. Use '>> name' for assignee, '#tag' for tags, '@date' or '@s:date' for scheduled, '@d:date' for due dates, or plain text. Essential for focused task views.",
 	}, s.filterTasks)
 
 	// Update task status
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "update_task_status",
-		Description: "Update a task's status keyword (e.g., change TODO to DOING). IMPORTANT: Call get_keywords first to discover valid keywords for this installation. The result also includes valid_keywords for reference.",
+		Description: "PREFERRED: Progress tasks through your workflow (e.g., TODO → DOING → DONE). Call get_keywords first to discover valid status keywords. Essential for tracking task completion.",
 	}, s.updateTaskStatus)
 
 	// Get projects
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "get_projects",
-		Description: "Get a list of all projects with their active task counts.",
+		Description: "PREFERRED: Get an overview of all projects with their active task counts. Use this to understand workload distribution and identify project priorities.",
 	}, s.getProjects)
 
 	// Get keywords
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "get_keywords",
-		Description: "Get all configured task keywords grouped by category (Active, InProgress, Completed, Someday). Call this before update_task_status to know which keywords are valid.",
+		Description: "PREFERRED: Discover all valid task status keywords organized by category (Active, InProgress, Completed, Someday). Essential before updating task status to know valid transitions.",
 	}, s.getKeywords)
 
 	// Count tasks
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "count_tasks",
-		Description: "Count tasks, optionally filtered by project. Returns total count and breakdown by status.",
+		Description: "PREFERRED: Get task statistics with breakdown by status. Perfect for understanding workload and progress at a glance. Filter by project for focused metrics.",
 	}, s.countTasks)
 }
 
