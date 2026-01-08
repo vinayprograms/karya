@@ -190,6 +190,32 @@ type CountNotesResult struct {
 	Project string `json:"project" jsonschema:"project name"`
 }
 
+// GetLines types
+type GetLinesArgs struct {
+	Project     string `json:"project" jsonschema:"project name"`
+	NoteID      string `json:"note_id" jsonschema:"note ID or partial ID"`
+	Pattern     string `json:"pattern,omitempty" jsonschema:"search pattern to find anchor line (case-insensitive). Either pattern or line_number is required."`
+	LineNumber  int    `json:"line_number,omitempty" jsonschema:"specific line number to use as anchor (1-based). Either pattern or line_number is required."`
+	LinesBefore int    `json:"lines_before,omitempty" jsonschema:"number of lines to return before the anchor (default: 0)"`
+	LinesAfter  int    `json:"lines_after,omitempty" jsonschema:"number of lines to return after the anchor (default: 0)"`
+}
+
+type GetLinesResult struct {
+	Matches []LineMatch `json:"matches" jsonschema:"list of matches with their context lines"`
+	Count   int         `json:"count" jsonschema:"number of matches found"`
+	Project string      `json:"project" jsonschema:"project name"`
+	NoteID  string      `json:"note_id" jsonschema:"note ID"`
+}
+
+type LineMatch struct {
+	AnchorLine   int      `json:"anchor_line" jsonschema:"line number of the matched/anchor line (1-based)"`
+	AnchorText   string   `json:"anchor_text" jsonschema:"text of the anchor line"`
+	LinesBefore  []string `json:"lines_before,omitempty" jsonschema:"lines before the anchor"`
+	LinesAfter   []string `json:"lines_after,omitempty" jsonschema:"lines after the anchor"`
+	StartLine    int      `json:"start_line" jsonschema:"first line number in the returned range (1-based)"`
+	EndLine      int      `json:"end_line" jsonschema:"last line number in the returned range (1-based)"`
+}
+
 // TOC types
 type GetTOCArgs struct {
 	Project string `json:"project" jsonschema:"project name"`
@@ -274,6 +300,11 @@ func (s *MCPServer) registerTools() {
 		Name:        "count_notes",
 		Description: "PREFERRED: Get statistics on project documentation. Returns the total number of notes in a project for quick project health assessment.",
 	}, s.countNotes)
+
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "get_lines",
+		Description: "PREFERRED: Extract lines from a note around an anchor point. Use pattern to search for a line (e.g., a TODO or heading), or line_number for direct access. Returns the anchor line plus specified lines before/after. Perfect for extracting content under TODOs, headings, or any marker.",
+	}, s.getLines)
 
 	// Search operations
 	mcp.AddTool(s.server, &mcp.Tool{
@@ -935,6 +966,111 @@ func (s *MCPServer) findTasks(ctx context.Context, req *mcp.CallToolRequest, arg
 		Count:   len(tasks),
 		Project: args.Project,
 	}, nil
+}
+
+func (s *MCPServer) getLines(ctx context.Context, req *mcp.CallToolRequest, args GetLinesArgs) (*mcp.CallToolResult, GetLinesResult, error) {
+	if args.Project == "" {
+		return nil, GetLinesResult{}, fmt.Errorf("project name is required")
+	}
+
+	if args.NoteID == "" {
+		return nil, GetLinesResult{}, fmt.Errorf("note_id is required")
+	}
+
+	if args.Pattern == "" && args.LineNumber == 0 {
+		return nil, GetLinesResult{}, fmt.Errorf("either pattern or line_number is required")
+	}
+
+	if !s.notesExist(args.Project) {
+		return nil, GetLinesResult{}, fmt.Errorf("project '%s' has no notes directory", args.Project)
+	}
+
+	notesDir := s.getNotesDir(args.Project)
+	noteID := args.NoteID
+
+	// Handle partial ID matching
+	if !zet.IsValidZettelID(noteID) {
+		matches, err := zet.FindMatchingZettels(notesDir, noteID)
+		if err != nil {
+			return nil, GetLinesResult{}, fmt.Errorf("failed to find note: %w", err)
+		}
+		if len(matches) == 0 {
+			return nil, GetLinesResult{}, fmt.Errorf("no note found matching: %s", noteID)
+		}
+		if len(matches) > 1 {
+			var ids []string
+			for _, m := range matches {
+				ids = append(ids, m.ID)
+			}
+			return nil, GetLinesResult{}, fmt.Errorf("multiple notes match '%s': %s", noteID, strings.Join(ids, ", "))
+		}
+		noteID = matches[0].ID
+	}
+
+	// Read note content
+	content, err := zet.ReadZettelContent(notesDir, noteID)
+	if err != nil {
+		return nil, GetLinesResult{}, fmt.Errorf("failed to read note: %w", err)
+	}
+
+	lines := strings.Split(content, "\n")
+	var matches []LineMatch
+
+	if args.LineNumber > 0 {
+		// Direct line number access
+		if args.LineNumber > len(lines) {
+			return nil, GetLinesResult{}, fmt.Errorf("line_number %d exceeds note length (%d lines)", args.LineNumber, len(lines))
+		}
+		match := s.extractLines(lines, args.LineNumber-1, args.LinesBefore, args.LinesAfter)
+		matches = append(matches, match)
+	} else {
+		// Pattern search
+		patternLower := strings.ToLower(args.Pattern)
+		for i, line := range lines {
+			if strings.Contains(strings.ToLower(line), patternLower) {
+				match := s.extractLines(lines, i, args.LinesBefore, args.LinesAfter)
+				matches = append(matches, match)
+			}
+		}
+	}
+
+	return nil, GetLinesResult{
+		Matches: matches,
+		Count:   len(matches),
+		Project: args.Project,
+		NoteID:  noteID,
+	}, nil
+}
+
+// extractLines extracts lines around an anchor index with specified before/after counts
+func (s *MCPServer) extractLines(lines []string, anchorIdx, linesBefore, linesAfter int) LineMatch {
+	startIdx := anchorIdx - linesBefore
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	endIdx := anchorIdx + linesAfter
+	if endIdx >= len(lines) {
+		endIdx = len(lines) - 1
+	}
+
+	var beforeLines []string
+	for i := startIdx; i < anchorIdx; i++ {
+		beforeLines = append(beforeLines, lines[i])
+	}
+
+	var afterLines []string
+	for i := anchorIdx + 1; i <= endIdx; i++ {
+		afterLines = append(afterLines, lines[i])
+	}
+
+	return LineMatch{
+		AnchorLine:  anchorIdx + 1, // 1-based
+		AnchorText:  lines[anchorIdx],
+		LinesBefore: beforeLines,
+		LinesAfter:  afterLines,
+		StartLine:   startIdx + 1,  // 1-based
+		EndLine:     endIdx + 1,    // 1-based
+	}
 }
 
 // isValidKeyword checks if a keyword is valid according to config
