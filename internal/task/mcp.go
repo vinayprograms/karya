@@ -22,17 +22,20 @@ type ListTasksResult struct {
 }
 
 type TaskInfo struct {
-	Keyword     string `json:"keyword" jsonschema:"task status keyword (e.g., TODO, DOING, DONE)"`
-	Title       string `json:"title" jsonschema:"task title/description"`
-	Tag         string `json:"tag,omitempty" jsonschema:"task tag (without #)"`
-	ScheduledAt string `json:"scheduled_at,omitempty" jsonschema:"scheduled date"`
-	DueAt       string `json:"due_at,omitempty" jsonschema:"due date"`
-	Assignee    string `json:"assignee,omitempty" jsonschema:"task assignee"`
-	Project     string `json:"project" jsonschema:"project name"`
-	Zettel      string `json:"zettel,omitempty" jsonschema:"zettel ID (if structured mode)"`
-	FilePath    string `json:"file_path" jsonschema:"file path where task is defined"`
-	Priority    int    `json:"priority" jsonschema:"priority level (1=in_progress, 2=active, 3=someday, 4=completed)"`
-	Status      string `json:"status" jsonschema:"status category (active, in_progress, completed, someday)"`
+	Keyword     string   `json:"keyword" jsonschema:"task status keyword (e.g., TODO, DOING, DONE)"`
+	ID          string   `json:"id,omitempty" jsonschema:"task unique identifier"`
+	Title       string   `json:"title" jsonschema:"task title/description"`
+	Tag         string   `json:"tag,omitempty" jsonschema:"task tag (without #)"`
+	References  []string `json:"references,omitempty" jsonschema:"IDs of tasks this task depends on (^id syntax)"`
+	ScheduledAt string   `json:"scheduled_at,omitempty" jsonschema:"scheduled date"`
+	DueAt       string   `json:"due_at,omitempty" jsonschema:"due date"`
+	Assignee    string   `json:"assignee,omitempty" jsonschema:"task assignee"`
+	Project     string   `json:"project" jsonschema:"project name"`
+	Zettel      string   `json:"zettel,omitempty" jsonschema:"zettel ID (if structured mode)"`
+	FilePath    string   `json:"file_path" jsonschema:"file path where task is defined"`
+	Priority    int      `json:"priority" jsonschema:"priority level (1=in_progress, 2=active, 3=someday, 4=completed)"`
+	Status      string   `json:"status" jsonschema:"status category (active, in_progress, completed, someday)"`
+	InCycle     bool     `json:"in_cycle,omitempty" jsonschema:"true if task participates in a circular dependency"`
 }
 
 type GetTaskArgs struct {
@@ -118,6 +121,47 @@ type CountTasksResult struct {
 	ByStatus map[string]int `json:"by_status" jsonschema:"count of tasks by status category"`
 }
 
+type GetTaskByIDArgs struct {
+	ID      string `json:"id" jsonschema:"task ID to look up"`
+	Project string `json:"project,omitempty" jsonschema:"optional project name to limit search"`
+}
+
+type GetTaskByIDResult struct {
+	Task  *TaskInfo `json:"task,omitempty" jsonschema:"the matching task"`
+	Found bool      `json:"found" jsonschema:"whether a task with this ID was found"`
+}
+
+type GetDependenciesArgs struct {
+	ID      string `json:"id" jsonschema:"task ID to get dependencies for"`
+	Project string `json:"project,omitempty" jsonschema:"optional project name to limit search"`
+}
+
+type GetDependenciesResult struct {
+	Task         *TaskInfo  `json:"task,omitempty" jsonschema:"the task being queried"`
+	Dependencies []TaskInfo `json:"dependencies" jsonschema:"tasks that this task depends on (referenced via ^id)"`
+	Count        int        `json:"count" jsonschema:"number of dependencies"`
+}
+
+type GetDependentsArgs struct {
+	ID      string `json:"id" jsonschema:"task ID to get dependents for"`
+	Project string `json:"project,omitempty" jsonschema:"optional project name to limit search"`
+}
+
+type GetDependentsResult struct {
+	Task       *TaskInfo  `json:"task,omitempty" jsonschema:"the task being queried"`
+	Dependents []TaskInfo `json:"dependents" jsonschema:"tasks that depend on this task (have ^id reference to it)"`
+	Count      int        `json:"count" jsonschema:"number of dependents"`
+}
+
+type GetCycleTasksArgs struct {
+	Project string `json:"project,omitempty" jsonschema:"optional project name to limit search"`
+}
+
+type GetCycleTasksResult struct {
+	Tasks []TaskInfo `json:"tasks" jsonschema:"tasks involved in circular dependencies"`
+	Count int        `json:"count" jsonschema:"number of tasks in cycles"`
+}
+
 // MCPServer wraps the MCP server with task operations
 type MCPServer struct {
 	config *config.Config
@@ -192,6 +236,30 @@ func (s *MCPServer) registerTools() {
 		Name:        "count_tasks",
 		Description: "PREFERRED: Get task statistics with breakdown by status. Perfect for understanding workload and progress at a glance. Filter by project for focused metrics.",
 	}, s.countTasks)
+
+	// Get task by ID
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "get_task_by_id",
+		Description: "PREFERRED: Get a task directly by its unique ID. Faster than searching by title when you know the task ID. Returns full task details including dependencies.",
+	}, s.getTaskByID)
+
+	// Get dependencies
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "get_dependencies",
+		Description: "PREFERRED: Get all tasks that a given task depends on (tasks referenced via ^id syntax). Essential for understanding task prerequisites and blocking relationships.",
+	}, s.getDependencies)
+
+	// Get dependents
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "get_dependents",
+		Description: "PREFERRED: Get all tasks that depend on a given task (tasks that reference it via ^id). Essential for understanding impact when completing or modifying a task.",
+	}, s.getDependents)
+
+	// Get cycle tasks
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "get_cycle_tasks",
+		Description: "PREFERRED: Find all tasks involved in circular dependencies. Returns tasks where A depends on B and B depends on A (directly or indirectly). Use this to identify and resolve dependency cycles.",
+	}, s.getCycleTasks)
 }
 
 func (s *MCPServer) taskToInfo(t *Task) TaskInfo {
@@ -208,8 +276,10 @@ func (s *MCPServer) taskToInfo(t *Task) TaskInfo {
 
 	return TaskInfo{
 		Keyword:     t.Keyword,
+		ID:          t.ID,
 		Title:       t.Title,
 		Tag:         t.Tag,
+		References:  t.References,
 		ScheduledAt: t.ScheduledAt,
 		DueAt:       t.DueAt,
 		Assignee:    t.Assignee,
@@ -218,6 +288,7 @@ func (s *MCPServer) taskToInfo(t *Task) TaskInfo {
 		FilePath:    t.FilePath,
 		Priority:    t.Priority(s.config),
 		Status:      status,
+		InCycle:     t.InCycle,
 	}
 }
 
@@ -227,12 +298,21 @@ func (s *MCPServer) listTasks(ctx context.Context, req *mcp.CallToolRequest, arg
 		return nil, ListTasksResult{}, fmt.Errorf("failed to list tasks: %w", err)
 	}
 
+	// Detect circular dependencies
+	DetectCycles(tasks)
+
 	// Sort by priority
 	SortByPriority(tasks, s.config)
-	// Secondary sort by project name within same priority
+	// Secondary sort by project, then title, then file path for deterministic order
 	sort.SliceStable(tasks, func(i, j int) bool {
 		if tasks[i].Priority(s.config) == tasks[j].Priority(s.config) {
-			return tasks[i].Project < tasks[j].Project
+			if tasks[i].Project != tasks[j].Project {
+				return tasks[i].Project < tasks[j].Project
+			}
+			if tasks[i].Title != tasks[j].Title {
+				return tasks[i].Title < tasks[j].Title
+			}
+			return tasks[i].FilePath < tasks[j].FilePath
 		}
 		return false
 	})
@@ -295,10 +375,26 @@ func (s *MCPServer) filterTasks(ctx context.Context, req *mcp.CallToolRequest, a
 		return nil, FilterTasksResult{}, fmt.Errorf("failed to list tasks: %w", err)
 	}
 
+	// Detect circular dependencies before filtering
+	DetectCycles(tasks)
+
 	filtered := FilterTasks(tasks, args.Filter)
 
 	// Sort by priority
 	SortByPriority(filtered, s.config)
+	// Secondary sort by project, then title, then file path for deterministic order
+	sort.SliceStable(filtered, func(i, j int) bool {
+		if filtered[i].Priority(s.config) == filtered[j].Priority(s.config) {
+			if filtered[i].Project != filtered[j].Project {
+				return filtered[i].Project < filtered[j].Project
+			}
+			if filtered[i].Title != filtered[j].Title {
+				return filtered[i].Title < filtered[j].Title
+			}
+			return filtered[i].FilePath < filtered[j].FilePath
+		}
+		return false
+	})
 
 	infos := make([]TaskInfo, len(filtered))
 	for i, t := range filtered {
@@ -429,6 +525,110 @@ func (s *MCPServer) countTasks(ctx context.Context, req *mcp.CallToolRequest, ar
 	return nil, CountTasksResult{
 		Count:    len(tasks),
 		ByStatus: byStatus,
+	}, nil
+}
+
+func (s *MCPServer) getTaskByID(ctx context.Context, req *mcp.CallToolRequest, args GetTaskByIDArgs) (*mcp.CallToolResult, GetTaskByIDResult, error) {
+	if args.ID == "" {
+		return nil, GetTaskByIDResult{Found: false}, nil
+	}
+
+	tasks, err := ListTasks(s.config, args.Project, true)
+	if err != nil {
+		return nil, GetTaskByIDResult{Found: false}, fmt.Errorf("failed to list tasks: %w", err)
+	}
+
+	DetectCycles(tasks)
+
+	task := GetTaskByID(tasks, args.ID)
+	if task == nil {
+		return nil, GetTaskByIDResult{Found: false}, nil
+	}
+
+	info := s.taskToInfo(task)
+	return nil, GetTaskByIDResult{Task: &info, Found: true}, nil
+}
+
+func (s *MCPServer) getDependencies(ctx context.Context, req *mcp.CallToolRequest, args GetDependenciesArgs) (*mcp.CallToolResult, GetDependenciesResult, error) {
+	if args.ID == "" {
+		return nil, GetDependenciesResult{}, fmt.Errorf("task ID is required")
+	}
+
+	tasks, err := ListTasks(s.config, args.Project, true)
+	if err != nil {
+		return nil, GetDependenciesResult{}, fmt.Errorf("failed to list tasks: %w", err)
+	}
+
+	DetectCycles(tasks)
+
+	task := GetTaskByID(tasks, args.ID)
+	if task == nil {
+		return nil, GetDependenciesResult{Count: 0}, nil
+	}
+
+	deps := GetDependencies(tasks, task)
+	infos := make([]TaskInfo, len(deps))
+	for i, d := range deps {
+		infos[i] = s.taskToInfo(d)
+	}
+
+	taskInfo := s.taskToInfo(task)
+	return nil, GetDependenciesResult{
+		Task:         &taskInfo,
+		Dependencies: infos,
+		Count:        len(infos),
+	}, nil
+}
+
+func (s *MCPServer) getDependents(ctx context.Context, req *mcp.CallToolRequest, args GetDependentsArgs) (*mcp.CallToolResult, GetDependentsResult, error) {
+	if args.ID == "" {
+		return nil, GetDependentsResult{}, fmt.Errorf("task ID is required")
+	}
+
+	tasks, err := ListTasks(s.config, args.Project, true)
+	if err != nil {
+		return nil, GetDependentsResult{}, fmt.Errorf("failed to list tasks: %w", err)
+	}
+
+	DetectCycles(tasks)
+
+	task := GetTaskByID(tasks, args.ID)
+	if task == nil {
+		return nil, GetDependentsResult{Count: 0}, nil
+	}
+
+	dependents := GetDependents(tasks, task)
+	infos := make([]TaskInfo, len(dependents))
+	for i, d := range dependents {
+		infos[i] = s.taskToInfo(d)
+	}
+
+	taskInfo := s.taskToInfo(task)
+	return nil, GetDependentsResult{
+		Task:       &taskInfo,
+		Dependents: infos,
+		Count:      len(infos),
+	}, nil
+}
+
+func (s *MCPServer) getCycleTasks(ctx context.Context, req *mcp.CallToolRequest, args GetCycleTasksArgs) (*mcp.CallToolResult, GetCycleTasksResult, error) {
+	tasks, err := ListTasks(s.config, args.Project, true)
+	if err != nil {
+		return nil, GetCycleTasksResult{}, fmt.Errorf("failed to list tasks: %w", err)
+	}
+
+	DetectCycles(tasks)
+
+	var cycleTasks []TaskInfo
+	for _, t := range tasks {
+		if t.InCycle {
+			cycleTasks = append(cycleTasks, s.taskToInfo(t))
+		}
+	}
+
+	return nil, GetCycleTasksResult{
+		Tasks: cycleTasks,
+		Count: len(cycleTasks),
 	}, nil
 }
 

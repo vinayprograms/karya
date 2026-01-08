@@ -150,10 +150,12 @@ type SearchTitlesResult struct {
 
 // Task types
 type AddTaskArgs struct {
-	Project string `json:"project" jsonschema:"project name"`
-	NoteID  string `json:"note_id" jsonschema:"note ID to add task to"`
-	Keyword string `json:"keyword" jsonschema:"task keyword (e.g., TODO, TASK). Call get_keywords from todo MCP to see valid keywords."`
-	Title   string `json:"title" jsonschema:"task title/description"`
+	Project    string   `json:"project" jsonschema:"project name"`
+	NoteID     string   `json:"note_id" jsonschema:"note ID to add task to"`
+	Keyword    string   `json:"keyword" jsonschema:"task keyword (e.g., TODO, TASK). Call get_keywords from todo MCP to see valid keywords."`
+	Title      string   `json:"title" jsonschema:"task title/description"`
+	ID         string   `json:"id,omitempty" jsonschema:"optional unique task identifier for creating references"`
+	References []string `json:"references,omitempty" jsonschema:"optional list of task IDs this task depends on (creates ^id references)"`
 }
 
 type AddTaskResult struct {
@@ -864,7 +866,16 @@ func (s *MCPServer) addTask(ctx context.Context, req *mcp.CallToolRequest, args 
 	}
 
 	// Append task line
-	taskLine := fmt.Sprintf("%s: %s", args.Keyword, args.Title)
+	var taskLine string
+	if args.ID != "" {
+		taskLine = fmt.Sprintf("%s: [%s] %s", args.Keyword, args.ID, args.Title)
+	} else {
+		taskLine = fmt.Sprintf("%s: %s", args.Keyword, args.Title)
+	}
+	// Add references if provided
+	for _, ref := range args.References {
+		taskLine += fmt.Sprintf(" ^%s", ref)
+	}
 	if !strings.HasSuffix(content, "\n") {
 		content += "\n"
 	}

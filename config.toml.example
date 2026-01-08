@@ -97,3 +97,5 @@
 # today-bg          = "yellow"                # Today's date background (highlight)
 # assignee          = "bright-white"         # Assignee badge text
 # assignee-bg       = "black"                 # Assignee badge background
+# cycle             = "bright-white"          # Circular dependency indicator text
+# cycle-bg          = "red"                   # Circular dependency indicator background
