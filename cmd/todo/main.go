@@ -40,6 +40,7 @@ type ColorScheme struct {
 	pastDateColor      lipgloss.Style
 	todayDateColor     lipgloss.Style
 	assigneeColor      lipgloss.Style
+	cycleColor         lipgloss.Style
 }
 
 // Global color scheme (will be initialized from config)
@@ -61,6 +62,7 @@ func InitializeColors(cfg *config.Config) {
 		pastDateColor:      lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.PastDateColor)).Background(lipgloss.Color(cfg.Colors.PastDateBgColor)),
 		todayDateColor:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TodayDateColor)).Background(lipgloss.Color(cfg.Colors.TodayDateBgColor)).Bold(true),
 		assigneeColor:      lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.AssigneeColor)).Background(lipgloss.Color(cfg.Colors.AssigneeBgColor)).Bold(true),
+		cycleColor:         lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CycleColor)).Background(lipgloss.Color(cfg.Colors.CycleBgColor)).Bold(true),
 	}
 }
 
@@ -85,6 +87,11 @@ func NewTaskItem(c *config.Config, t *task.Task, projectColWidth, keywordColWidt
 func (i taskItem) renderWithSelection(isSelected bool) string {
 	var parts []string
 
+	// Show cycle indicator if task is in a cycle
+	if i.task.InCycle {
+		parts = append(parts, colors.cycleColor.Render(" ⟲ "))
+	}
+
 	parts = append(parts, colors.prjColor.Render(fmt.Sprintf("%-*s", i.projectColWidth, i.task.Project)))
 
 	// Only show Zettel column in verbose mode
@@ -107,8 +114,14 @@ func (i taskItem) renderWithSelection(isSelected bool) string {
 		titleStyle = colors.completedTaskColor
 	}
 
+	// Build title with optional ID prefix
+	displayTitle := i.task.Title
+	if i.task.ID != "" {
+		displayTitle = fmt.Sprintf("[%s] %s", i.task.ID, i.task.Title)
+	}
+
 	// Render task title with markdown formatting
-	formattedTitle := task.RenderMarkdownDescription(i.task.Title, titleStyle)
+	formattedTitle := task.RenderMarkdownDescription(displayTitle, titleStyle)
 	if isSelected {
 		indicator := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("13")).
@@ -149,17 +162,29 @@ func (i taskItem) renderWithSelection(isSelected bool) string {
 		parts = append(parts, colors.assigneeColor.Render(fmt.Sprintf(" %s ", i.task.Assignee)))
 	}
 
+	// Show references if task has any
+	if len(i.task.References) > 0 {
+		refStr := "^" + strings.Join(i.task.References, " ^")
+		parts = append(parts, colors.prjColor.Render(refStr))
+	}
+
 	return strings.Join(parts, " ")
 }
 
 func (i taskItem) FilterValue() string {
-	return fmt.Sprintf("%s %s %s %s %s %s %s %s",
-		i.task.Project, i.task.Zettel, i.task.Keyword, i.task.Title,
-		i.task.Tag, i.task.ScheduledAt, i.task.DueAt, i.task.Assignee)
+	return fmt.Sprintf("%s %s %s %s %s %s %s %s %s %s",
+		i.task.Project, i.task.Zettel, i.task.Keyword, i.task.ID, i.task.Title,
+		i.task.Tag, i.task.ScheduledAt, i.task.DueAt, i.task.Assignee,
+		strings.Join(i.task.References, " "))
 }
 
 func (i taskItem) Title() string {
 	var parts []string
+
+	// Show cycle indicator if task is in a cycle
+	if i.task.InCycle {
+		parts = append(parts, colors.cycleColor.Render(" ⟲ "))
+	}
 
 	parts = append(parts, colors.prjColor.Render(fmt.Sprintf("%-*s", i.projectColWidth, i.task.Project)))
 
@@ -175,13 +200,22 @@ func (i taskItem) Title() string {
 	} else if i.task.IsInProgress(i.config) {
 		parts = append(parts, colors.inProgressColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
 		titleStyle = colors.taskColor
+	} else if i.task.IsSomeday(i.config) {
+		parts = append(parts, colors.somedayColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
+		titleStyle = colors.taskColor
 	} else {
 		parts = append(parts, colors.completedColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
 		titleStyle = colors.completedTaskColor
 	}
 
+	// Build title with optional ID prefix
+	displayTitle := i.task.Title
+	if i.task.ID != "" {
+		displayTitle = fmt.Sprintf("[%s] %s", i.task.ID, i.task.Title)
+	}
+
 	// Render task title with markdown formatting
-	formattedTitle := task.RenderMarkdownDescription(i.task.Title, titleStyle)
+	formattedTitle := task.RenderMarkdownDescription(displayTitle, titleStyle)
 	parts = append(parts, fmt.Sprintf("%-40s", formattedTitle))
 
 	// Render tag with special color if it's in special tags. Special tags either contain
@@ -214,6 +248,12 @@ func (i taskItem) Title() string {
 	}
 	if i.task.Assignee != "" {
 		parts = append(parts, colors.assigneeColor.Render(fmt.Sprintf(" %s ", i.task.Assignee)))
+	}
+
+	// Show references if task has any
+	if len(i.task.References) > 0 {
+		refStr := "^" + strings.Join(i.task.References, " ^")
+		parts = append(parts, colors.prjColor.Render(refStr))
 	}
 
 	return strings.Join(parts, " ")
@@ -594,29 +634,61 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Reload tasks when files change
 		tasks, err := loadTaskWithInbox(m.config, m.project, m.config.Todo.ShowCompleted)
 		if err == nil {
-			m.tasks = tasks
-			// Sort tasks by priority: InProgress -> Active -> Someday -> Completed
-			task.SortByPriority(m.tasks, m.config)
-			// Secondary sort by project name within same priority
-			sort.SliceStable(m.tasks, func(i, j int) bool {
-				if m.tasks[i].Priority(m.config) == m.tasks[j].Priority(m.config) {
-					return m.tasks[i].Project < m.tasks[j].Project
+			// Save current selection to restore after update
+			var selectedKey string
+			currentIdx := m.list.Index()
+			if currentIdx >= 0 && currentIdx < len(m.tasks) {
+				selectedKey = taskKey(m.tasks[currentIdx])
+			}
+
+			if m.config.GeneralConfig.Verbose {
+				// Verbose mode: full re-sort and UI update (zettel column shown)
+				m.tasks = tasks
+				task.SortByPriority(m.tasks, m.config)
+				sort.SliceStable(m.tasks, func(i, j int) bool {
+					if m.tasks[i].Priority(m.config) == m.tasks[j].Priority(m.config) {
+						if m.tasks[i].Project != m.tasks[j].Project {
+							return m.tasks[i].Project < m.tasks[j].Project
+						}
+						if m.tasks[i].Title != m.tasks[j].Title {
+							return m.tasks[i].Title < m.tasks[j].Title
+						}
+						return m.tasks[i].FilePath < m.tasks[j].FilePath
+					}
+					return false
+				})
+				m.projectColWidth = calculateProjectColWidth(m.tasks)
+				m.keywordColWidth = calculateKeywordColWidth(m.tasks)
+				items := make([]list.Item, len(m.tasks))
+				for i, t := range m.tasks {
+					items[i] = NewTaskItem(m.config, t, m.projectColWidth, m.keywordColWidth, m.config.GeneralConfig.Verbose)
 				}
-				return false
-			})
-			m.projectColWidth = calculateProjectColWidth(m.tasks)
-			m.keywordColWidth = calculateKeywordColWidth(m.tasks)
-			items := make([]list.Item, len(m.tasks))
-			for i, t := range m.tasks {
-				items[i] = NewTaskItem(m.config, t, m.projectColWidth, m.keywordColWidth, m.config.GeneralConfig.Verbose)
-			}
-			m.allItems = items
-			if m.customFilter != "" {
-				m.applyCustomFilter()
+				m.allItems = items
+				if m.customFilter != "" {
+					m.applyCustomFilter()
+				} else {
+					m.list.SetItems(items)
+				}
 			} else {
-				m.list.SetItems(items)
+				// Non-verbose mode: preserve order, update tasks in place, append new tasks at end
+				newTasks := appendNewTasksOnly(m.tasks, tasks, m.config)
+				m.tasks = newTasks
+				m.projectColWidth = calculateProjectColWidth(m.tasks)
+				m.keywordColWidth = calculateKeywordColWidth(m.tasks)
+				items := make([]list.Item, len(m.tasks))
+				for i, t := range m.tasks {
+					items[i] = NewTaskItem(m.config, t, m.projectColWidth, m.keywordColWidth, m.config.GeneralConfig.Verbose)
+				}
+				m.allItems = items
+				if m.customFilter != "" {
+					m.applyCustomFilter()
+				} else {
+					m.list.SetItems(items)
+				}
 			}
-			m.list.ResetSelected()
+
+			// Restore cursor position
+			restoreCursorPosition(&m.list, m.tasks, selectedKey, currentIdx)
 
 			// Update watcher to monitor new files/directories
 			updateWatcher(m.watcher, m.config, m.project)
@@ -634,10 +706,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.tasks = msg.tasks
 			// Sort tasks by priority: InProgress -> Active -> Someday -> Completed
 			task.SortByPriority(m.tasks, m.config)
-			// Secondary sort by project name within same priority
+			// Secondary sort by project, then title, then file path for deterministic order
 			sort.SliceStable(m.tasks, func(i, j int) bool {
 				if m.tasks[i].Priority(m.config) == m.tasks[j].Priority(m.config) {
-					return m.tasks[i].Project < m.tasks[j].Project
+					if m.tasks[i].Project != m.tasks[j].Project {
+						return m.tasks[i].Project < m.tasks[j].Project
+					}
+					if m.tasks[i].Title != m.tasks[j].Title {
+						return m.tasks[i].Title < m.tasks[j].Title
+					}
+					return m.tasks[i].FilePath < m.tasks[j].FilePath
 				}
 				return false
 			})
@@ -659,22 +737,40 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			log.Printf("Editor error: %v", msg.err)
 		}
+
+		// Save current selection to restore after update
+		var selectedKey string
+		currentIdx := m.list.Index()
+		if currentIdx >= 0 && currentIdx < len(m.tasks) {
+			selectedKey = taskKey(m.tasks[currentIdx])
+		}
+
 		// Reload tasks after editing (including inbox)
 		tasks, err := loadTaskWithInbox(m.config, m.project, m.config.Todo.ShowCompleted)
 		if err != nil {
 			return m, tea.Quit
 		}
-		m.tasks = tasks
 
-		// Sort tasks by priority: InProgress -> Active -> Someday -> Completed
-		task.SortByPriority(m.tasks, m.config)
-		// Secondary sort by project name within same priority
-		sort.SliceStable(m.tasks, func(i, j int) bool {
-			if m.tasks[i].Priority(m.config) == m.tasks[j].Priority(m.config) {
-				return m.tasks[i].Project < m.tasks[j].Project
-			}
-			return false
-		})
+		if m.config.GeneralConfig.Verbose {
+			// Verbose mode: full re-sort
+			m.tasks = tasks
+			task.SortByPriority(m.tasks, m.config)
+			sort.SliceStable(m.tasks, func(i, j int) bool {
+				if m.tasks[i].Priority(m.config) == m.tasks[j].Priority(m.config) {
+					if m.tasks[i].Project != m.tasks[j].Project {
+						return m.tasks[i].Project < m.tasks[j].Project
+					}
+					if m.tasks[i].Title != m.tasks[j].Title {
+						return m.tasks[i].Title < m.tasks[j].Title
+					}
+					return m.tasks[i].FilePath < m.tasks[j].FilePath
+				}
+				return false
+			})
+		} else {
+			// Non-verbose mode: preserve existing order, append new tasks
+			m.tasks = mergeTasksPreservingOrder(m.tasks, tasks, m.config)
+		}
 
 		m.projectColWidth = calculateProjectColWidth(m.tasks)
 		m.keywordColWidth = calculateKeywordColWidth(m.tasks)
@@ -691,7 +787,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.list.SetItems(items)
 		}
-		m.list.ResetSelected()
+
+		// Restore cursor position
+		restoreCursorPosition(&m.list, m.tasks, selectedKey, currentIdx)
 
 		return m, nil
 	case statusUpdateMsg:
@@ -987,6 +1085,9 @@ func reloadTasksCmd() tea.Cmd {
 func loadTasksCmd(cfg *config.Config, project string) tea.Cmd {
 	return func() tea.Msg {
 		tasks, err := task.ListTasks(cfg, project, cfg.Todo.ShowCompleted)
+		if err == nil {
+			task.DetectCycles(tasks)
+		}
 		return loadingDoneMsg{tasks: tasks, err: err}
 	}
 }
@@ -1166,6 +1267,197 @@ func getWatchDirectories(config *config.Config, project string) []string {
 	})
 
 	return dirs
+}
+
+// taskKey creates a unique identifier for a task (includes keyword for cursor restoration)
+func taskKey(t *task.Task) string {
+	return t.FilePath + ":" + t.Keyword + ":" + t.Title
+}
+
+// taskIdentityKey creates a stable identifier for a task that doesn't change when status changes.
+// Used for merge operations to recognize the same task after status updates.
+func taskIdentityKey(t *task.Task) string {
+	return t.FilePath + ":" + t.Title
+}
+
+// restoreCursorPosition finds the task by key and restores cursor, or clamps to bounds if deleted.
+// First tries exact match (including keyword), then tries identity match (FilePath+Title) for
+// when the task status has changed.
+func restoreCursorPosition(l *list.Model, tasks []*task.Task, selectedKey string, fallbackIdx int) {
+	if len(tasks) == 0 {
+		return
+	}
+
+	// Try to find the previously selected task by exact key
+	if selectedKey != "" {
+		for i, t := range tasks {
+			if taskKey(t) == selectedKey {
+				l.Select(i)
+				return
+			}
+		}
+
+		// Exact key not found - try identity match (task status may have changed)
+		// Extract identity from selectedKey: "FilePath:Keyword:Title" -> "FilePath:Title"
+		parts := strings.SplitN(selectedKey, ":", 3)
+		if len(parts) == 3 {
+			selectedIdentity := parts[0] + ":" + parts[2] // FilePath:Title
+			for i, t := range tasks {
+				if taskIdentityKey(t) == selectedIdentity {
+					l.Select(i)
+					return
+				}
+			}
+		}
+	}
+
+	// Task was deleted or not found - clamp to bounds
+	if fallbackIdx >= len(tasks) {
+		fallbackIdx = len(tasks) - 1
+	}
+	if fallbackIdx < 0 {
+		fallbackIdx = 0
+	}
+	l.Select(fallbackIdx)
+}
+
+// appendNewTasksOnly keeps existing tasks in place when priority unchanged, repositions tasks
+// whose priority changed, removes deleted tasks, and appends new tasks at the correct position.
+// Uses taskIdentityKey (FilePath+Title) to match tasks even when their status changes.
+func appendNewTasksOnly(existing, incoming []*task.Task, cfg *config.Config) []*task.Task {
+	// Build a map of incoming tasks by identity key for matching
+	incomingByIdentity := make(map[string]*task.Task)
+	for _, t := range incoming {
+		incomingByIdentity[taskIdentityKey(t)] = t
+	}
+
+	// Build maps for existing tasks
+	existingByIdentity := make(map[string]*task.Task)
+	existingIdentityKeys := make(map[string]bool)
+	for _, t := range existing {
+		key := taskIdentityKey(t)
+		existingByIdentity[key] = t
+		existingIdentityKeys[key] = true
+	}
+
+	// Separate tasks into: unchanged (keep in place), priority-changed, and new
+	var unchangedTasks []*task.Task
+	var priorityChangedTasks []*task.Task
+
+	for _, t := range existing {
+		identityKey := taskIdentityKey(t)
+		if updated, ok := incomingByIdentity[identityKey]; ok {
+			// Task still exists - check if priority changed
+			if t.Priority(cfg) == updated.Priority(cfg) {
+				// Priority unchanged - keep in place with updated data
+				unchangedTasks = append(unchangedTasks, updated)
+			} else {
+				// Priority changed - will be repositioned
+				priorityChangedTasks = append(priorityChangedTasks, updated)
+			}
+		}
+		// Task no longer exists - don't add it (it was deleted)
+	}
+
+	// Find truly new tasks (not in existing at all)
+	var newTasks []*task.Task
+	for _, t := range incoming {
+		if !existingIdentityKeys[taskIdentityKey(t)] {
+			newTasks = append(newTasks, t)
+		}
+	}
+
+	// Start with unchanged tasks (they keep their positions)
+	result := unchangedTasks
+
+	// Insert priority-changed and new tasks at correct positions
+	tasksToInsert := append(priorityChangedTasks, newTasks...)
+	task.SortByPriority(tasksToInsert, cfg)
+
+	for _, insertTask := range tasksToInsert {
+		insertPriority := insertTask.Priority(cfg)
+		inserted := false
+
+		// Find the last task with the same or higher priority and insert after it
+		for i := len(result) - 1; i >= 0; i-- {
+			if result[i].Priority(cfg) <= insertPriority {
+				// Insert after this position
+				result = append(result[:i+1], append([]*task.Task{insertTask}, result[i+1:]...)...)
+				inserted = true
+				break
+			}
+		}
+
+		if !inserted {
+			// No task with same or higher priority found, prepend
+			result = append([]*task.Task{insertTask}, result...)
+		}
+	}
+
+	return result
+}
+
+// mergeTasksPreservingOrder merges new tasks into existing list while preserving order.
+// - Keeps existing tasks in their current positions (updating if status changed)
+// - Removes tasks that no longer exist
+// - Appends new tasks at the end of their priority group
+// Uses taskIdentityKey (FilePath+Title) to match tasks even when status changes.
+func mergeTasksPreservingOrder(existing, incoming []*task.Task, cfg *config.Config) []*task.Task {
+	// Build a map of incoming tasks by identity key for matching
+	incomingByIdentity := make(map[string]*task.Task)
+	for _, t := range incoming {
+		incomingByIdentity[taskIdentityKey(t)] = t
+	}
+
+	// Build a set of existing identity keys
+	existingIdentityKeys := make(map[string]bool)
+	for _, t := range existing {
+		existingIdentityKeys[taskIdentityKey(t)] = true
+	}
+
+	// Keep existing tasks that still exist (preserving order), updating their state
+	var result []*task.Task
+	for _, t := range existing {
+		identityKey := taskIdentityKey(t)
+		if updated, ok := incomingByIdentity[identityKey]; ok {
+			result = append(result, updated)
+		}
+		// Task no longer exists - don't add it
+	}
+
+	// Find new tasks (in incoming but not in existing)
+	var newTasks []*task.Task
+	for _, t := range incoming {
+		if !existingIdentityKeys[taskIdentityKey(t)] {
+			newTasks = append(newTasks, t)
+		}
+	}
+
+	// Sort new tasks by priority for proper insertion
+	task.SortByPriority(newTasks, cfg)
+
+	// Append new tasks at the end of their respective priority groups
+	for _, newTask := range newTasks {
+		newPriority := newTask.Priority(cfg)
+		inserted := false
+
+		// Find the last task with the same or higher priority and insert after it
+		for i := len(result) - 1; i >= 0; i-- {
+			if result[i].Priority(cfg) <= newPriority {
+				// Insert after this position
+				result = append(result[:i+1], append([]*task.Task{newTask}, result[i+1:]...)...)
+				inserted = true
+				break
+			}
+		}
+
+		if !inserted {
+			// No task with same or higher priority found, prepend
+			result = append([]*task.Task{newTask}, result...)
+		}
+	}
+
+	return result
 }
 
 func main() {
@@ -1589,6 +1881,7 @@ func loadTaskWithInbox(c *config.Config, project string, showCompleted bool) ([]
 	if err != nil {
 		// If inbox file doesn't exist, just return regular tasks
 		if os.IsNotExist(err) {
+			task.DetectCycles(regularTasks)
 			return regularTasks, nil
 		}
 		return nil, err
@@ -1607,6 +1900,9 @@ func loadTaskWithInbox(c *config.Config, project string, showCompleted bool) ([]
 
 	// Merge the tasks - regular tasks first, then inbox tasks
 	allTasks := append(regularTasks, inboxTasks...)
+
+	// Detect circular dependencies
+	task.DetectCycles(allTasks)
 
 	return allTasks, nil
 }
