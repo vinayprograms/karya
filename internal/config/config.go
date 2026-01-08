@@ -72,6 +72,8 @@ type ColorScheme struct {
 	TodayDateBgColor   string `toml:"today-bg"`
 	AssigneeColor      string `toml:"assignee"`
 	AssigneeBgColor    string `toml:"assignee-bg"`
+	CycleColor         string `toml:"cycle"`
+	CycleBgColor       string `toml:"cycle-bg"`
 }
 
 type Directories struct {
@@ -209,6 +211,8 @@ func Load() (*Config, error) {
 	cfg.Colors.TodayDateBgColor = resolveColorValue(cfg.Colors.TodayDateBgColor)
 	cfg.Colors.AssigneeColor = resolveColorValue(cfg.Colors.AssigneeColor)
 	cfg.Colors.AssigneeBgColor = resolveColorValue(cfg.Colors.AssigneeBgColor)
+	cfg.Colors.CycleColor = resolveColorValue(cfg.Colors.CycleColor)
+	cfg.Colors.CycleBgColor = resolveColorValue(cfg.Colors.CycleBgColor)
 
 	return cfg, nil
 }
@@ -306,6 +310,12 @@ func (c *Config) initializeColors() {
 		if c.Colors.AssigneeBgColor == "" {
 			c.Colors.AssigneeBgColor = string(themeColorCache["gray"])
 		}
+		if c.Colors.CycleColor == "" {
+			c.Colors.CycleColor = string(themeColorCache["bright-white"])
+		}
+		if c.Colors.CycleBgColor == "" {
+			c.Colors.CycleBgColor = string(themeColorCache["red"])
+		}
 	} else {
 		// No theme set - use terminal's native ANSI colors by setting color names only
 		// This allows the terminal emulator to use its own color scheme (light/dark)
@@ -365,6 +375,12 @@ func (c *Config) initializeColors() {
 		}
 		if c.Colors.AssigneeBgColor == "" {
 			c.Colors.AssigneeBgColor = "8" // ANSI bright black (gray)
+		}
+		if c.Colors.CycleColor == "" {
+			c.Colors.CycleColor = "15" // ANSI bright white
+		}
+		if c.Colors.CycleBgColor == "" {
+			c.Colors.CycleBgColor = "1" // ANSI red - warning color for circular deps
 		}
 	}
 
