@@ -16,14 +16,17 @@ import (
 // Task represents a parsed task from a line
 type Task struct {
 	Keyword     string
+	ID          string   // Optional unique identifier [id]
 	Title       string
 	Tag         string
-	ScheduledAt string // @date or @s:date (scheduled date)
-	DueAt       string // @d:date (due date)
+	References  []string // IDs of tasks this task depends on (^id syntax)
+	ScheduledAt string   // @date or @s:date (scheduled date)
+	DueAt       string   // @d:date (due date)
 	Assignee    string
 	Project     string
 	Zettel      string
 	FilePath    string // Original file path where this task was found
+	InCycle     bool   // True if this task participates in a circular dependency
 }
 
 // IsActive returns true if the task is active (not completed)
@@ -216,6 +219,25 @@ func ParseLine(c *config.Config, line, project, zettel, filePath string) *Task {
 	// Parse the rest of the line for metadata
 	title := basicMatches[2]
 
+	// Extract task ID [id] - must be at the start of title
+	var id string
+	idRe := regexp.MustCompile(`^\[([^\]]+)\]\s*`)
+	if idMatch := idRe.FindStringSubmatch(title); len(idMatch) > 1 {
+		id = idMatch[1]
+		title = idRe.ReplaceAllString(title, "") // Remove from title
+	}
+
+	// Extract references (^id) - can appear multiple times
+	var references []string
+	refRe := regexp.MustCompile(`\s*\^([^ ]+)`)
+	refMatches := refRe.FindAllStringSubmatch(title, -1)
+	for _, match := range refMatches {
+		if len(match) > 1 {
+			references = append(references, match[1])
+		}
+	}
+	title = refRe.ReplaceAllString(title, "") // Remove all references from title
+
 	// Extract tag (#tag)
 	var tag string
 	tagRe := regexp.MustCompile(`\s*#([^ ]+)`)
@@ -260,8 +282,10 @@ func ParseLine(c *config.Config, line, project, zettel, filePath string) *Task {
 
 	return &Task{
 		Keyword:     keyword,
+		ID:          id,
 		Title:       strings.TrimSpace(title),
 		Tag:         tag,
+		References:  references,
 		ScheduledAt: scheduledAt,
 		DueAt:       dueAt,
 		Assignee:    assignee,
@@ -335,8 +359,9 @@ func ListTasks(c *config.Config, project string, showCompleted bool) ([]*Task, e
 
 // SortByPriority sorts tasks by their priority order
 // Order: In Progress (1) -> Active (2) -> Someday (3) -> Completed (4)
+// Uses stable sort to preserve relative order of equal-priority tasks
 func SortByPriority(tasks []*Task, c *config.Config) {
-	sort.Slice(tasks, func(i, j int) bool {
+	sort.SliceStable(tasks, func(i, j int) bool {
 		return tasks[i].Priority(c) < tasks[j].Priority(c)
 	})
 }
@@ -518,9 +543,10 @@ func filterByAnyField(tasks []*Task, searchTerm string) []*Task {
 	searchLower := strings.ToLower(searchTerm)
 
 	for _, task := range tasks {
-		searchString := fmt.Sprintf("%s %s %s %s %s %s %s %s",
-			task.Project, task.Zettel, task.Keyword, task.Title,
-			task.Tag, task.ScheduledAt, task.DueAt, task.Assignee)
+		searchString := fmt.Sprintf("%s %s %s %s %s %s %s %s %s %s",
+			task.Project, task.Zettel, task.Keyword, task.ID, task.Title,
+			task.Tag, task.ScheduledAt, task.DueAt, task.Assignee,
+			strings.Join(task.References, " "))
 
 		if strings.Contains(strings.ToLower(searchString), searchLower) {
 			filtered = append(filtered, task)
@@ -665,8 +691,13 @@ func UpdateTaskStatus(t *Task, newKeyword string) error {
 	lines := strings.Split(string(content), "\n")
 	found := false
 
-	// Build the search pattern: "KEYWORD: title" (with optional metadata after title)
-	searchPrefix := fmt.Sprintf("%s: %s", t.Keyword, t.Title)
+	// Build the search pattern: "KEYWORD: [id] title" or "KEYWORD: title" (with optional metadata after title)
+	var searchPrefix string
+	if t.ID != "" {
+		searchPrefix = fmt.Sprintf("%s: [%s] %s", t.Keyword, t.ID, t.Title)
+	} else {
+		searchPrefix = fmt.Sprintf("%s: %s", t.Keyword, t.Title)
+	}
 
 	for i, line := range lines {
 		// Check if this line starts with our task's keyword and title
@@ -728,4 +759,132 @@ func GetAllKeywordsFlat(c *config.Config) []KeywordEntry {
 	}
 
 	return entries
+}
+
+// DetectCycles finds all tasks that participate in circular dependencies.
+// It builds a directed graph from task references and uses DFS to detect cycles.
+// Tasks participating in cycles will have their InCycle field set to true.
+func DetectCycles(tasks []*Task) {
+	// Build ID -> Task map for tasks that have IDs
+	taskByID := make(map[string]*Task)
+	for _, t := range tasks {
+		if t.ID != "" {
+			taskByID[t.ID] = t
+		}
+	}
+
+	// Build adjacency list (task ID -> referenced task IDs)
+	graph := make(map[string][]string)
+	for _, t := range tasks {
+		if t.ID != "" {
+			graph[t.ID] = t.References
+		}
+	}
+
+	// Find all cycle participants using DFS
+	cycleParticipants := findCycleParticipants(graph)
+
+	// Mark tasks that are in cycles
+	for _, t := range tasks {
+		if t.ID != "" {
+			if _, inCycle := cycleParticipants[t.ID]; inCycle {
+				t.InCycle = true
+			}
+		}
+	}
+}
+
+// findCycleParticipants returns a set of node IDs that participate in any cycle
+func findCycleParticipants(graph map[string][]string) map[string]bool {
+	// Track visit states: 0=unvisited, 1=visiting (in current path), 2=visited
+	state := make(map[string]int)
+	// Track the path during DFS
+	path := make([]string, 0)
+	// All nodes that are part of any cycle
+	cycleNodes := make(map[string]bool)
+
+	var dfs func(node string) bool
+	dfs = func(node string) bool {
+		if state[node] == 1 {
+			// Found a cycle - mark all nodes in the path from this node
+			foundStart := false
+			for _, n := range path {
+				if n == node {
+					foundStart = true
+				}
+				if foundStart {
+					cycleNodes[n] = true
+				}
+			}
+			return true
+		}
+		if state[node] == 2 {
+			return false
+		}
+
+		state[node] = 1 // Mark as visiting
+		path = append(path, node)
+
+		for _, neighbor := range graph[node] {
+			// Only follow edges to nodes that exist in the graph
+			if _, exists := graph[neighbor]; exists {
+				dfs(neighbor)
+			}
+		}
+
+		path = path[:len(path)-1] // Remove from path
+		state[node] = 2           // Mark as visited
+		return false
+	}
+
+	// Run DFS from all nodes
+	for node := range graph {
+		if state[node] == 0 {
+			dfs(node)
+		}
+	}
+
+	return cycleNodes
+}
+
+// GetTaskByID returns a task by its ID from a slice of tasks.
+// Returns nil if id is empty or not found.
+func GetTaskByID(tasks []*Task, id string) *Task {
+	if id == "" {
+		return nil
+	}
+	for _, t := range tasks {
+		if t.ID == id {
+			return t
+		}
+	}
+	return nil
+}
+
+// GetDependencies returns the tasks that the given task depends on
+func GetDependencies(tasks []*Task, t *Task) []*Task {
+	var deps []*Task
+	for _, refID := range t.References {
+		if dep := GetTaskByID(tasks, refID); dep != nil {
+			deps = append(deps, dep)
+		}
+	}
+	return deps
+}
+
+// GetDependents returns the tasks that depend on the given task
+func GetDependents(tasks []*Task, t *Task) []*Task {
+	if t.ID == "" {
+		return nil
+	}
+	var dependents []*Task
+	for _, other := range tasks {
+		for _, refID := range other.References {
+			if refID == t.ID {
+				dependents = append(dependents, other)
+				break
+			}
+		}
+	}
+	return dependents
 }
