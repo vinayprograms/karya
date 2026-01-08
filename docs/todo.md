@@ -1,6 +1,6 @@
 # todo - Task Management
 
-Manage tasks across projects with support for tags, dates, and assignees. Features powerful field-specific filtering, an interactive TUI, and **live file monitoring** that automatically updates the task list when files change.
+Manage tasks across projects with support for tags, dates, assignees, and **task relationships**. Features powerful field-specific filtering, an interactive TUI, and **live file monitoring** that automatically updates the task list when files change.
 
 ## Task Format
 
@@ -8,6 +8,8 @@ Tasks in markdown files follow this format:
 
 ```markdown
 TODO: Implement feature X #urgent @2025-01-15 >> john
+TODO: [auth-01] Implement authentication #backend
+TODO: [api-02] Build REST API ^auth-01 #backend
 TODO: Review PR @s:2025-01-16 @d:2025-01-18 >> alice
 DONE: Fix bug Y
 TASK: Meeting notes #meeting @2025-01-20
@@ -15,12 +17,39 @@ TASK: Meeting notes #meeting @2025-01-20
 
 ### Field Definitions
 
-- Any text prefixed by "#" is treated as a tag. Multiple tags can be added to a task.
-  - Special tags can be listed in `config.toml` which will be highlighted with a different color. Special tags can also be followe by a ":<additional text>" to provide extra context. For example "#priority:high".
-- Any text prefixed by "@" is treated as a date. By default, this is the scheduled date.
+- **`[id]`** - Optional unique identifier. Must appear right after the keyword. Used to create references between tasks.
+- **`^id`** - Reference to another task by its ID. Creates a dependency relationship. Multiple references can be specified.
+- **`#tag`** - Any text prefixed by "#" is treated as a tag.
+  - Special tags can be listed in `config.toml` which will be highlighted with a different color. Special tags can also be followed by a ":<additional text>" to provide extra context. For example "#priority:high".
+- **`@date`** - Any text prefixed by "@" is treated as a date. By default, this is the scheduled date.
   - To specify due dates, use the `@d:` prefix.
   - To specify scheduled dates explicitly, use the `@s:` prefix.
-- Any text prefixed by ">>" is treated as an assignee. Multiple assignees must be separated by commas.
+- **`>> assignee`** - Any text prefixed by ">>" is treated as an assignee. Multiple assignees must be separated by commas.
+
+## Task Relationships
+
+Tasks can reference other tasks using the `^id` syntax:
+
+```markdown
+TODO: [build-01] Build project
+TODO: [test-01] Run unit tests ^build-01
+TODO: [deploy-01] Deploy to production ^test-01 ^build-01
+```
+
+In this example:
+- `test-01` depends on `build-01`
+- `deploy-01` depends on both `test-01` and `build-01`
+
+### Circular Dependency Detection
+
+The tool automatically detects circular dependencies and highlights them in the TUI with a special indicator (⟲). For example:
+
+```markdown
+TODO: [a] Task A ^b
+TODO: [b] Task B ^a  # Creates a cycle: a → b → a
+```
+
+Both tasks will be highlighted with the cycle indicator to help you identify and resolve the circular dependency.
 
 ## Tool usage
 
