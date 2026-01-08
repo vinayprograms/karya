@@ -8,6 +8,7 @@ The term "karya" means "work" or "creation" in several Indian languages, reflect
 
 - **Fast & Concurrent**: Multi-threaded file processing handles hundreds of files efficiently
 - **Task Management**: Track TODOs, tasks, and project status across multiple projects
+- **Task Relationships**: Link tasks with dependencies using `^id` syntax, with automatic circular dependency detection
 - **Live File Monitoring**: Task list automatically updates when files change (no refresh needed)
 - **Zettelkasten Support**: Built-in support for zettelkasten note-taking methodology
 - **Git Integration**: Automatic git commits for notes and zettels using go-git
@@ -254,6 +255,6 @@ Contributions are welcome! Please follow these guidelines:
 - [ ] Web UI for task visualization
 - [ ] Mobile app integration
 - [ ] Cloud sync support
-- [ ] Task dependencies and workflows
+- [x] Task dependencies and workflows
 - [ ] Time tracking integration
 - [ ] Export to various formats (JSON, CSV, etc.)
