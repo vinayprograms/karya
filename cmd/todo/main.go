@@ -1243,28 +1243,112 @@ func updateWatcher(watcher *fsnotify.Watcher, config *config.Config, project str
 	}
 }
 
-// getWatchDirectories returns a list of directories that should be watched
+// maxWatchDirs limits the number of directories to watch to avoid exhausting
+// file descriptors. Each watched directory consumes a file descriptor.
+const maxWatchDirs = 100
+
+// getWatchDirectories returns a list of directories that should be watched.
+// In structured mode, watches only the zettel directories (PRJDIR/*/notes/*/).
+// In unstructured mode, watches up to maxWatchDirs directories, prioritizing shallower ones.
 func getWatchDirectories(config *config.Config, project string) []string {
+	if config.Todo.Structured {
+		return getStructuredWatchDirs(config, project)
+	}
+	return getUnstructuredWatchDirs(config, project)
+}
+
+// getStructuredWatchDirs returns directories for structured (zettelkasten) mode.
+// Only watches: PRJDIR, PRJDIR/*, PRJDIR/*/notes, and PRJDIR/*/notes/*
+func getStructuredWatchDirs(config *config.Config, project string) []string {
+	var dirs []string
+	prjDir := config.Directories.Projects
+
+	if project != "" && project != "*" {
+		// Specific project: watch project dir and its notes subdirs
+		projectDir := filepath.Join(prjDir, project)
+		notesDir := filepath.Join(projectDir, "notes")
+		dirs = append(dirs, projectDir, notesDir)
+
+		// Add zettel directories under notes/
+		entries, err := os.ReadDir(notesDir)
+		if err == nil {
+			for _, e := range entries {
+				if e.IsDir() {
+					dirs = append(dirs, filepath.Join(notesDir, e.Name()))
+				}
+			}
+		}
+	} else {
+		// All projects: watch PRJDIR and each project's notes structure
+		dirs = append(dirs, prjDir)
+
+		entries, err := os.ReadDir(prjDir)
+		if err == nil {
+			for _, e := range entries {
+				if e.IsDir() {
+					projectDir := filepath.Join(prjDir, e.Name())
+					notesDir := filepath.Join(projectDir, "notes")
+					dirs = append(dirs, projectDir, notesDir)
+
+					// Add zettel directories under notes/
+					zettelEntries, err := os.ReadDir(notesDir)
+					if err == nil {
+						for _, z := range zettelEntries {
+							if z.IsDir() {
+								dirs = append(dirs, filepath.Join(notesDir, z.Name()))
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Limit to maxWatchDirs
+	if len(dirs) > maxWatchDirs {
+		dirs = dirs[:maxWatchDirs]
+	}
+	return dirs
+}
+
+// getUnstructuredWatchDirs returns directories for unstructured mode.
+// Watches up to maxWatchDirs directories, prioritizing shallower ones.
+func getUnstructuredWatchDirs(config *config.Config, project string) []string {
 	var dirs []string
 
-	// Determine the root directory to watch
-	var rootDir string
-	if project == "" || project == "*" {
-		// Watch everything under PRJDIR
-		rootDir = config.Directories.Projects
-	} else {
-		// Watch specific project directory tree
+	rootDir := config.Directories.Projects
+	if project != "" && project != "*" {
 		rootDir = filepath.Join(config.Directories.Projects, project)
 	}
 
-	// Recursively walk and watch all directories under the root
-	// This handles any directory structure: flat, nested, or hierarchical groupings
+	// Collect directories with depth info for prioritization
+	rootDepth := strings.Count(rootDir, string(filepath.Separator))
+	type dirInfo struct {
+		path  string
+		depth int
+	}
+	var allDirs []dirInfo
+
 	filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
 		if err == nil && info.IsDir() {
-			dirs = append(dirs, path)
+			depth := strings.Count(path, string(filepath.Separator)) - rootDepth
+			allDirs = append(allDirs, dirInfo{path: path, depth: depth})
 		}
 		return nil
 	})
+
+	// Sort by depth (shallower first) to prioritize important directories
+	sort.Slice(allDirs, func(i, j int) bool {
+		return allDirs[i].depth < allDirs[j].depth
+	})
+
+	// Take only up to maxWatchDirs directories
+	for i, d := range allDirs {
+		if i >= maxWatchDirs {
+			break
+		}
+		dirs = append(dirs, d.path)
+	}
 
 	return dirs
 }
