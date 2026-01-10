@@ -383,10 +383,9 @@ func (s *MCPServer) listProjects(ctx context.Context, req *mcp.CallToolRequest, 
 			if count, err := zet.CountZettels(notesPath); err == nil {
 				noteCount = count
 			}
-			// Count tasks
-			if results, err := zet.FindTodos(notesPath); err == nil {
-				taskCount = len(results)
-			}
+			// Skip task counting here - too slow for list_projects
+			// Use todo MCP's get_projects for task counts instead
+			_ = taskCount
 		}
 
 		projects = append(projects, ProjectInfo{
