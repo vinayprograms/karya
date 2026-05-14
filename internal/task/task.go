@@ -201,11 +201,36 @@ func ProcessFile(c *config.Config, filePath string) ([]*Task, error) {
 	return tasks, scanner.Err()
 }
 
+// StripLinePrefix strips leading whitespace and an optional bullet marker (-, *, +)
+// followed by at least one space. Returns the content after the prefix and the
+// byte offset where that content begins in the original line.
+func StripLinePrefix(line string) (string, int) {
+	i := 0
+	for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
+		i++
+	}
+	if i < len(line) && (line[i] == '-' || line[i] == '*' || line[i] == '+') {
+		j := i + 1
+		spaces := 0
+		for j < len(line) && line[j] == ' ' {
+			j++
+			spaces++
+		}
+		if spaces > 0 {
+			return line[j:], j
+		}
+	}
+	return line[i:], i
+}
+
 // ParseLine parses a task line and returns a Task
 func ParseLine(c *config.Config, line, project, zettel, filePath string) *Task {
+	// Strip leading whitespace and optional bullet before matching keyword
+	stripped, _ := StripLinePrefix(line)
+
 	// First check for basic structure: KEYWORD: title
 	basicRe := regexp.MustCompile(`^([A-Z]+):\s*(.+)$`)
-	basicMatches := basicRe.FindStringSubmatch(line)
+	basicMatches := basicRe.FindStringSubmatch(stripped)
 	if len(basicMatches) == 0 {
 		return nil
 	}
@@ -770,10 +795,9 @@ func UpdateTaskStatus(t *Task, newKeyword string) error {
 	}
 
 	for i, line := range lines {
-		// Check if this line starts with our task's keyword and title
-		if strings.HasPrefix(line, searchPrefix) {
-			// Replace the old keyword with the new one
-			newLine := newKeyword + line[len(t.Keyword):]
+		stripped, prefixLen := StripLinePrefix(line)
+		if strings.HasPrefix(stripped, searchPrefix) {
+			newLine := line[:prefixLen] + newKeyword + line[prefixLen+len(t.Keyword):]
 			lines[i] = newLine
 			found = true
 			break
