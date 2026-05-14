@@ -320,31 +320,53 @@ func isValidKeyword(c *config.Config, keyword string) bool {
 }
 
 // ListTasks lists tasks for a project, filtering by showCompleted
+// This includes tasks from both project files and the inbox file
 func ListTasks(c *config.Config, project string, showCompleted bool) ([]*Task, error) {
+	// Get tasks from project files
 	files, err := FindFiles(c, project)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(files) == 0 {
-		return []*Task{}, nil
-	}
+	var regularTasks []*Task
+	if len(files) > 0 {
+		// Use parallel processing with the shared parallel package
+		taskSlices := parallel.Process(files, func(file string) *[]*Task {
+			tasks, err := ProcessFile(c, file)
+			if err != nil {
+				return nil
+			}
+			return &tasks
+		})
 
-	// Use parallel processing with the shared parallel package
-	taskSlices := parallel.Process(files, func(file string) *[]*Task {
-		tasks, err := ProcessFile(c, file)
-		if err != nil {
-			return nil
+		// Flatten results
+		for _, tasksPtr := range taskSlices {
+			regularTasks = append(regularTasks, *tasksPtr...)
 		}
-		return &tasks
-	})
-
-	// Flatten results
-	var allTasks []*Task
-	for _, tasksPtr := range taskSlices {
-		allTasks = append(allTasks, *tasksPtr...)
 	}
 
+	// Load tasks from inbox file
+	inboxFilePath := c.GetInboxFilePath()
+	inboxTasks, err := readInboxFile(inboxFilePath, c)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+
+	// Filter inbox tasks if showCompleted is false
+	if !showCompleted && len(inboxTasks) > 0 {
+		var filtered []*Task
+		for _, t := range inboxTasks {
+			if !t.IsCompleted(c) {
+				filtered = append(filtered, t)
+			}
+		}
+		inboxTasks = filtered
+	}
+
+	// Merge the tasks - regular tasks first, then inbox tasks
+	allTasks := append(regularTasks, inboxTasks...)
+
+	// Filter regular tasks if showCompleted is false
 	if !showCompleted {
 		var filtered []*Task
 		for _, t := range allTasks {
@@ -355,6 +377,27 @@ func ListTasks(c *config.Config, project string, showCompleted bool) ([]*Task, e
 		return filtered, nil
 	}
 	return allTasks, nil
+}
+
+// readInboxFile reads tasks from the inbox file
+func readInboxFile(inboxPath string, c *config.Config) ([]*Task, error) {
+	file, err := os.Open(inboxPath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var tasks []*Task
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		task := ParseLine(c, line, "inbox", "inbox", inboxPath)
+		if task != nil {
+			tasks = append(tasks, task)
+		}
+	}
+	
+	return tasks, scanner.Err()
 }
 
 // SortByPriority sorts tasks by their priority order
@@ -371,10 +414,6 @@ func SummarizeProjects(c *config.Config) (map[string]int, error) {
 	files, err := FindFiles(c, "")
 	if err != nil {
 		return nil, err
-	}
-
-	if len(files) == 0 {
-		return make(map[string]int), nil
 	}
 
 	type projectCount struct {
@@ -406,6 +445,23 @@ func SummarizeProjects(c *config.Config) (map[string]int, error) {
 	summary := make(map[string]int)
 	for _, res := range results {
 		summary[res.project] += res.count
+	}
+
+	// Add inbox tasks
+	inboxPath := c.GetInboxFilePath()
+	if _, err := os.Stat(inboxPath); err == nil {
+		inboxTasks, err := readInboxFile(inboxPath, c)
+		if err == nil {
+			activeCount := 0
+			for _, t := range inboxTasks {
+				if t.IsActive(c) {
+					activeCount++
+				}
+			}
+			if activeCount > 0 {
+				summary["inbox"] = activeCount
+			}
+		}
 	}
 
 	return summary, nil
@@ -633,6 +689,20 @@ func SearchTasks(c *config.Config, project string, searchTerm string) ([]SearchR
 					filename := filepath.Base(file)
 					results[i].Title = strings.TrimSuffix(filename, filepath.Ext(filename))
 				}
+			}
+			allResults = append(allResults, results...)
+		}
+	}
+
+	// Also search inbox file if project is empty (all projects) or "inbox"
+	if project == "" || project == "inbox" {
+		inboxPath := c.GetInboxFilePath()
+		if _, err := os.Stat(inboxPath); err == nil {
+			results := SearchInFile(inboxPath, searchTerm)
+			for i := range results {
+				results[i].Project = "inbox"
+				results[i].Title = "inbox"
+				results[i].ZettelID = "inbox"
 			}
 			allResults = append(allResults, results...)
 		}
