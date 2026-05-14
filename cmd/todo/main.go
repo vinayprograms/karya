@@ -1187,7 +1187,8 @@ func findTaskLine(filePath, keyword, title string) (int, error) {
 
 	for scanner.Scan() {
 		lineNum++
-		if strings.HasPrefix(scanner.Text(), searchStr) {
+		stripped, _ := task.StripLinePrefix(scanner.Text())
+		if strings.HasPrefix(stripped, searchStr) {
 			return lineNum, nil
 		}
 	}
