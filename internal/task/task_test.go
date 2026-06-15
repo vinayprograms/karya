@@ -766,3 +766,128 @@ func TestFilterTasksWithIDAndReferences(t *testing.T) {
 		})
 	}
 }
+
+func makeProcessFileConfig(t *testing.T) (*config.Config, string) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	cfg := createTestConfig()
+	cfg.Directories.Projects = tmpDir
+	cfg.Todo.Structured = false
+	return cfg, tmpDir
+}
+
+func writeTaskFile(t *testing.T, dir, name, content string) string {
+	t.Helper()
+	path := dir + "/" + name
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestProcessFile_IndentLevel(t *testing.T) {
+	cfg, tmpDir := makeProcessFileConfig(t)
+	path := writeTaskFile(t, tmpDir, "tasks.md", "TODO: parent\n  - TODO: child\n")
+
+	tasks, err := ProcessFile(cfg, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(tasks))
+	}
+	if tasks[0].IndentLevel != 0 {
+		t.Errorf("parent IndentLevel = %d, want 0", tasks[0].IndentLevel)
+	}
+	if tasks[1].IndentLevel != 4 {
+		t.Errorf("child IndentLevel = %d, want 4", tasks[1].IndentLevel)
+	}
+}
+
+func TestProcessFile_ParentChildAssignment(t *testing.T) {
+	cfg, tmpDir := makeProcessFileConfig(t)
+	path := writeTaskFile(t, tmpDir, "tasks.md",
+		"TODO: parent\n  - TODO: child one\n  - DONE: child two\n")
+
+	tasks, err := ProcessFile(cfg, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 3 {
+		t.Fatalf("expected 3 flat tasks, got %d", len(tasks))
+	}
+
+	parent := tasks[0]
+	if len(parent.Children) != 2 {
+		t.Fatalf("parent.Children = %d, want 2", len(parent.Children))
+	}
+	if parent.Children[0].Title != "child one" {
+		t.Errorf("child[0].Title = %q, want %q", parent.Children[0].Title, "child one")
+	}
+	if parent.Children[1].Title != "child two" {
+		t.Errorf("child[1].Title = %q, want %q", parent.Children[1].Title, "child two")
+	}
+}
+
+func TestProcessFile_NoChildrenOnFlatTasks(t *testing.T) {
+	cfg, tmpDir := makeProcessFileConfig(t)
+	path := writeTaskFile(t, tmpDir, "tasks.md",
+		"TODO: first\nTODO: second\nDONE: third\n")
+
+	tasks, err := ProcessFile(cfg, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range tasks {
+		if len(task.Children) != 0 {
+			t.Errorf("task %q has unexpected children", task.Title)
+		}
+	}
+}
+
+func TestProcessFile_MultiLevelNesting(t *testing.T) {
+	cfg, tmpDir := makeProcessFileConfig(t)
+	path := writeTaskFile(t, tmpDir, "tasks.md",
+		"TODO: grandparent\n  - TODO: parent\n    - TODO: child\n")
+
+	tasks, err := ProcessFile(cfg, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 3 {
+		t.Fatalf("expected 3 flat tasks, got %d", len(tasks))
+	}
+	grandparent := tasks[0]
+	if len(grandparent.Children) != 1 {
+		t.Fatalf("grandparent.Children = %d, want 1", len(grandparent.Children))
+	}
+	parent := grandparent.Children[0]
+	if len(parent.Children) != 1 {
+		t.Fatalf("parent.Children = %d, want 1", len(parent.Children))
+	}
+	if parent.Children[0].Title != "child" {
+		t.Errorf("grandchild.Title = %q, want %q", parent.Children[0].Title, "child")
+	}
+}
+
+func TestProcessFile_SiblingsDontNestIntoEachOther(t *testing.T) {
+	cfg, tmpDir := makeProcessFileConfig(t)
+	path := writeTaskFile(t, tmpDir, "tasks.md",
+		"TODO: parent one\n  - TODO: child of one\nTODO: parent two\n  - TODO: child of two\n")
+
+	tasks, err := ProcessFile(cfg, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 4 {
+		t.Fatalf("expected 4 flat tasks, got %d", len(tasks))
+	}
+
+	p1, p2 := tasks[0], tasks[2]
+	if len(p1.Children) != 1 || p1.Children[0].Title != "child of one" {
+		t.Errorf("parent one children wrong: %v", p1.Children)
+	}
+	if len(p2.Children) != 1 || p2.Children[0].Title != "child of two" {
+		t.Errorf("parent two children wrong: %v", p2.Children)
+	}
+}

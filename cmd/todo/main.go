@@ -27,20 +27,22 @@ import (
 
 // ColorScheme holds the lipgloss color styles for rendering
 type ColorScheme struct {
-	prjColor           lipgloss.Style
-	activeColor        lipgloss.Style
-	inProgressColor    lipgloss.Style
-	completedColor     lipgloss.Style
-	somedayColor       lipgloss.Style
-	taskColor          lipgloss.Style
-	completedTaskColor lipgloss.Style
-	specialTagColor    lipgloss.Style
-	tagColor           lipgloss.Style
-	dateColor          lipgloss.Style
-	pastDateColor      lipgloss.Style
-	todayDateColor     lipgloss.Style
-	assigneeColor      lipgloss.Style
-	cycleColor         lipgloss.Style
+	prjColor             lipgloss.Style
+	activeColor          lipgloss.Style
+	inProgressColor      lipgloss.Style
+	completedColor       lipgloss.Style
+	somedayColor         lipgloss.Style
+	taskColor            lipgloss.Style
+	completedTaskColor   lipgloss.Style
+	specialTagColor      lipgloss.Style
+	tagColor             lipgloss.Style
+	dateColor            lipgloss.Style
+	pastDateColor        lipgloss.Style
+	todayDateColor       lipgloss.Style
+	assigneeColor        lipgloss.Style
+	cycleColor           lipgloss.Style
+	childConnectorColor  lipgloss.Style // ⌊ connector for child tasks
+	pendingChildColor    lipgloss.Style // ◑ indicator for parents with pending children
 }
 
 // Global color scheme (will be initialized from config)
@@ -61,26 +63,30 @@ func InitializeColors(cfg *config.Config) {
 		dateColor:          lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.DateColor)).Background(lipgloss.Color(cfg.Colors.DateBgColor)),
 		pastDateColor:      lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.PastDateColor)).Background(lipgloss.Color(cfg.Colors.PastDateBgColor)),
 		todayDateColor:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TodayDateColor)).Background(lipgloss.Color(cfg.Colors.TodayDateBgColor)).Bold(true),
-		assigneeColor:      lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.AssigneeColor)).Background(lipgloss.Color(cfg.Colors.AssigneeBgColor)).Bold(true),
-		cycleColor:         lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CycleColor)).Background(lipgloss.Color(cfg.Colors.CycleBgColor)).Bold(true),
+		assigneeColor:       lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.AssigneeColor)).Background(lipgloss.Color(cfg.Colors.AssigneeBgColor)).Bold(true),
+		cycleColor:          lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CycleColor)).Background(lipgloss.Color(cfg.Colors.CycleBgColor)).Bold(true),
+		childConnectorColor: lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
+		pendingChildColor:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.InProgressColor)),
 	}
 }
 
 type taskItem struct {
-	config          *config.Config
-	task            *task.Task
-	projectColWidth int
-	keywordColWidth int
-	verbose         bool
+	config           *config.Config
+	task             *task.Task
+	projectColWidth  int
+	keywordColWidth  int
+	fractionColWidth int
+	verbose          bool
 }
 
-func NewTaskItem(c *config.Config, t *task.Task, projectColWidth, keywordColWidth int, verbose bool) taskItem {
+func NewTaskItem(c *config.Config, t *task.Task, projectColWidth, keywordColWidth, fractionColWidth int, verbose bool) taskItem {
 	return taskItem{
-		config:          c,
-		task:            t,
-		projectColWidth: projectColWidth,
-		keywordColWidth: keywordColWidth,
-		verbose:         verbose,
+		config:           c,
+		task:             t,
+		projectColWidth:  projectColWidth,
+		keywordColWidth:  keywordColWidth,
+		fractionColWidth: fractionColWidth,
+		verbose:          verbose,
 	}
 }
 
@@ -92,11 +98,30 @@ func (i taskItem) renderWithSelection(isSelected bool) string {
 		parts = append(parts, colors.cycleColor.Render(" ⟲ "))
 	}
 
-	parts = append(parts, colors.prjColor.Render(fmt.Sprintf("%-*s", i.projectColWidth, i.task.Project)))
+	// Project column: blank for child tasks, project name for root tasks
+	if i.task.Parent != nil {
+		parts = append(parts, strings.Repeat(" ", i.projectColWidth))
+	} else {
+		parts = append(parts, colors.prjColor.Render(fmt.Sprintf("%-*s", i.projectColWidth, i.task.Project)))
+	}
 
 	// Only show Zettel column in verbose mode
 	if i.verbose {
 		parts = append(parts, colors.prjColor.Render(fmt.Sprintf("%-16s", i.task.Zettel)))
+	}
+
+	// Indicator slot (always 2 display columns):
+	//   ⌊  for child tasks (connector to parent above)
+	//   ◑  for root tasks with pending children
+	//      blank otherwise
+	done, total := i.task.PendingChildCount(i.config)
+	hasPending := total > 0 && done < total
+	if i.task.Parent != nil {
+		parts = append(parts, colors.childConnectorColor.Render("╰─"))
+	} else if hasPending {
+		parts = append(parts, colors.pendingChildColor.Render("◑ "))
+	} else {
+		parts = append(parts, "  ")
 	}
 
 	var titleStyle lipgloss.Style
@@ -112,6 +137,15 @@ func (i taskItem) renderWithSelection(isSelected bool) string {
 	} else {
 		parts = append(parts, colors.completedColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
 		titleStyle = colors.completedTaskColor
+	}
+
+	// Progress fraction column immediately after keyword (fixed width, blank when not applicable)
+	if i.fractionColWidth > 0 {
+		if hasPending {
+			parts = append(parts, colors.completedColor.Render(fmt.Sprintf("%-*s", i.fractionColWidth, fmt.Sprintf("[%d/%d]", done, total))))
+		} else {
+			parts = append(parts, strings.Repeat(" ", i.fractionColWidth))
+		}
 	}
 
 	// Build title with optional ID prefix
@@ -186,11 +220,30 @@ func (i taskItem) Title() string {
 		parts = append(parts, colors.cycleColor.Render(" ⟲ "))
 	}
 
-	parts = append(parts, colors.prjColor.Render(fmt.Sprintf("%-*s", i.projectColWidth, i.task.Project)))
+	// Project column: blank for child tasks, project name for root tasks
+	if i.task.Parent != nil {
+		parts = append(parts, strings.Repeat(" ", i.projectColWidth))
+	} else {
+		parts = append(parts, colors.prjColor.Render(fmt.Sprintf("%-*s", i.projectColWidth, i.task.Project)))
+	}
 
 	// Only show Zettel column in verbose mode
 	if i.verbose {
 		parts = append(parts, colors.prjColor.Render(fmt.Sprintf("%-16s", i.task.Zettel)))
+	}
+
+	// Indicator slot (always 2 display columns):
+	//   ⌊  for child tasks (connector to parent above)
+	//   ◑  for root tasks with pending children
+	//      blank otherwise
+	done, total := i.task.PendingChildCount(i.config)
+	hasPending := total > 0 && done < total
+	if i.task.Parent != nil {
+		parts = append(parts, colors.childConnectorColor.Render("╰─"))
+	} else if hasPending {
+		parts = append(parts, colors.pendingChildColor.Render("◑ "))
+	} else {
+		parts = append(parts, "  ")
 	}
 
 	var titleStyle lipgloss.Style
@@ -206,6 +259,15 @@ func (i taskItem) Title() string {
 	} else {
 		parts = append(parts, colors.completedColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
 		titleStyle = colors.completedTaskColor
+	}
+
+	// Progress fraction column immediately after keyword (fixed width, blank when not applicable)
+	if i.fractionColWidth > 0 {
+		if hasPending {
+			parts = append(parts, colors.completedColor.Render(fmt.Sprintf("%-*s", i.fractionColWidth, fmt.Sprintf("[%d/%d]", done, total))))
+		} else {
+			parts = append(parts, strings.Repeat(" ", i.fractionColWidth))
+		}
 	}
 
 	// Build title with optional ID prefix
@@ -351,9 +413,10 @@ type model struct {
 	project         string
 	quitting        bool
 	watcher         *fsnotify.Watcher
-	projectColWidth int
-	keywordColWidth int
-	savedFilter     string
+	projectColWidth  int
+	keywordColWidth  int
+	fractionColWidth int
+	savedFilter      string
 	customFilter    string
 	filtering       bool
 	allItems        []list.Item
@@ -362,11 +425,15 @@ type model struct {
 	searchTerm      string // Track search term for editor highlighting
 
 	// Status selector state
-	showingStatusSelector bool
-	statusSelectorList    list.Model
-	selectedTask          *task.Task
-	statusMessage         string
-	statusMessageTimer    int
+	showingStatusSelector     bool
+	statusSelectorList        list.Model
+	selectedTask              *task.Task
+	statusMessage             string
+	statusMessageTimer        int
+
+	// Pending-child warning state
+	showingPendingChildWarning bool
+	pendingWarningKeyword      string
 }
 
 func (m model) Init() tea.Cmd {
@@ -423,6 +490,44 @@ func waitForFileChange(watcher *fsnotify.Watcher) tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Handle pending-child warning confirmation
+	if m.showingPendingChildWarning {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "ctrl+c":
+				m.quitting = true
+				if m.watcher != nil {
+					m.watcher.Close()
+				}
+				return m, tea.Quit
+			case "y", "Y":
+				t, kw := m.selectedTask, m.pendingWarningKeyword
+				m.showingPendingChildWarning = false
+				m.pendingWarningKeyword = ""
+				return m, updateTaskStatusCmd(t, kw)
+			case "n", "N", "esc", "q":
+				m.showingPendingChildWarning = false
+				m.selectedTask = nil
+				m.pendingWarningKeyword = ""
+				return m, nil
+			}
+		case statusUpdateMsg:
+			m.showingPendingChildWarning = false
+			m.selectedTask = nil
+			m.pendingWarningKeyword = ""
+			if msg.err != nil {
+				m.statusMessage = fmt.Sprintf("Error: %v", msg.err)
+			} else {
+				m.statusMessage = msg.message
+			}
+			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+				return clearStatusMsg{}
+			})
+		}
+		return m, nil
+	}
+
 	// Handle status selector mode - forward all messages to it
 	if m.showingStatusSelector {
 		switch msg := msg.(type) {
@@ -471,6 +576,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				// Apply the selected status (works for both unfiltered and filter-applied states)
 				if i, ok := m.statusSelectorList.SelectedItem().(keywordItem); ok {
+					if isCompletedKeyword(m.config, i.keyword) && hasActiveChildren(m.selectedTask, m.config) {
+						m.showingStatusSelector = false
+						m.showingPendingChildWarning = true
+						m.pendingWarningKeyword = i.keyword
+						return m, nil
+					}
 					return m, updateTaskStatusCmd(m.selectedTask, i.keyword)
 				}
 				m.showingStatusSelector = false
@@ -658,11 +769,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					return false
 				})
+				m.tasks = task.GroupWithChildren(m.tasks)
 				m.projectColWidth = calculateProjectColWidth(m.tasks)
 				m.keywordColWidth = calculateKeywordColWidth(m.tasks)
+				m.fractionColWidth = calculateFractionColWidth(m.tasks, m.config)
 				items := make([]list.Item, len(m.tasks))
 				for i, t := range m.tasks {
-					items[i] = NewTaskItem(m.config, t, m.projectColWidth, m.keywordColWidth, m.config.GeneralConfig.Verbose)
+					items[i] = NewTaskItem(m.config, t, m.projectColWidth, m.keywordColWidth, m.fractionColWidth, m.config.GeneralConfig.Verbose)
 				}
 				m.allItems = items
 				if m.customFilter != "" {
@@ -673,12 +786,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				// Non-verbose mode: preserve order, update tasks in place, append new tasks at end
 				newTasks := appendNewTasksOnly(m.tasks, tasks, m.config)
-				m.tasks = newTasks
+				m.tasks = task.GroupWithChildren(newTasks)
 				m.projectColWidth = calculateProjectColWidth(m.tasks)
 				m.keywordColWidth = calculateKeywordColWidth(m.tasks)
+				m.fractionColWidth = calculateFractionColWidth(m.tasks, m.config)
 				items := make([]list.Item, len(m.tasks))
 				for i, t := range m.tasks {
-					items[i] = NewTaskItem(m.config, t, m.projectColWidth, m.keywordColWidth, m.config.GeneralConfig.Verbose)
+					items[i] = NewTaskItem(m.config, t, m.projectColWidth, m.keywordColWidth, m.fractionColWidth, m.config.GeneralConfig.Verbose)
 				}
 				m.allItems = items
 				if m.customFilter != "" {
@@ -720,12 +834,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return false
 			})
+			m.tasks = task.GroupWithChildren(m.tasks)
 
 			m.projectColWidth = calculateProjectColWidth(m.tasks)
 			m.keywordColWidth = calculateKeywordColWidth(m.tasks)
+			m.fractionColWidth = calculateFractionColWidth(m.tasks, m.config)
 			items := make([]list.Item, len(m.tasks))
 			for i, t := range m.tasks {
-				items[i] = taskItem{config: m.config, task: t, projectColWidth: m.projectColWidth, keywordColWidth: m.keywordColWidth, verbose: m.config.GeneralConfig.Verbose}
+				items[i] = taskItem{config: m.config, task: t, projectColWidth: m.projectColWidth, keywordColWidth: m.keywordColWidth, fractionColWidth: m.fractionColWidth, verbose: m.config.GeneralConfig.Verbose}
 			}
 			m.allItems = items
 			m.list.SetItems(items)
@@ -769,16 +885,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return false
 			})
+			m.tasks = task.GroupWithChildren(m.tasks)
 		} else {
 			// Non-verbose mode: preserve existing order, append new tasks
-			m.tasks = mergeTasksPreservingOrder(m.tasks, tasks, m.config)
+			m.tasks = task.GroupWithChildren(mergeTasksPreservingOrder(m.tasks, tasks, m.config))
 		}
 
 		m.projectColWidth = calculateProjectColWidth(m.tasks)
 		m.keywordColWidth = calculateKeywordColWidth(m.tasks)
+		m.fractionColWidth = calculateFractionColWidth(m.tasks, m.config)
 		items := make([]list.Item, len(m.tasks))
 		for i, t := range m.tasks {
-			items[i] = taskItem{config: m.config, task: t, projectColWidth: m.projectColWidth, keywordColWidth: m.keywordColWidth, verbose: m.config.GeneralConfig.Verbose}
+			items[i] = taskItem{config: m.config, task: t, projectColWidth: m.projectColWidth, keywordColWidth: m.keywordColWidth, fractionColWidth: m.fractionColWidth, verbose: m.config.GeneralConfig.Verbose}
 		}
 		m.allItems = items
 
@@ -855,7 +973,7 @@ func (m *model) applyCustomFilter() {
 				Zettel:   result.ZettelID,
 				FilePath: result.Path,
 			}
-			item := NewTaskItem(m.config, pseudoTask, m.projectColWidth, m.keywordColWidth, m.config.GeneralConfig.Verbose)
+			item := NewTaskItem(m.config, pseudoTask, m.projectColWidth, m.keywordColWidth, m.fractionColWidth, m.config.GeneralConfig.Verbose)
 			searchResultItems = append(searchResultItems, item)
 		}
 
@@ -898,6 +1016,11 @@ func (m *model) applyCustomFilter() {
 func (m model) View() string {
 	if m.quitting {
 		return ""
+	}
+
+	// Show pending-child warning overlay if active
+	if m.showingPendingChildWarning {
+		return m.renderPendingChildWarning()
 	}
 
 	// Show status selector overlay if active
@@ -1014,6 +1137,39 @@ func (m model) renderStatusSelector() string {
 	return boxStyle.Render(content.String())
 }
 
+// renderPendingChildWarning renders the warning overlay for completing a parent with active children
+func (m model) renderPendingChildWarning() string {
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("9")).
+		Padding(1, 2)
+
+	activeCount := 0
+	for _, child := range m.selectedTask.Children {
+		if child.IsActive(m.config) || child.IsInProgress(m.config) {
+			activeCount++
+		}
+	}
+
+	var content strings.Builder
+
+	warningStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
+	content.WriteString(warningStyle.Render("⚠  Incomplete children"))
+	content.WriteString("\n\n")
+
+	infoStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	content.WriteString(infoStyle.Render(fmt.Sprintf(
+		"%d active/in-progress child task(s) still pending.\nMark parent as %s anyway?",
+		activeCount, m.pendingWarningKeyword,
+	)))
+	content.WriteString("\n\n")
+
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	content.WriteString(helpStyle.Render("y: confirm • n/esc: cancel"))
+
+	return boxStyle.Render(content.String())
+}
+
 type editorFinishedMsg struct{ err error }
 
 // createStatusSelectorList creates a list.Model for the status selector popup
@@ -1047,6 +1203,27 @@ func createStatusSelectorList(cfg *config.Config, currentKeyword string) list.Mo
 	l.Select(selectedIdx)
 
 	return l
+}
+
+func isCompletedKeyword(cfg *config.Config, keyword string) bool {
+	for _, k := range cfg.Todo.Completed {
+		if k == keyword {
+			return true
+		}
+	}
+	return false
+}
+
+func hasActiveChildren(t *task.Task, cfg *config.Config) bool {
+	if t == nil {
+		return false
+	}
+	for _, child := range t.Children {
+		if child.IsActive(cfg) || child.IsInProgress(cfg) {
+			return true
+		}
+	}
+	return false
 }
 
 // updateTaskStatusCmd creates a command that updates the task status
@@ -1211,6 +1388,20 @@ func calculateKeywordColWidth(tasks []*task.Task) int {
 	for _, t := range tasks {
 		if len(t.Keyword) > maxLen {
 			maxLen = len(t.Keyword)
+		}
+	}
+	return maxLen
+}
+
+func calculateFractionColWidth(tasks []*task.Task, cfg *config.Config) int {
+	maxLen := 0
+	for _, t := range tasks {
+		done, total := t.PendingChildCount(cfg)
+		if total > 0 && done < total {
+			w := len(fmt.Sprintf("[%d/%d]", done, total))
+			if w > maxLen {
+				maxLen = w
+			}
 		}
 	}
 	return maxLen
@@ -1746,12 +1937,14 @@ func showInteractiveTUI(config *config.Config, project string) {
 		}
 		return false
 	})
+	tasks = task.GroupWithChildren(tasks)
 
 	projectColWidth := calculateProjectColWidth(tasks)
 	keywordColWidth := calculateKeywordColWidth(tasks)
+	fractionColWidth := calculateFractionColWidth(tasks, config)
 	items := make([]list.Item, len(tasks))
 	for i, t := range tasks {
-		items[i] = taskItem{config: config, task: t, projectColWidth: projectColWidth, keywordColWidth: keywordColWidth, verbose: config.GeneralConfig.Verbose}
+		items[i] = taskItem{config: config, task: t, projectColWidth: projectColWidth, keywordColWidth: keywordColWidth, fractionColWidth: fractionColWidth, verbose: config.GeneralConfig.Verbose}
 	}
 
 	delegate := taskDelegate{DefaultDelegate: list.NewDefaultDelegate()}
@@ -1860,16 +2053,17 @@ func showInteractiveTUI(config *config.Config, project string) {
 	}
 
 	m := model{
-		list:            l,
-		tasks:           tasks,
-		config:          config,
-		project:         project,
-		watcher:         watcher,
-		projectColWidth: projectColWidth,
-		keywordColWidth: keywordColWidth,
-		allItems:        items,
-		structuredMode:  config.Todo.Structured,
-		searchTerm:      "",  // Initialize search term
+		list:             l,
+		tasks:            tasks,
+		config:           config,
+		project:          project,
+		watcher:          watcher,
+		projectColWidth:  projectColWidth,
+		keywordColWidth:  keywordColWidth,
+		fractionColWidth: fractionColWidth,
+		allItems:         items,
+		structuredMode:   config.Todo.Structured,
+		searchTerm:       "",
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
