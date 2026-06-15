@@ -25,8 +25,11 @@ type Task struct {
 	Assignee    string
 	Project     string
 	Zettel      string
-	FilePath    string // Original file path where this task was found
-	InCycle     bool   // True if this task participates in a circular dependency
+	FilePath    string  // Original file path where this task was found
+	InCycle     bool    // True if this task participates in a circular dependency
+	IndentLevel int     // Byte offset of first non-whitespace character in source line
+	Parent      *Task   // Parent task, nil for root tasks
+	Children    []*Task // Child tasks nested under this task in the source file
 }
 
 // IsActive returns true if the task is active (not completed)
@@ -189,14 +192,33 @@ func ProcessFile(c *config.Config, filePath string) ([]*Task, error) {
 		}
 	}
 
+	type stackFrame struct {
+		level int
+		task  *Task
+	}
+
 	var tasks []*Task
+	var stack []stackFrame
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
-		task := ParseLine(c, line, project, zettel, filePath)
-		if task != nil {
-			tasks = append(tasks, task)
+		_, level := StripLinePrefix(line)
+		t := ParseLine(c, line, project, zettel, filePath)
+		if t == nil {
+			continue
 		}
+		t.IndentLevel = level
+		// Pop frames at the same or deeper indent — they are siblings or closed subtrees.
+		for len(stack) > 0 && stack[len(stack)-1].level >= level {
+			stack = stack[:len(stack)-1]
+		}
+		if len(stack) > 0 {
+			parent := stack[len(stack)-1].task
+			parent.Children = append(parent.Children, t)
+			t.Parent = parent
+		}
+		stack = append(stack, stackFrame{level: level, task: t})
+		tasks = append(tasks, t)
 	}
 	return tasks, scanner.Err()
 }
@@ -964,6 +986,39 @@ func GetDependencies(tasks []*Task, t *Task) []*Task {
 		}
 	}
 	return deps
+}
+
+// PendingChildCount returns the number of completed and total direct children.
+func (t *Task) PendingChildCount(c *config.Config) (done, total int) {
+	for _, child := range t.Children {
+		total++
+		if child.IsCompleted(c) {
+			done++
+		}
+	}
+	return
+}
+
+// GroupWithChildren reorders a sorted flat task list so each root task is
+// immediately followed by its descendants (depth-first, children in file order).
+// The flat list is unchanged in length; children are simply relocated adjacent
+// to their parent rather than scattered by the sort.
+func GroupWithChildren(tasks []*Task) []*Task {
+	result := make([]*Task, 0, len(tasks))
+	for _, t := range tasks {
+		if t.Parent == nil {
+			result = append(result, t)
+			appendDescendants(&result, t)
+		}
+	}
+	return result
+}
+
+func appendDescendants(result *[]*Task, t *Task) {
+	for _, c := range t.Children {
+		*result = append(*result, c)
+		appendDescendants(result, c)
+	}
 }
 
 // GetDependents returns the tasks that depend on the given task
