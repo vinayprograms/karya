@@ -426,7 +426,7 @@ func ListTasks(c *config.Config, project string, showCompleted bool) ([]*Task, e
 	return allTasks, nil
 }
 
-// readInboxFile reads tasks from the inbox file
+// readInboxFile reads tasks from the inbox file, preserving parent/child hierarchy
 func readInboxFile(inboxPath string, c *config.Config) ([]*Task, error) {
 	file, err := os.Open(inboxPath)
 	if err != nil {
@@ -434,16 +434,34 @@ func readInboxFile(inboxPath string, c *config.Config) ([]*Task, error) {
 	}
 	defer file.Close()
 
+	type stackFrame struct {
+		level int
+		task  *Task
+	}
+
 	var tasks []*Task
+	var stack []stackFrame
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
-		task := ParseLine(c, line, "inbox", "inbox", inboxPath)
-		if task != nil {
-			tasks = append(tasks, task)
+		_, level := StripLinePrefix(line)
+		t := ParseLine(c, line, "inbox", "inbox", inboxPath)
+		if t == nil {
+			continue
 		}
+		t.IndentLevel = level
+		for len(stack) > 0 && stack[len(stack)-1].level >= level {
+			stack = stack[:len(stack)-1]
+		}
+		if len(stack) > 0 {
+			parent := stack[len(stack)-1].task
+			parent.Children = append(parent.Children, t)
+			t.Parent = parent
+		}
+		stack = append(stack, stackFrame{level: level, task: t})
+		tasks = append(tasks, t)
 	}
-	
+
 	return tasks, scanner.Err()
 }
 
