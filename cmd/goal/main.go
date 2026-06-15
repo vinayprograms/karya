@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -923,6 +924,30 @@ func (m *Model) editGoal() tea.Cmd {
 }
 
 func main() {
+	args := os.Args[1:]
+
+	if len(args) > 0 && args[0] == "mcp" {
+		cfg, err := config.Load()
+		if err != nil {
+			log.Fatal(err)
+		}
+		karyaDir := cfg.Directories.Karya
+		if karyaDir == "" {
+			if cfg.Directories.Projects != "" {
+				karyaDir = cfg.Directories.Projects
+			} else {
+				home, _ := os.UserHomeDir()
+				karyaDir = filepath.Join(home, ".karya")
+			}
+		}
+		manager := goal.NewGoalManager(filepath.Join(karyaDir, ".goals"))
+		server := goal.NewMCPServer(manager)
+		if err := server.Run(context.Background()); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
 	model, err := NewModel()
 	if err != nil {
 		log.Fatal(err)
