@@ -1435,6 +1435,11 @@ func updateWatcher(watcher *fsnotify.Watcher, config *config.Config, project str
 		// Ignore errors - directory might not exist yet or might already be watched
 		watcher.Add(dir)
 	}
+
+	// Watch the inbox file's parent directory so external edits trigger a refresh
+	if inboxPath := config.GetInboxFilePath(); inboxPath != "" {
+		watcher.Add(filepath.Dir(inboxPath))
+	}
 }
 
 // maxWatchDirs limits the number of directories to watch to avoid exhausting
