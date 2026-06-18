@@ -74,6 +74,9 @@ type ColorScheme struct {
 	AssigneeBgColor    string `toml:"assignee-bg"`
 	CycleColor         string `toml:"cycle"`
 	CycleBgColor       string `toml:"cycle-bg"`
+	OverdueColor       string `toml:"overdue"`
+	OverdueBgColor     string `toml:"overdue-bg"`
+	AgendaHeaderColor  string `toml:"agenda-header"`
 }
 
 type Directories struct {
@@ -95,6 +98,13 @@ type Todo struct {
 type Goals struct {
 	YearStart string `toml:"year-start"`
 }
+
+type Schedule struct {
+	WeekStart          string `toml:"week_start"`
+	DefaultWarningDays int    `toml:"default_warning_days"`
+	DefaultView        string `toml:"default_view"`
+}
+
 type GeneralConfig struct {
 	EDITOR  string `toml:"editor"`
 	Verbose bool   `toml:"verbose"`
@@ -105,6 +115,7 @@ type Config struct {
 	Directories   Directories   `toml:"directories"`
 	Todo          Todo          `toml:"todo"`
 	Goals         Goals         `toml:"goals"`
+	Schedule      Schedule      `toml:"schedule"`
 	Colors        ColorScheme   `toml:"colors"`
 }
 
@@ -188,6 +199,17 @@ func Load() (*Config, error) {
 		}
 	}
 
+	// Schedule defaults
+	if cfg.Schedule.WeekStart == "" {
+		cfg.Schedule.WeekStart = "monday"
+	}
+	if cfg.Schedule.DefaultWarningDays == 0 {
+		cfg.Schedule.DefaultWarningDays = 3
+	}
+	if cfg.Schedule.DefaultView == "" {
+		cfg.Schedule.DefaultView = "week"
+	}
+
 	// Initialize colors with defaults
 	cfg.initializeColors()
 
@@ -213,6 +235,9 @@ func Load() (*Config, error) {
 	cfg.Colors.AssigneeBgColor = resolveColorValue(cfg.Colors.AssigneeBgColor)
 	cfg.Colors.CycleColor = resolveColorValue(cfg.Colors.CycleColor)
 	cfg.Colors.CycleBgColor = resolveColorValue(cfg.Colors.CycleBgColor)
+	cfg.Colors.OverdueColor = resolveColorValue(cfg.Colors.OverdueColor)
+	cfg.Colors.OverdueBgColor = resolveColorValue(cfg.Colors.OverdueBgColor)
+	cfg.Colors.AgendaHeaderColor = resolveColorValue(cfg.Colors.AgendaHeaderColor)
 
 	return cfg, nil
 }
@@ -381,6 +406,15 @@ func (c *Config) initializeColors() {
 		}
 		if c.Colors.CycleBgColor == "" {
 			c.Colors.CycleBgColor = "1" // ANSI red - warning color for circular deps
+		}
+		if c.Colors.OverdueColor == "" {
+			c.Colors.OverdueColor = "1" // ANSI red
+		}
+		if c.Colors.OverdueBgColor == "" {
+			c.Colors.OverdueBgColor = ""
+		}
+		if c.Colors.AgendaHeaderColor == "" {
+			c.Colors.AgendaHeaderColor = "4" // ANSI blue
 		}
 	}
 

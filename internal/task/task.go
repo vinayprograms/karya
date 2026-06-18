@@ -28,6 +28,7 @@ type Task struct {
 	FilePath    string  // Original file path where this task was found
 	InCycle     bool    // True if this task participates in a circular dependency
 	IndentLevel int     // Byte offset of first non-whitespace character in source line
+	LineNum     int     // 1-based line number in source file
 	Parent      *Task   // Parent task, nil for root tasks
 	Children    []*Task // Child tasks nested under this task in the source file
 }
@@ -199,8 +200,10 @@ func ProcessFile(c *config.Config, filePath string) ([]*Task, error) {
 
 	var tasks []*Task
 	var stack []stackFrame
+	lineNum := 0
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
+		lineNum++
 		line := scanner.Text()
 		_, level := StripLinePrefix(line)
 		t := ParseLine(c, line, project, zettel, filePath)
@@ -208,6 +211,7 @@ func ProcessFile(c *config.Config, filePath string) ([]*Task, error) {
 			continue
 		}
 		t.IndentLevel = level
+		t.LineNum = lineNum
 		// Pop frames at the same or deeper indent — they are siblings or closed subtrees.
 		for len(stack) > 0 && stack[len(stack)-1].level >= level {
 			stack = stack[:len(stack)-1]
@@ -342,6 +346,11 @@ func ParseLine(c *config.Config, line, project, zettel, filePath string) *Task {
 	}
 }
 
+// IsKeywordValid returns true if the keyword is in any configured category.
+func IsKeywordValid(c *config.Config, keyword string) bool {
+	return isValidKeyword(c, keyword)
+}
+
 func isValidKeyword(c *config.Config, keyword string) bool {
 	for _, kw := range c.Todo.Active {
 		if keyword == kw {
@@ -441,8 +450,10 @@ func readInboxFile(inboxPath string, c *config.Config) ([]*Task, error) {
 
 	var tasks []*Task
 	var stack []stackFrame
+	lineNum := 0
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
+		lineNum++
 		line := scanner.Text()
 		_, level := StripLinePrefix(line)
 		t := ParseLine(c, line, "inbox", "inbox", inboxPath)
@@ -450,6 +461,7 @@ func readInboxFile(inboxPath string, c *config.Config) ([]*Task, error) {
 			continue
 		}
 		t.IndentLevel = level
+		t.LineNum = lineNum
 		for len(stack) > 0 && stack[len(stack)-1].level >= level {
 			stack = stack[:len(stack)-1]
 		}
@@ -1039,6 +1051,59 @@ func appendDescendants(result *[]*Task, t *Task) {
 	}
 }
 
+// ReadRawBlock reads the raw content of a task from its source file.
+// Returns the task's own line plus all subsequent lines that are indented
+// deeper (regardless of whether they are tasks or plain text).
+func ReadRawBlock(t *Task) (string, error) {
+	if t.FilePath == "" || t.LineNum == 0 {
+		return "", nil
+	}
+
+	file, err := os.Open(t.FilePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	var lines []string
+	scanner := bufio.NewScanner(file)
+	currentLine := 0
+	taskIndent := -1
+
+	for scanner.Scan() {
+		currentLine++
+		line := scanner.Text()
+
+		if currentLine < t.LineNum {
+			continue
+		}
+
+		if currentLine == t.LineNum {
+			taskIndent = t.IndentLevel
+			lines = append(lines, line)
+			continue
+		}
+
+		// Include subsequent lines that are deeper or blank
+		if line == "" {
+			lines = append(lines, line)
+			continue
+		}
+		_, level := StripLinePrefix(line)
+		if level > taskIndent {
+			lines = append(lines, line)
+		} else {
+			break
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+
+	return strings.Join(lines, "\n"), nil
+}
+
 // GetDependents returns the tasks that depend on the given task
 func GetDependents(tasks []*Task, t *Task) []*Task {
 	if t.ID == "" {
@@ -1054,4 +1119,150 @@ func GetDependents(tasks []*Task, t *Task) []*Task {
 		}
 	}
 	return dependents
+}
+
+// SetTaskDate sets, updates, or removes scheduled/due dates on a task's source line.
+// Empty string for scheduledAt/dueAt means no-op for that field.
+// removeScheduled/removeDue=true removes the corresponding token.
+func SetTaskDate(t *Task, scheduledAt, dueAt string, removeScheduled, removeDue bool) error {
+	if scheduledAt != "" && removeScheduled {
+		return fmt.Errorf("cannot both set and remove scheduled date")
+	}
+	if dueAt != "" && removeDue {
+		return fmt.Errorf("cannot both set and remove due date")
+	}
+	if scheduledAt == "" && dueAt == "" && !removeScheduled && !removeDue {
+		return fmt.Errorf("nothing to do")
+	}
+
+	if scheduledAt != "" {
+		if _, err := ParseSchedule(scheduledAt); err != nil {
+			return fmt.Errorf("invalid scheduled date %q: %w", scheduledAt, err)
+		}
+	}
+	if dueAt != "" {
+		if _, err := ParseSchedule(dueAt); err != nil {
+			return fmt.Errorf("invalid due date %q: %w", dueAt, err)
+		}
+	}
+
+	if t.FilePath == "" {
+		return fmt.Errorf("task has no file path")
+	}
+
+	content, err := os.ReadFile(t.FilePath)
+	if err != nil {
+		return fmt.Errorf("failed to read file: %w", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+
+	var searchPrefix string
+	if t.ID != "" {
+		searchPrefix = fmt.Sprintf("%s: [%s] %s", t.Keyword, t.ID, t.Title)
+	} else {
+		searchPrefix = fmt.Sprintf("%s: %s", t.Keyword, t.Title)
+	}
+
+	found := false
+	for i, line := range lines {
+		stripped, _ := StripLinePrefix(line)
+		if strings.HasPrefix(stripped, searchPrefix) {
+			lines[i] = applyDateChanges(line, scheduledAt, dueAt, removeScheduled, removeDue)
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("task not found in file: %s: %s", t.Keyword, t.Title)
+	}
+
+	if err := os.WriteFile(t.FilePath, []byte(strings.Join(lines, "\n")), 0644); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	if scheduledAt != "" {
+		t.ScheduledAt = scheduledAt
+	} else if removeScheduled {
+		t.ScheduledAt = ""
+	}
+	if dueAt != "" {
+		t.DueAt = dueAt
+	} else if removeDue {
+		t.DueAt = ""
+	}
+
+	return nil
+}
+
+// applyDateChanges modifies date tokens on a task line.
+func applyDateChanges(line, scheduledAt, dueAt string, removeScheduled, removeDue bool) string {
+	scheduledExplicitRe := regexp.MustCompile(`\s*@s:[^\s]+`)
+	dueRe := regexp.MustCompile(`\s*@d:[^\s]+`)
+
+	if removeScheduled {
+		line = scheduledExplicitRe.ReplaceAllString(line, "")
+		// Remove bare @date only if no @s: was found (already removed above)
+		if !scheduledExplicitRe.MatchString(line) {
+			line = removeBareScheduledDate(line)
+		}
+	} else if scheduledAt != "" {
+		newToken := " @s:" + scheduledAt
+		if loc := scheduledExplicitRe.FindStringIndex(line); loc != nil {
+			line = line[:loc[0]] + newToken + line[loc[1]:]
+		} else if loc := findBareScheduledDate(line); loc != nil {
+			line = line[:loc[0]] + newToken + line[loc[1]:]
+		} else {
+			line = insertToken(line, newToken)
+		}
+	}
+
+	if removeDue {
+		line = dueRe.ReplaceAllString(line, "")
+	} else if dueAt != "" {
+		newToken := " @d:" + dueAt
+		if loc := dueRe.FindStringIndex(line); loc != nil {
+			line = line[:loc[0]] + newToken + line[loc[1]:]
+		} else {
+			line = insertToken(line, newToken)
+		}
+	}
+
+	return line
+}
+
+// findBareScheduledDate finds a bare @DATE token (not @s: or @d:) in the line.
+func findBareScheduledDate(line string) []int {
+	re := regexp.MustCompile(`\s*@([^\s:][^\s]*)`)
+	matches := re.FindAllStringIndex(line, -1)
+	for _, loc := range matches {
+		substr := line[loc[0]:loc[1]]
+		// Skip if it's @s: or @d:
+		trimmed := strings.TrimLeft(substr, " \t")
+		if strings.HasPrefix(trimmed, "@s:") || strings.HasPrefix(trimmed, "@d:") {
+			continue
+		}
+		return loc
+	}
+	return nil
+}
+
+// removeBareScheduledDate removes a bare @DATE token from the line.
+func removeBareScheduledDate(line string) string {
+	loc := findBareScheduledDate(line)
+	if loc == nil {
+		return line
+	}
+	return line[:loc[0]] + line[loc[1]:]
+}
+
+// insertToken inserts a date token before trailing metadata (#tag, >> assignee, ^ref).
+func insertToken(line, token string) string {
+	// Find the first trailing metadata marker
+	metaRe := regexp.MustCompile(`\s+(#[^\s]|>>\s|(\^[^\s]))`)
+	if loc := metaRe.FindStringIndex(line); loc != nil {
+		return line[:loc[0]] + token + line[loc[0]:]
+	}
+	return line + token
 }
