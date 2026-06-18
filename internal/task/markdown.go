@@ -6,47 +6,58 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// RenderMarkdownDescription renders a task description with markdown formatting
-// It supports bold (**text**), italic (*text*), strikethrough (~~text~~), and inline code (`code`)
-// The raw markdown syntax is hidden in the output
-//
-// Color choices:
-// - Bold text: Uses bright white color to make it stand out
-// - Italic text: Preserves the original text color but adds italic styling
-// - Strikethrough text: Preserves the original text color but adds strikethrough styling
-// - Inline code: Uses black text on white background for clear distinction
+// RenderMarkdownDescription renders a task description with markdown formatting.
+// Supports: bold, italic, strikethrough, inline code, URLs, and bullet markers.
 func RenderMarkdownDescription(description string, taskColor lipgloss.Style) string {
-	// Process bold text (**text**) - use bright white color to make it stand out
-	boldRe := regexp.MustCompile(`\*\*(.*?)\*\*`)
-	description = boldRe.ReplaceAllStringFunc(description, func(match string) string {
-		content := boldRe.FindStringSubmatch(match)[1]
-		// Use bright white color for bold text to make it stand out
-		boldStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true)
-		return boldStyle.Render(content)
-	})
-
-	// Process italic text (*text*) - preserve original color but add italic styling
-	italicRe := regexp.MustCompile(`\*(.*?)\*`)
-	description = italicRe.ReplaceAllStringFunc(description, func(match string) string {
-		content := italicRe.FindStringSubmatch(match)[1]
-		// Apply italic to the existing style to preserve the original color
-		return taskColor.Italic(true).Render(content)
-	})
-
-	// Process strikethrough text (~~text~~) - preserve original color but add strikethrough styling
-	strikeRe := regexp.MustCompile(`~~(.*?)~~`)
-	description = strikeRe.ReplaceAllStringFunc(description, func(match string) string {
-		content := strikeRe.FindStringSubmatch(match)[1]
-		// Apply strikethrough to the existing style to preserve the original color
-		return taskColor.Strikethrough(true).Render(content)
-	})
-
-	// Process inline code (`code`) - use distinct styling for clear distinction
+	// Process inline code first (protect from other transformations)
 	codeRe := regexp.MustCompile("`([^`]+)`")
 	description = codeRe.ReplaceAllStringFunc(description, func(match string) string {
 		content := codeRe.FindStringSubmatch(match)[1]
-		// Use black text on white background for clear distinction of inline code
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Background(lipgloss.Color("#000000")).Render(content)
+	})
+
+	// Process markdown links [text](url) — show text underlined in blue
+	mdLinkRe := regexp.MustCompile(`\[([^\]]+)\]\([^\)]+\)`)
+	description = mdLinkRe.ReplaceAllStringFunc(description, func(match string) string {
+		parts := mdLinkRe.FindStringSubmatch(match)
+		linkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("4")).Underline(true)
+		return linkStyle.Render(parts[1])
+	})
+
+	// Process bare URLs
+	urlRe := regexp.MustCompile(`https?://[^\s\)>\]]+`)
+	description = urlRe.ReplaceAllStringFunc(description, func(match string) string {
+		linkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("4")).Underline(true)
+		return linkStyle.Render(match)
+	})
+
+	// Process bold text (**text**)
+	boldRe := regexp.MustCompile(`\*\*(.*?)\*\*`)
+	description = boldRe.ReplaceAllStringFunc(description, func(match string) string {
+		content := boldRe.FindStringSubmatch(match)[1]
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true).Render(content)
+	})
+
+	// Process italic text (*text*)
+	italicRe := regexp.MustCompile(`\*(.*?)\*`)
+	description = italicRe.ReplaceAllStringFunc(description, func(match string) string {
+		content := italicRe.FindStringSubmatch(match)[1]
+		return taskColor.Italic(true).Render(content)
+	})
+
+	// Process strikethrough text (~~text~~)
+	strikeRe := regexp.MustCompile(`~~(.*?)~~`)
+	description = strikeRe.ReplaceAllStringFunc(description, func(match string) string {
+		content := strikeRe.FindStringSubmatch(match)[1]
+		return taskColor.Strikethrough(true).Render(content)
+	})
+
+	// Colorize leading bullet markers (-, *, +)
+	bulletRe := regexp.MustCompile(`^(\s*)([-*+])(\s)`)
+	description = bulletRe.ReplaceAllStringFunc(description, func(match string) string {
+		parts := bulletRe.FindStringSubmatch(match)
+		bulletStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
+		return parts[1] + bulletStyle.Render(parts[2]) + parts[3]
 	})
 
 	return description
