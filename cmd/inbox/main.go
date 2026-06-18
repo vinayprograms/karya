@@ -86,8 +86,17 @@ func main() {
 	args := flag.Args()
 
 	if len(args) == 0 {
-		// Open inbox file in editor immediately
-		cmd := exec.Command(editor, inboxFile)
+		// Ensure file ends with a blank line for immediate typing
+		ensureTrailingNewline(inboxFile)
+
+		// Open inbox file at end of file, in insert mode for vim/nvim
+		var cmd *exec.Cmd
+		base := filepath.Base(editor)
+		if base == "vim" || base == "nvim" || base == "vi" {
+			cmd = exec.Command(editor, "+$", "+startinsert!", inboxFile)
+		} else {
+			cmd = exec.Command(editor, inboxFile)
+		}
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -127,6 +136,32 @@ func main() {
 		fmt.Println("Error: direct task arguments not supported. Use 'inbox add \"task\"'")
 		fmt.Println("For help, run: inbox --help")
 		os.Exit(1)
+	}
+}
+
+// ensureTrailingNewline makes sure the file ends with a blank line
+// so the cursor lands on an empty line ready for typing.
+func ensureTrailingNewline(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 {
+		return
+	}
+
+	// Check if file ends with two newlines (blank line at end)
+	if len(data) >= 2 && data[len(data)-1] == '\n' && data[len(data)-2] == '\n' {
+		return
+	}
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	if data[len(data)-1] != '\n' {
+		f.WriteString("\n\n")
+	} else {
+		f.WriteString("\n")
 	}
 }
 
