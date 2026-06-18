@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -76,16 +77,18 @@ type taskItem struct {
 	projectColWidth  int
 	keywordColWidth  int
 	fractionColWidth int
+	maxTitleWidth    int
 	verbose          bool
 }
 
-func NewTaskItem(c *config.Config, t *task.Task, projectColWidth, keywordColWidth, fractionColWidth int, verbose bool) taskItem {
+func NewTaskItem(c *config.Config, t *task.Task, projectColWidth, keywordColWidth, fractionColWidth, maxTitleWidth int, verbose bool) taskItem {
 	return taskItem{
 		config:           c,
 		task:             t,
 		projectColWidth:  projectColWidth,
 		keywordColWidth:  keywordColWidth,
 		fractionColWidth: fractionColWidth,
+		maxTitleWidth:    maxTitleWidth,
 		verbose:          verbose,
 	}
 }
@@ -154,16 +157,21 @@ func (i taskItem) renderWithSelection(isSelected bool) string {
 		displayTitle = fmt.Sprintf("[%s] %s", i.task.ID, i.task.Title)
 	}
 
-	// Render task title with markdown formatting
+	// Render task title with markdown formatting, then truncate (no padding)
 	formattedTitle := task.RenderMarkdownDescription(displayTitle, titleStyle)
+	titleWidth := i.maxTitleWidth
+	if titleWidth <= 0 {
+		titleWidth = 40
+	}
+	formattedTitle = task.TruncateString(formattedTitle, titleWidth)
 	if isSelected {
 		indicator := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("13")).
 			Bold(true).
 			Render("█ ")
-		parts = append(parts, indicator+fmt.Sprintf("%-40s", formattedTitle))
+		parts = append(parts, indicator+formattedTitle)
 	} else {
-		parts = append(parts, "  "+fmt.Sprintf("%-40s", formattedTitle))
+		parts = append(parts, "  "+formattedTitle)
 	}
 
 	// Render tag with special color if it's in special tags. Special tags either contain
@@ -276,9 +284,14 @@ func (i taskItem) Title() string {
 		displayTitle = fmt.Sprintf("[%s] %s", i.task.ID, i.task.Title)
 	}
 
-	// Render task title with markdown formatting
+	// Render task title with markdown formatting, then truncate (no padding)
 	formattedTitle := task.RenderMarkdownDescription(displayTitle, titleStyle)
-	parts = append(parts, fmt.Sprintf("%-40s", formattedTitle))
+	titleWidth := i.maxTitleWidth
+	if titleWidth <= 0 {
+		titleWidth = 40
+	}
+	formattedTitle = task.TruncateString(formattedTitle, titleWidth)
+	parts = append(parts, formattedTitle)
 
 	// Render tag with special color if it's in special tags. Special tags either contain
 	// that exact text or start with that text followed by a colon.
@@ -434,6 +447,31 @@ type model struct {
 	// Pending-child warning state
 	showingPendingChildWarning bool
 	pendingWarningKeyword      string
+
+	// Detail view state
+	showingDetailView bool
+
+	// Date picker state
+	showingDatePicker bool
+	datePicker        *task.DatePicker
+
+	// Terminal dimensions
+	termWidth  int
+	termHeight int
+}
+
+func (m model) calcMaxTitleWidth() int {
+	// Left columns: project + indicator(2) + keyword + fraction + selector(2)
+	left := m.projectColWidth + 2 + m.keywordColWidth + m.fractionColWidth + 2
+	if m.config.GeneralConfig.Verbose {
+		left += 16 // zettel column
+	}
+	// Reserve 30 for right-side metadata (tag, dates, assignee)
+	available := m.termWidth - left - 30
+	if available < 20 {
+		available = 20
+	}
+	return available
 }
 
 func (m model) Init() tea.Cmd {
@@ -505,7 +543,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				t, kw := m.selectedTask, m.pendingWarningKeyword
 				m.showingPendingChildWarning = false
 				m.pendingWarningKeyword = ""
-				return m, updateTaskStatusCmd(t, kw)
+				return m, updateTaskStatusCmd(m.config, t, kw)
 			case "n", "N", "esc", "q":
 				m.showingPendingChildWarning = false
 				m.selectedTask = nil
@@ -524,6 +562,74 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 				return clearStatusMsg{}
 			})
+		}
+		return m, nil
+	}
+
+	// Handle detail view mode
+	if m.showingDetailView {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "ctrl+c":
+				m.quitting = true
+				if m.watcher != nil {
+					m.watcher.Close()
+				}
+				return m, tea.Quit
+			case "esc", "q", "v":
+				m.showingDetailView = false
+				m.selectedTask = nil
+				return m, nil
+			}
+		case tea.WindowSizeMsg:
+			m.termWidth = msg.Width
+			m.termHeight = msg.Height
+			return m, nil
+		}
+		return m, nil
+	}
+
+	// Handle date picker mode
+	if m.showingDatePicker {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			if msg.String() == "ctrl+c" {
+				m.quitting = true
+				if m.watcher != nil {
+					m.watcher.Close()
+				}
+				return m, tea.Quit
+			}
+			m.datePicker.Update(msg.String())
+			if m.datePicker.Cancelled {
+				m.showingDatePicker = false
+				m.datePicker = nil
+				m.selectedTask = nil
+				return m, nil
+			}
+			if m.datePicker.Confirmed {
+				return m, applyDatePickerCmd(m.config, m.datePicker)
+			}
+			return m, nil
+		case datePickerResultMsg:
+			m.showingDatePicker = false
+			dp := m.datePicker
+			m.datePicker = nil
+			m.selectedTask = nil
+			if msg.err != nil {
+				m.statusMessage = fmt.Sprintf("Error: %v", msg.err)
+			} else {
+				m.statusMessage = msg.message
+				_ = dp // keep reference until msg handled
+			}
+			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+				return clearStatusMsg{}
+			})
+		case tea.WindowSizeMsg:
+			m.termWidth = msg.Width
+			m.termHeight = msg.Height
+			return m, nil
 		}
 		return m, nil
 	}
@@ -582,7 +688,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.pendingWarningKeyword = i.keyword
 						return m, nil
 					}
-					return m, updateTaskStatusCmd(m.selectedTask, i.keyword)
+					return m, updateTaskStatusCmd(m.config, m.selectedTask, i.keyword)
 				}
 				m.showingStatusSelector = false
 				return m, nil
@@ -593,6 +699,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 		case tea.WindowSizeMsg:
+			m.termWidth = msg.Width
+			m.termHeight = msg.Height
 			m.statusSelectorList.SetWidth(msg.Width / 2)
 			m.statusSelectorList.SetHeight(msg.Height / 2)
 			return m, nil
@@ -739,6 +847,49 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, nil
 					}
 				}
+			case "v":
+				// Show detail view for the current task
+				if !m.filtering {
+					if i, ok := m.list.SelectedItem().(taskItem); ok {
+						m.selectedTask = i.task
+						m.showingDetailView = true
+						return m, nil
+					}
+				}
+			case "S":
+				// Open date picker for scheduled date
+				if !m.filtering {
+					if i, ok := m.list.SelectedItem().(taskItem); ok {
+						m.selectedTask = i.task
+						m.datePicker = task.NewDatePicker(i.task, task.FieldScheduled)
+						m.showingDatePicker = true
+						return m, nil
+					}
+				}
+			case "D":
+				// Open date picker for due date
+				if !m.filtering {
+					if i, ok := m.list.SelectedItem().(taskItem); ok {
+						m.selectedTask = i.task
+						m.datePicker = task.NewDatePicker(i.task, task.FieldDue)
+						m.showingDatePicker = true
+						return m, nil
+					}
+				}
+			case "i":
+				// Clock in to the current task
+				if !m.filtering {
+					if i, ok := m.list.SelectedItem().(taskItem); ok {
+						return m, clockInCmd(i.task)
+					}
+				}
+			case "o":
+				// Clock out of the current task
+				if !m.filtering {
+					if i, ok := m.list.SelectedItem().(taskItem); ok {
+						return m, clockOutCmd(i.task)
+					}
+				}
 			}
 		}
 	case fileChangedMsg:
@@ -775,7 +926,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.fractionColWidth = calculateFractionColWidth(m.tasks, m.config)
 				items := make([]list.Item, len(m.tasks))
 				for i, t := range m.tasks {
-					items[i] = NewTaskItem(m.config, t, m.projectColWidth, m.keywordColWidth, m.fractionColWidth, m.config.GeneralConfig.Verbose)
+					items[i] = NewTaskItem(m.config, t, m.projectColWidth, m.keywordColWidth, m.fractionColWidth, m.calcMaxTitleWidth(), m.config.GeneralConfig.Verbose)
 				}
 				m.allItems = items
 				if m.customFilter != "" {
@@ -792,7 +943,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.fractionColWidth = calculateFractionColWidth(m.tasks, m.config)
 				items := make([]list.Item, len(m.tasks))
 				for i, t := range m.tasks {
-					items[i] = NewTaskItem(m.config, t, m.projectColWidth, m.keywordColWidth, m.fractionColWidth, m.config.GeneralConfig.Verbose)
+					items[i] = NewTaskItem(m.config, t, m.projectColWidth, m.keywordColWidth, m.fractionColWidth, m.calcMaxTitleWidth(), m.config.GeneralConfig.Verbose)
 				}
 				m.allItems = items
 				if m.customFilter != "" {
@@ -841,7 +992,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.fractionColWidth = calculateFractionColWidth(m.tasks, m.config)
 			items := make([]list.Item, len(m.tasks))
 			for i, t := range m.tasks {
-				items[i] = taskItem{config: m.config, task: t, projectColWidth: m.projectColWidth, keywordColWidth: m.keywordColWidth, fractionColWidth: m.fractionColWidth, verbose: m.config.GeneralConfig.Verbose}
+				items[i] = taskItem{config: m.config, task: t, projectColWidth: m.projectColWidth, keywordColWidth: m.keywordColWidth, fractionColWidth: m.fractionColWidth, maxTitleWidth: m.calcMaxTitleWidth(), verbose: m.config.GeneralConfig.Verbose}
 			}
 			m.allItems = items
 			m.list.SetItems(items)
@@ -896,7 +1047,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.fractionColWidth = calculateFractionColWidth(m.tasks, m.config)
 		items := make([]list.Item, len(m.tasks))
 		for i, t := range m.tasks {
-			items[i] = taskItem{config: m.config, task: t, projectColWidth: m.projectColWidth, keywordColWidth: m.keywordColWidth, fractionColWidth: m.fractionColWidth, verbose: m.config.GeneralConfig.Verbose}
+			items[i] = taskItem{config: m.config, task: t, projectColWidth: m.projectColWidth, keywordColWidth: m.keywordColWidth, fractionColWidth: m.fractionColWidth, maxTitleWidth: m.calcMaxTitleWidth(), verbose: m.config.GeneralConfig.Verbose}
 		}
 		m.allItems = items
 
@@ -927,9 +1078,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clearStatusMsg:
 		m.statusMessage = ""
 		return m, nil
+	case clockResultMsg:
+		if msg.err != nil {
+			m.statusMessage = fmt.Sprintf("Clock: %v", msg.err)
+		} else {
+			m.statusMessage = msg.message
+		}
+		return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+			return clearStatusMsg{}
+		})
 	case tea.WindowSizeMsg:
+		m.termWidth = msg.Width
+		m.termHeight = msg.Height
 		m.list.SetWidth(msg.Width)
 		m.list.SetHeight(msg.Height - 2)
+		// Rebuild items with new title width
+		newTitleWidth := m.calcMaxTitleWidth()
+		for idx, item := range m.allItems {
+			if ti, ok := item.(taskItem); ok {
+				ti.maxTitleWidth = newTitleWidth
+				m.allItems[idx] = ti
+			}
+		}
+		m.list.SetItems(m.allItems)
 	}
 
 	var cmd tea.Cmd
@@ -973,7 +1144,7 @@ func (m *model) applyCustomFilter() {
 				Zettel:   result.ZettelID,
 				FilePath: result.Path,
 			}
-			item := NewTaskItem(m.config, pseudoTask, m.projectColWidth, m.keywordColWidth, m.fractionColWidth, m.config.GeneralConfig.Verbose)
+			item := NewTaskItem(m.config, pseudoTask, m.projectColWidth, m.keywordColWidth, m.fractionColWidth, m.calcMaxTitleWidth(), m.config.GeneralConfig.Verbose)
 			searchResultItems = append(searchResultItems, item)
 		}
 
@@ -1018,9 +1189,19 @@ func (m model) View() string {
 		return ""
 	}
 
+	// Show detail view overlay if active
+	if m.showingDetailView {
+		return m.renderDetailView()
+	}
+
 	// Show pending-child warning overlay if active
 	if m.showingPendingChildWarning {
 		return m.renderPendingChildWarning()
+	}
+
+	// Show date picker overlay if active
+	if m.showingDatePicker && m.datePicker != nil {
+		return m.datePicker.View(m.termWidth / 2)
 	}
 
 	// Show status selector overlay if active
@@ -1170,6 +1351,150 @@ func (m model) renderPendingChildWarning() string {
 	return boxStyle.Render(content.String())
 }
 
+// renderDetailView renders the task detail overlay showing full raw content from file
+func (m model) renderDetailView() string {
+	if m.selectedTask == nil {
+		return ""
+	}
+
+	// Box width = terminal width minus outer margin (2 per side)
+	boxWidth := m.termWidth - 4
+	if boxWidth < 40 {
+		boxWidth = 40
+	}
+	// Content width = box width minus border (1 per side) minus padding (2 per side)
+	contentWidth := boxWidth - 6
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("62")).
+		Padding(1, 2).
+		Width(boxWidth)
+
+	t := m.selectedTask
+
+	// Read raw block from source file
+	var rawBlock string
+	var err error
+	rawBlock, err = task.ReadRawBlock(t)
+
+	var lines []string
+	if err != nil || rawBlock == "" {
+		lines = append(lines, fmt.Sprintf("%s: %s", t.Keyword, t.Title))
+		if err != nil {
+			lines = append(lines, fmt.Sprintf("(could not read file: %v)", err))
+		}
+	} else {
+		lines = strings.Split(rawBlock, "\n")
+	}
+
+	// Render each line with task-syntax and markdown coloring, then hard-wrap
+	var wrapped []string
+	for _, line := range lines {
+		rendered := m.renderDetailLine(line)
+		if len(line) <= contentWidth {
+			wrapped = append(wrapped, rendered)
+		} else {
+			// Wrap based on raw length, render each segment
+			for len(line) > contentWidth {
+				segment := line[:contentWidth]
+				wrapped = append(wrapped, m.renderDetailLine(segment))
+				line = line[contentWidth:]
+			}
+			if line != "" {
+				wrapped = append(wrapped, m.renderDetailLine(line))
+			}
+		}
+	}
+
+	// Metadata footer
+	metaStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	wrapped = append(wrapped, "")
+	wrapped = append(wrapped, metaStyle.Render(fmt.Sprintf("── %s", t.FilePath)))
+
+	// Help
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	wrapped = append(wrapped, "")
+	wrapped = append(wrapped, helpStyle.Render("esc/q/v: close"))
+
+	return boxStyle.Render(strings.Join(wrapped, "\n"))
+}
+
+// renderDetailLine colorizes a raw file line with task-syntax highlighting and markdown.
+func (m model) renderDetailLine(line string) string {
+	textStyle := colors.taskColor
+
+	// Check if this line is a task line (KEYWORD: ...)
+	stripped, _ := task.StripLinePrefix(line)
+	kwRe := regexp.MustCompile(`^([A-Z]+):\s`)
+	if kwMatch := kwRe.FindStringSubmatch(stripped); len(kwMatch) > 0 {
+		kw := kwMatch[1]
+		if task.IsKeywordValid(m.config, kw) {
+			// Determine keyword style
+			var kwStyle lipgloss.Style
+			t := &task.Task{Keyword: kw}
+			if t.IsInProgress(m.config) {
+				kwStyle = colors.inProgressColor
+			} else if t.IsActive(m.config) {
+				kwStyle = colors.activeColor
+			} else if t.IsSomeday(m.config) {
+				kwStyle = colors.somedayColor
+			} else {
+				kwStyle = colors.completedColor
+				textStyle = colors.completedTaskColor
+			}
+			// Replace the keyword in the line with styled version
+			line = strings.Replace(line, kw+":", kwStyle.Render(kw)+":", 1)
+		}
+	}
+
+	// Colorize tags (#tag)
+	tagRe := regexp.MustCompile(`(#[^\s]+)`)
+	line = tagRe.ReplaceAllStringFunc(line, func(match string) string {
+		tagName := match[1:]
+		isSpecial := false
+		for _, st := range m.config.Todo.SpecialTags {
+			if tagName == st || strings.HasPrefix(tagName, st+":") {
+				isSpecial = true
+				break
+			}
+		}
+		if isSpecial {
+			return colors.specialTagColor.Render(match)
+		}
+		return colors.tagColor.Render(match)
+	})
+
+	// Colorize dates (@date, @s:date, @d:date)
+	dateRe := regexp.MustCompile(`(@(?:s:|d:)?[^\s]+)`)
+	line = dateRe.ReplaceAllStringFunc(line, func(match string) string {
+		return colors.dateColor.Render(match)
+	})
+
+	// Colorize assignees (>> name)
+	assigneeRe := regexp.MustCompile(`(>>\s*[^\s#@^]+)`)
+	line = assigneeRe.ReplaceAllStringFunc(line, func(match string) string {
+		return colors.assigneeColor.Render(match)
+	})
+
+	// Colorize references (^id)
+	refRe := regexp.MustCompile(`(\^[^\s]+)`)
+	line = refRe.ReplaceAllStringFunc(line, func(match string) string {
+		return colors.prjColor.Render(match)
+	})
+
+	// Colorize task IDs ([id])
+	idRe := regexp.MustCompile(`(\[[^\]]+\])`)
+	line = idRe.ReplaceAllStringFunc(line, func(match string) string {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Render(match)
+	})
+
+	// Apply markdown rendering (bold, italic, code, URLs, bullets)
+	line = task.RenderMarkdownDescription(line, textStyle)
+
+	return line
+}
+
 type editorFinishedMsg struct{ err error }
 
 // createStatusSelectorList creates a list.Model for the status selector popup
@@ -1226,16 +1551,84 @@ func hasActiveChildren(t *task.Task, cfg *config.Config) bool {
 	return false
 }
 
-// updateTaskStatusCmd creates a command that updates the task status
-func updateTaskStatusCmd(t *task.Task, newKeyword string) tea.Cmd {
+type datePickerResultMsg struct {
+	message string
+	err     error
+}
+
+func applyDatePickerCmd(_ *config.Config, dp *task.DatePicker) tea.Cmd {
+	return func() tea.Msg {
+		scheduledAt, dueAt, removeScheduled, removeDue := dp.Result()
+		if err := task.SetTaskDate(dp.Task, scheduledAt, dueAt, removeScheduled, removeDue); err != nil {
+			return datePickerResultMsg{err: err}
+		}
+
+		commitMsg := fmt.Sprintf("Schedule task: %s", dp.Task.Title)
+		kgit.CommitFile(dp.Task.FilePath, commitMsg, true)
+
+		var msg string
+		if removeScheduled || removeDue {
+			msg = "Date removed"
+		} else if scheduledAt != "" {
+			msg = fmt.Sprintf("Scheduled: %s", scheduledAt)
+		} else {
+			msg = fmt.Sprintf("Due: %s", dueAt)
+		}
+		return datePickerResultMsg{message: msg}
+	}
+}
+
+type clockResultMsg struct {
+	message string
+	err     error
+}
+
+func clockInCmd(t *task.Task) tea.Cmd {
+	return func() tea.Msg {
+		err := task.ClockIn(t)
+		if err != nil {
+			return clockResultMsg{err: err}
+		}
+		return clockResultMsg{message: "Clocked in"}
+	}
+}
+
+func clockOutCmd(t *task.Task) tea.Cmd {
+	return func() tea.Msg {
+		err := task.ClockOut(t)
+		if err != nil {
+			return clockResultMsg{err: err}
+		}
+		return clockResultMsg{message: "Clocked out"}
+	}
+}
+
+// updateTaskStatusCmd creates a command that updates the task status.
+// For recurring tasks being marked complete, it advances the date instead.
+func updateTaskStatusCmd(cfg *config.Config, t *task.Task, newKeyword string) tea.Cmd {
 	return func() tea.Msg {
 		if t == nil {
 			return statusUpdateMsg{err: fmt.Errorf("no task selected")}
 		}
 
+		// Check if this is a completion of a recurring task
+		if isCompletedKeyword(cfg, newKeyword) {
+			advanced, err := task.CompleteRecurringTask(t, cfg)
+			if err != nil {
+				return statusUpdateMsg{err: fmt.Errorf("recurring advance failed: %w", err)}
+			}
+			if advanced {
+				commitMsg := fmt.Sprintf("Advance recurring task: %s", t.Title)
+				kgit.CommitFile(t.FilePath, commitMsg, true)
+				return statusUpdateMsg{
+					message: fmt.Sprintf("Recurring task advanced → %s", t.ScheduledAt),
+				}
+			}
+		}
+
 		oldKeyword := t.Keyword
 
-		// Update the task status in the file
+		// Normal (non-recurring) status update
 		if err := task.UpdateTaskStatus(t, newKeyword); err != nil {
 			return statusUpdateMsg{err: err}
 		}
@@ -1243,7 +1636,6 @@ func updateTaskStatusCmd(t *task.Task, newKeyword string) tea.Cmd {
 		// Commit the change if in a git repo
 		commitMsg := fmt.Sprintf("Update task status: %s -> %s", oldKeyword, newKeyword)
 		if err := kgit.CommitFile(t.FilePath, commitMsg, true); err != nil {
-			// Don't fail the whole operation if git commit fails
 			return statusUpdateMsg{
 				message: fmt.Sprintf("Status updated to %s (git commit failed: %v)", newKeyword, err),
 			}
@@ -1806,6 +2198,48 @@ func main() {
 			log.Fatal(err)
 		}
 		printProjectsList(summary)
+	case "clock-in":
+		if len(args) < 4 {
+			fmt.Fprintln(os.Stderr, "Usage: todo clock-in <project> <keyword> <title>")
+			os.Exit(1)
+		}
+		project, keyword, title := args[1], args[2], strings.Join(args[3:], " ")
+		tasks, err := task.ListTasks(config, project, true)
+		if err != nil {
+			log.Fatal(err)
+		}
+		for _, t := range tasks {
+			if t.Keyword == keyword && strings.Contains(strings.ToLower(t.Title), strings.ToLower(title)) {
+				if err := task.ClockIn(t); err != nil {
+					log.Fatal(err)
+				}
+				fmt.Printf("Clocked in: %s\n", t.Title)
+				return
+			}
+		}
+		fmt.Fprintln(os.Stderr, "task not found")
+		os.Exit(1)
+	case "clock-out":
+		if len(args) < 4 {
+			fmt.Fprintln(os.Stderr, "Usage: todo clock-out <project> <keyword> <title>")
+			os.Exit(1)
+		}
+		project, keyword, title := args[1], args[2], strings.Join(args[3:], " ")
+		tasks, err := task.ListTasks(config, project, true)
+		if err != nil {
+			log.Fatal(err)
+		}
+		for _, t := range tasks {
+			if t.Keyword == keyword && strings.Contains(strings.ToLower(t.Title), strings.ToLower(title)) {
+				if err := task.ClockOut(t); err != nil {
+					log.Fatal(err)
+				}
+				fmt.Printf("Clocked out: %s\n", t.Title)
+				return
+			}
+		}
+		fmt.Fprintln(os.Stderr, "task not found")
+		os.Exit(1)
 	case "mcp":
 		// Start MCP server on stdio
 		mcpServer := task.NewMCPServer(config)
@@ -1833,6 +2267,8 @@ COMMANDS:
     ls [PROJECT]        List tasks in plain text format (for scripting)
     projects            Show project summary table with task counts
     pl                  Show project list in plain text format
+    clock-in <p> <k> <t> Clock in on a task (project, keyword, title)
+    clock-out <p> <k> <t> Clock out of a task (project, keyword, title)
     mcp                 Start MCP server (stdio) for AI agent integration
     <project-name>      Show interactive TUI filtered to specific project
     -h, --help, help    Show this help message
@@ -1949,7 +2385,7 @@ func showInteractiveTUI(config *config.Config, project string) {
 	fractionColWidth := calculateFractionColWidth(tasks, config)
 	items := make([]list.Item, len(tasks))
 	for i, t := range tasks {
-		items[i] = taskItem{config: config, task: t, projectColWidth: projectColWidth, keywordColWidth: keywordColWidth, fractionColWidth: fractionColWidth, verbose: config.GeneralConfig.Verbose}
+		items[i] = taskItem{config: config, task: t, projectColWidth: projectColWidth, keywordColWidth: keywordColWidth, fractionColWidth: fractionColWidth, maxTitleWidth: 40, verbose: config.GeneralConfig.Verbose}
 	}
 
 	delegate := taskDelegate{DefaultDelegate: list.NewDefaultDelegate()}
@@ -1996,6 +2432,14 @@ func showInteractiveTUI(config *config.Config, project string) {
 			key.NewBinding(
 				key.WithKeys("u"),
 				key.WithHelp("u", "unstructured"),
+			),
+			key.NewBinding(
+				key.WithKeys("i"),
+				key.WithHelp("i", "clock in"),
+			),
+			key.NewBinding(
+				key.WithKeys("o"),
+				key.WithHelp("o", "clock out"),
 			),
 		}
 	}
