@@ -112,7 +112,7 @@ func TestParseLine(t *testing.T) {
 			want: &task.Task{
 				Keyword:     "TODO",
 				Title:       "Write documentation",
-				Tag:         "urgent",
+				Tags:        []string{"urgent"},
 				ScheduledAt: "2023-10-01",
 				Assignee:    "john",
 				Project:     "proj1",
@@ -154,7 +154,7 @@ func TestParseLine(t *testing.T) {
 			want: &task.Task{
 				Keyword:     "SOMEDAY",
 				Title:       "Learn Go deeply",
-				Tag:         "learning",
+				Tags:        []string{"learning"},
 				ScheduledAt: "2024-06-01",
 				Project:     "personal",
 				Zettel:      "20240201000000",
@@ -168,7 +168,7 @@ func TestParseLine(t *testing.T) {
 			continue
 		}
 		if got != nil && tt.want != nil {
-			if got.Keyword != tt.want.Keyword || got.Title != tt.want.Title || got.Tag != tt.want.Tag || got.ScheduledAt != tt.want.ScheduledAt || got.Assignee != tt.want.Assignee || got.Project != tt.want.Project || got.Zettel != tt.want.Zettel {
+			if got.Keyword != tt.want.Keyword || got.Title != tt.want.Title || strings.Join(got.Tags, ",") != strings.Join(tt.want.Tags, ",") || got.ScheduledAt != tt.want.ScheduledAt || got.Assignee != tt.want.Assignee || got.Project != tt.want.Project || got.Zettel != tt.want.Zettel {
 				t.Errorf("ParseLine(%q, %q, %q, %q) = %v, want %v", tt.line, tt.project, tt.zettel, "test.md", got, tt.want)
 			}
 		}

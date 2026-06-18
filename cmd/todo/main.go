@@ -14,8 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vinayprograms/karya/internal/config"
+	configpkg "github.com/vinayprograms/karya/internal/config"
 	kgit "github.com/vinayprograms/karya/internal/git"
+	"github.com/vinayprograms/karya/internal/jira"
 	"github.com/vinayprograms/karya/internal/task"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -50,7 +51,7 @@ type ColorScheme struct {
 var colors ColorScheme
 
 // InitializeColors initializes the color scheme from task config
-func InitializeColors(cfg *config.Config) {
+func InitializeColors(cfg *configpkg.Config) {
 	colors = ColorScheme{
 		prjColor:           lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
 		activeColor:        lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ActiveColor)),
@@ -72,7 +73,7 @@ func InitializeColors(cfg *config.Config) {
 }
 
 type taskItem struct {
-	config           *config.Config
+	config           *configpkg.Config
 	task             *task.Task
 	projectColWidth  int
 	keywordColWidth  int
@@ -81,7 +82,7 @@ type taskItem struct {
 	verbose          bool
 }
 
-func NewTaskItem(c *config.Config, t *task.Task, projectColWidth, keywordColWidth, fractionColWidth, maxTitleWidth int, verbose bool) taskItem {
+func NewTaskItem(c *configpkg.Config, t *task.Task, projectColWidth, keywordColWidth, fractionColWidth, maxTitleWidth int, verbose bool) taskItem {
 	return taskItem{
 		config:           c,
 		task:             t,
@@ -174,22 +175,20 @@ func (i taskItem) renderWithSelection(isSelected bool) string {
 		parts = append(parts, "  "+formattedTitle)
 	}
 
-	// Render tag with special color if it's in special tags. Special tags either contain
-	// that exact text or start with that text followed by a colon.
-	isSpecialTag := false
-	for _, specialTag := range i.config.Todo.SpecialTags {
-		if i.task.Tag == specialTag {
-			isSpecialTag = true
-			break
-		} else if strings.HasPrefix(i.task.Tag, specialTag+":") {
-			isSpecialTag = true
-			break
+	// Render tags with special color if they match special tags
+	for _, tag := range i.task.Tags {
+		isSpecial := false
+		for _, specialTag := range i.config.Todo.SpecialTags {
+			if tag == specialTag || strings.HasPrefix(tag, specialTag+":") {
+				isSpecial = true
+				break
+			}
 		}
-	}
-	if isSpecialTag {
-		parts = append(parts, colors.specialTagColor.Render(fmt.Sprintf(" %s ", i.task.Tag)))
-	} else if i.task.Tag != "" {
-		parts = append(parts, colors.tagColor.Render(fmt.Sprintf(" %s ", i.task.Tag)))
+		if isSpecial {
+			parts = append(parts, colors.specialTagColor.Render(fmt.Sprintf(" %s ", tag)))
+		} else {
+			parts = append(parts, colors.tagColor.Render(fmt.Sprintf(" %s ", tag)))
+		}
 	}
 	// Display date types with prefixes
 	if i.task.ScheduledAt != "" {
@@ -216,7 +215,7 @@ func (i taskItem) renderWithSelection(isSelected bool) string {
 func (i taskItem) FilterValue() string {
 	return fmt.Sprintf("%s %s %s %s %s %s %s %s %s %s",
 		i.task.Project, i.task.Zettel, i.task.Keyword, i.task.ID, i.task.Title,
-		i.task.Tag, i.task.ScheduledAt, i.task.DueAt, i.task.Assignee,
+		strings.Join(i.task.Tags, " "), i.task.ScheduledAt, i.task.DueAt, i.task.Assignee,
 		strings.Join(i.task.References, " "))
 }
 
@@ -293,23 +292,19 @@ func (i taskItem) Title() string {
 	formattedTitle = task.TruncateString(formattedTitle, titleWidth)
 	parts = append(parts, formattedTitle)
 
-	// Render tag with special color if it's in special tags. Special tags either contain
-	// that exact text or start with that text followed by a colon.
-	isSpecialTag := false
-	for _, specialTag := range i.config.Todo.SpecialTags {
-		if i.task.Tag == specialTag {
-			isSpecialTag = true
-			break
-		} else if strings.HasPrefix(i.task.Tag, specialTag+":") {
-			isSpecialTag = true
-			break
+	// Render tags with special color if they match special tags
+	for _, tag := range i.task.Tags {
+		isSpecial := false
+		for _, specialTag := range i.config.Todo.SpecialTags {
+			if tag == specialTag || strings.HasPrefix(tag, specialTag+":") {
+				isSpecial = true
+				break
+			}
 		}
-	}
-	if i.task.Tag != "" {
-		if isSpecialTag {
-			parts = append(parts, colors.specialTagColor.Render(fmt.Sprintf(" %s ", i.task.Tag)))
+		if isSpecial {
+			parts = append(parts, colors.specialTagColor.Render(fmt.Sprintf(" %s ", tag)))
 		} else {
-			parts = append(parts, colors.tagColor.Render(fmt.Sprintf(" %s ", i.task.Tag)))
+			parts = append(parts, colors.tagColor.Render(fmt.Sprintf(" %s ", tag)))
 		}
 	}
 	// Display date types with prefixes
@@ -422,7 +417,7 @@ func (i keywordItem) Description() string { return i.category }
 type model struct {
 	list            list.Model
 	tasks           []*task.Task
-	config          *config.Config
+	config          *configpkg.Config
 	project         string
 	quitting        bool
 	watcher         *fsnotify.Watcher
@@ -1214,34 +1209,34 @@ func (m model) View() string {
 
 	view := m.list.View()
 
-	// Add custom pagination info at the top, right after the title (only if multiple pages)
+	// Add custom pagination/count info at the top
 	totalItems := len(m.list.Items())
 	if totalItems > 0 {
-		// Use paginator information for accurate page display
 		p := m.list.Paginator
 		totalPages := p.TotalPages
 
-		// Only show pagination info if there's more than one page
+		var paginationText string
 		if totalPages > 1 {
 			currentPage := p.Page
 			itemsPerPage := p.PerPage
-
-			// Calculate the range of items on current page
 			startIdx := currentPage * itemsPerPage
 			endIdx := startIdx + itemsPerPage
 			if endIdx > totalItems {
 				endIdx = totalItems
 			}
+			paginationText = fmt.Sprintf("Showing %d-%d of %d • Page %d/%d",
+				startIdx+1, endIdx, totalItems, currentPage+1, totalPages)
+		} else if m.customFilter != "" {
+			paginationText = fmt.Sprintf("%d matches", totalItems)
+		}
 
+		if paginationText != "" {
 			paginationInfo := lipgloss.NewStyle().
 				Foreground(lipgloss.Color("240")).
-				Render(fmt.Sprintf("Showing %d-%d of %d • Page %d/%d",
-					startIdx+1, endIdx, totalItems, currentPage+1, totalPages))
+				Render(paginationText)
 
-			// Split the view and insert pagination info after the title line (first line)
 			lines := strings.Split(view, "\n")
 			if len(lines) >= 1 {
-				// Insert pagination info after the title (first line)
 				result := []string{lines[0], paginationInfo}
 				result = append(result, lines[1:]...)
 				view = strings.Join(result, "\n")
@@ -1501,7 +1496,7 @@ func (m model) renderDetailLine(line string) string {
 type editorFinishedMsg struct{ err error }
 
 // createStatusSelectorList creates a list.Model for the status selector popup
-func createStatusSelectorList(cfg *config.Config, currentKeyword string) list.Model {
+func createStatusSelectorList(cfg *configpkg.Config, currentKeyword string) list.Model {
 	keywords := task.GetAllKeywordsFlat(cfg)
 	items := make([]list.Item, 0, len(keywords))
 
@@ -1533,7 +1528,7 @@ func createStatusSelectorList(cfg *config.Config, currentKeyword string) list.Mo
 	return l
 }
 
-func isCompletedKeyword(cfg *config.Config, keyword string) bool {
+func isCompletedKeyword(cfg *configpkg.Config, keyword string) bool {
 	for _, k := range cfg.Todo.Completed {
 		if k == keyword {
 			return true
@@ -1542,7 +1537,7 @@ func isCompletedKeyword(cfg *config.Config, keyword string) bool {
 	return false
 }
 
-func hasActiveChildren(t *task.Task, cfg *config.Config) bool {
+func hasActiveChildren(t *task.Task, cfg *configpkg.Config) bool {
 	if t == nil {
 		return false
 	}
@@ -1559,7 +1554,7 @@ type datePickerResultMsg struct {
 	err     error
 }
 
-func applyDatePickerCmd(_ *config.Config, dp *task.DatePicker) tea.Cmd {
+func applyDatePickerCmd(_ *configpkg.Config, dp *task.DatePicker) tea.Cmd {
 	return func() tea.Msg {
 		scheduledAt, dueAt, removeScheduled, removeDue := dp.Result()
 		if err := task.SetTaskDate(dp.Task, scheduledAt, dueAt, removeScheduled, removeDue); err != nil {
@@ -1608,7 +1603,7 @@ func clockOutCmd(t *task.Task) tea.Cmd {
 
 // updateTaskStatusCmd creates a command that updates the task status.
 // For recurring tasks being marked complete, it advances the date instead.
-func updateTaskStatusCmd(cfg *config.Config, t *task.Task, newKeyword string) tea.Cmd {
+func updateTaskStatusCmd(cfg *configpkg.Config, t *task.Task, newKeyword string) tea.Cmd {
 	return func() tea.Msg {
 		if t == nil {
 			return statusUpdateMsg{err: fmt.Errorf("no task selected")}
@@ -1656,7 +1651,7 @@ func reloadTasksCmd() tea.Cmd {
 	}
 }
 
-func loadTasksCmd(cfg *config.Config, project string) tea.Cmd {
+func loadTasksCmd(cfg *configpkg.Config, project string) tea.Cmd {
 	return func() tea.Msg {
 		tasks, err := task.ListTasks(cfg, project, cfg.Todo.ShowCompleted)
 		if err == nil {
@@ -1666,7 +1661,7 @@ func loadTasksCmd(cfg *config.Config, project string) tea.Cmd {
 	}
 }
 
-func openEditorCmd(cfg *config.Config, t *task.Task, searchTerm string) tea.Cmd {
+func openEditorCmd(cfg *configpkg.Config, t *task.Task, searchTerm string) tea.Cmd {
 	var filePath string
 	if t.Project == "inbox" {
 		// Inbox tasks are in the inbox.md file directly
@@ -1679,11 +1674,15 @@ func openEditorCmd(cfg *config.Config, t *task.Task, searchTerm string) tea.Cmd 
 		filePath = t.FilePath
 	}
 
-	// Find line number by matching keyword and title
-	lineNum, err := findTaskLine(filePath, t.Keyword, t.Title)
-	if err != nil {
-		return func() tea.Msg {
-			return editorFinishedMsg{err: err}
+	// Use stored line number if available, otherwise search
+	lineNum := t.LineNum
+	if lineNum == 0 {
+		var err error
+		lineNum, err = findTaskLine(filePath, t)
+		if err != nil {
+			return func() tea.Msg {
+				return editorFinishedMsg{err: err}
+			}
 		}
 	}
 
@@ -1746,7 +1745,7 @@ func openEditorCmd(cfg *config.Config, t *task.Task, searchTerm string) tea.Cmd 
 	})
 }
 
-func findTaskLine(filePath, keyword, title string) (int, error) {
+func findTaskLine(filePath string, t *task.Task) (int, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return 0, err
@@ -1755,12 +1754,21 @@ func findTaskLine(filePath, keyword, title string) (int, error) {
 
 	scanner := bufio.NewScanner(file)
 	lineNum := 0
-	searchStr := fmt.Sprintf("%s: %s", keyword, title)
+
+	// Try matching by ID first (most reliable for JIRA tasks)
+	idPrefix := ""
+	if t.ID != "" {
+		idPrefix = fmt.Sprintf("[%s]", t.ID)
+	}
+	titleSearch := fmt.Sprintf("%s: %s", t.Keyword, t.Title)
 
 	for scanner.Scan() {
 		lineNum++
 		stripped, _ := task.StripLinePrefix(scanner.Text())
-		if strings.HasPrefix(stripped, searchStr) {
+		if idPrefix != "" && strings.Contains(stripped, idPrefix) {
+			return lineNum, nil
+		}
+		if strings.HasPrefix(stripped, titleSearch) {
 			return lineNum, nil
 		}
 	}
@@ -1788,7 +1796,7 @@ func calculateKeywordColWidth(tasks []*task.Task) int {
 	return maxLen
 }
 
-func calculateFractionColWidth(tasks []*task.Task, cfg *config.Config) int {
+func calculateFractionColWidth(tasks []*task.Task, cfg *configpkg.Config) int {
 	maxLen := 0
 	for _, t := range tasks {
 		done, total := t.PendingChildCount(cfg)
@@ -1803,7 +1811,7 @@ func calculateFractionColWidth(tasks []*task.Task, cfg *config.Config) int {
 }
 
 // setupWatcher creates a new watcher and watches all relevant directories
-func setupWatcher(config *config.Config, project string) (*fsnotify.Watcher, error) {
+func setupWatcher(config *configpkg.Config, project string) (*fsnotify.Watcher, error) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
@@ -1814,7 +1822,7 @@ func setupWatcher(config *config.Config, project string) (*fsnotify.Watcher, err
 }
 
 // updateWatcher updates the watcher to monitor all relevant directories and files
-func updateWatcher(watcher *fsnotify.Watcher, config *config.Config, project string) {
+func updateWatcher(watcher *fsnotify.Watcher, config *configpkg.Config, project string) {
 	if watcher == nil {
 		return
 	}
@@ -1844,7 +1852,7 @@ const maxWatchDirs = 100
 // getWatchDirectories returns a list of directories that should be watched.
 // In structured mode, watches only the zettel directories (PRJDIR/*/notes/*/).
 // In unstructured mode, watches up to maxWatchDirs directories, prioritizing shallower ones.
-func getWatchDirectories(config *config.Config, project string) []string {
+func getWatchDirectories(config *configpkg.Config, project string) []string {
 	if config.Todo.Structured {
 		return getStructuredWatchDirs(config, project)
 	}
@@ -1853,7 +1861,7 @@ func getWatchDirectories(config *config.Config, project string) []string {
 
 // getStructuredWatchDirs returns directories for structured (zettelkasten) mode.
 // Only watches: PRJDIR, PRJDIR/*, PRJDIR/*/notes, and PRJDIR/*/notes/*
-func getStructuredWatchDirs(config *config.Config, project string) []string {
+func getStructuredWatchDirs(config *configpkg.Config, project string) []string {
 	var dirs []string
 	prjDir := config.Directories.Projects
 
@@ -1907,7 +1915,7 @@ func getStructuredWatchDirs(config *config.Config, project string) []string {
 
 // getUnstructuredWatchDirs returns directories for unstructured mode.
 // Watches up to maxWatchDirs directories, prioritizing shallower ones.
-func getUnstructuredWatchDirs(config *config.Config, project string) []string {
+func getUnstructuredWatchDirs(config *configpkg.Config, project string) []string {
 	var dirs []string
 
 	rootDir := config.Directories.Projects
@@ -2002,7 +2010,7 @@ func restoreCursorPosition(l *list.Model, tasks []*task.Task, selectedKey string
 // appendNewTasksOnly keeps existing tasks in place when priority unchanged, repositions tasks
 // whose priority changed, removes deleted tasks, and appends new tasks at the correct position.
 // Uses taskIdentityKey (FilePath+Title) to match tasks even when their status changes.
-func appendNewTasksOnly(existing, incoming []*task.Task, cfg *config.Config) []*task.Task {
+func appendNewTasksOnly(existing, incoming []*task.Task, cfg *configpkg.Config) []*task.Task {
 	// Build a map of incoming tasks by identity key for matching
 	incomingByIdentity := make(map[string]*task.Task)
 	for _, t := range incoming {
@@ -2080,7 +2088,7 @@ func appendNewTasksOnly(existing, incoming []*task.Task, cfg *config.Config) []*
 // - Removes tasks that no longer exist
 // - Appends new tasks at the end of their priority group
 // Uses taskIdentityKey (FilePath+Title) to match tasks even when status changes.
-func mergeTasksPreservingOrder(existing, incoming []*task.Task, cfg *config.Config) []*task.Task {
+func mergeTasksPreservingOrder(existing, incoming []*task.Task, cfg *configpkg.Config) []*task.Task {
 	// Build a map of incoming tasks by identity key for matching
 	incomingByIdentity := make(map[string]*task.Task)
 	for _, t := range incoming {
@@ -2139,7 +2147,7 @@ func mergeTasksPreservingOrder(existing, incoming []*task.Task, cfg *config.Conf
 }
 
 func main() {
-	config, err := config.Load()
+	config, err := configpkg.Load()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -2157,6 +2165,11 @@ func main() {
 			args = append(args[:i], args[i+1:]...)
 			i--
 		}
+	}
+
+	// Run JIRA sync on startup if configured
+	if config.HasJira() {
+		syncJiraOnce(config)
 	}
 
 	if len(args) == 0 {
@@ -2250,6 +2263,41 @@ func main() {
 		if err := mcpServer.Run(ctx); err != nil {
 			log.Fatal(err)
 		}
+	case "jira-auth":
+		if !config.HasJira() {
+			fmt.Fprintln(os.Stderr, "JIRA not configured. Add [[jira.connections]] to ~/.config/karya/config.toml.")
+			os.Exit(1)
+		}
+		// Determine which connection to auth
+		var conn *configpkg.JiraConnection
+		if len(args) > 2 {
+			name := args[2]
+			for i := range config.Jira.Connections {
+				if config.Jira.Connections[i].Name == name {
+					conn = &config.Jira.Connections[i]
+					break
+				}
+			}
+			if conn == nil {
+				fmt.Fprintf(os.Stderr, "Connection %q not found in config.\n", name)
+				os.Exit(1)
+			}
+		} else if len(config.Jira.Connections) == 1 {
+			conn = &config.Jira.Connections[0]
+		} else {
+			fmt.Fprintln(os.Stderr, "Multiple connections configured. Specify which: todo jira-auth <name>")
+			for _, c := range config.Jira.Connections {
+				fmt.Fprintf(os.Stderr, "  - %s\n", c.Name)
+			}
+			os.Exit(1)
+		}
+		store := jira.NewTokenStore(conn.Name)
+		ctx := context.Background()
+		if err := store.RunAuthFlow(ctx, conn.Endpoint); err != nil {
+			fmt.Fprintf(os.Stderr, "Authentication failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("JIRA authentication successful for %q. Token stored.\n", conn.Name)
 	default:
 		// Project name - show interactive TUI for that project
 		showInteractiveTUI(config, subcommand)
@@ -2273,6 +2321,7 @@ COMMANDS:
     clock-in <p> <k> <t> Clock in on a task (project, keyword, title)
     clock-out <p> <k> <t> Clock out of a task (project, keyword, title)
     mcp                 Start MCP server (stdio) for AI agent integration
+    jira-auth           Authenticate with JIRA (OAuth browser flow, one-time setup)
     <project-name>      Show interactive TUI filtered to specific project
     -h, --help, help    Show this help message
 
@@ -2348,7 +2397,7 @@ CONFIGURATION:
 	fmt.Print(help)
 }
 
-func showInteractiveTUI(config *config.Config, project string) {
+func showInteractiveTUI(config *configpkg.Config, project string) {
 	tasks, err := task.ListTasks(config, project, config.Todo.ShowCompleted)
 	if err != nil {
 		log.Fatal(err)
@@ -2529,7 +2578,7 @@ func showInteractiveTUI(config *config.Config, project string) {
 	}
 }
 
-func printTasksPlain(config *config.Config, tasks []*task.Task) {
+func printTasksPlain(config *configpkg.Config, tasks []*task.Task) {
 	projectColWidth := calculateProjectColWidth(tasks)
 	taskColor := lipgloss.NewStyle()
 	completedTaskColor := lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // Gray for completed tasks
@@ -2552,8 +2601,8 @@ func printTasksPlain(config *config.Config, tasks []*task.Task) {
 			fmt.Printf("%-*s %-12s %-40s",
 				projectColWidth, t.Project, t.Keyword, formattedTitle)
 		}
-		if t.Tag != "" {
-			fmt.Printf(" #%s", t.Tag)
+		for _, tag := range t.Tags {
+			fmt.Printf(" #%s", tag)
 		}
 		if t.ScheduledAt != "" {
 			fmt.Printf(" S:%s", t.ScheduledAt)
@@ -2599,5 +2648,30 @@ func printProjectsList(summary map[string]int) {
 	sort.Strings(projects)
 	for _, p := range projects {
 		fmt.Printf("%-20s %5d\n", p, summary[p])
+	}
+}
+
+func syncJiraOnce(cfg *configpkg.Config) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	for _, conn := range cfg.Jira.Connections {
+		fmt.Fprintf(os.Stderr, "JIRA sync [%s]: connecting...\n", conn.Name)
+		client, err := jira.NewClient(conn.Name)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "JIRA sync [%s]: %v\n", conn.Name, err)
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "JIRA sync [%s]: resolving site...\n", conn.Name)
+		if err := client.Init(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "JIRA sync [%s]: %v\n", conn.Name, err)
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "JIRA sync [%s]: pulling tickets...\n", conn.Name)
+		if err := task.SyncFromJira(ctx, cfg, client); err != nil {
+			fmt.Fprintf(os.Stderr, "JIRA sync [%s]: %v\n", conn.Name, err)
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "JIRA sync [%s]: done\n", conn.Name)
 	}
 }

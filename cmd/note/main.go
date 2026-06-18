@@ -1902,8 +1902,8 @@ func main() {
 			// Print all tasks for this zettel
 			for _, t := range tasks {
 				taskLine := fmt.Sprintf("%s: %s", t.Keyword, t.Title)
-				if t.Tag != "" {
-					taskLine += fmt.Sprintf(" #%s", t.Tag)
+				for _, tag := range t.Tags {
+					taskLine += fmt.Sprintf(" #%s", tag)
 				}
 				if t.ScheduledAt != "" {
 					taskLine += fmt.Sprintf(" @s:%s", t.ScheduledAt)

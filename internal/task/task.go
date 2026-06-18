@@ -18,7 +18,7 @@ type Task struct {
 	Keyword     string
 	ID          string   // Optional unique identifier [id]
 	Title       string
-	Tag         string
+	Tags        []string
 	References  []string // IDs of tasks this task depends on (^id syntax)
 	ScheduledAt string   // @date or @s:date (scheduled date)
 	DueAt       string   // @d:date (due date)
@@ -289,13 +289,16 @@ func ParseLine(c *config.Config, line, project, zettel, filePath string) *Task {
 	}
 	title = refRe.ReplaceAllString(title, "") // Remove all references from title
 
-	// Extract tag (#tag)
-	var tag string
+	// Extract tags (#tag) - supports multiple tags
+	var tags []string
 	tagRe := regexp.MustCompile(`\s*#([^ ]+)`)
-	if tagMatch := tagRe.FindStringSubmatch(title); len(tagMatch) > 1 {
-		tag = tagMatch[1]
-		title = tagRe.ReplaceAllString(title, "") // Remove from title
+	tagMatches := tagRe.FindAllStringSubmatch(title, -1)
+	for _, match := range tagMatches {
+		if len(match) > 1 {
+			tags = append(tags, match[1])
+		}
 	}
+	title = tagRe.ReplaceAllString(title, "")
 
 	// Extract assignee (>> assignee)
 	var assignee string
@@ -335,7 +338,7 @@ func ParseLine(c *config.Config, line, project, zettel, filePath string) *Task {
 		Keyword:     keyword,
 		ID:          id,
 		Title:       strings.TrimSpace(title),
-		Tag:         tag,
+		Tags:        tags,
 		References:  references,
 		ScheduledAt: scheduledAt,
 		DueAt:       dueAt,
@@ -659,8 +662,11 @@ func filterByTag(tasks []*Task, tag string) []*Task {
 	tagLower := strings.ToLower(tag)
 
 	for _, task := range tasks {
-		if strings.Contains(strings.ToLower(task.Tag), tagLower) {
-			filtered = append(filtered, task)
+		for _, t := range task.Tags {
+			if strings.Contains(strings.ToLower(t), tagLower) {
+				filtered = append(filtered, task)
+				break
+			}
 		}
 	}
 	return filtered
@@ -678,7 +684,7 @@ func filterByAnyField(tasks []*Task, searchTerm string) []*Task {
 	for _, task := range tasks {
 		searchString := fmt.Sprintf("%s %s %s %s %s %s %s %s %s %s",
 			task.Project, task.Zettel, task.Keyword, task.ID, task.Title,
-			task.Tag, task.ScheduledAt, task.DueAt, task.Assignee,
+			strings.Join(task.Tags, " "), task.ScheduledAt, task.DueAt, task.Assignee,
 			strings.Join(task.References, " "))
 
 		if strings.Contains(strings.ToLower(searchString), searchLower) {

@@ -1077,20 +1077,19 @@ func (m model) renderItem(item task.AgendaItem, selected bool) string {
 	}
 	parts = append(parts, task.TruncateString(formattedTitle, maxTitle))
 
-	// Tag (right side)
-	if t.Tag != "" {
-		parts = append(parts, " ")
+	// Tags (right side)
+	for _, tag := range t.Tags {
 		isSpecial := false
 		for _, st := range m.config.Todo.SpecialTags {
-			if t.Tag == st || strings.HasPrefix(t.Tag, st+":") {
+			if tag == st || strings.HasPrefix(tag, st+":") {
 				isSpecial = true
 				break
 			}
 		}
 		if isSpecial {
-			parts = append(parts, colors.specialTag.Render(fmt.Sprintf(" %s ", t.Tag)))
+			parts = append(parts, colors.specialTag.Render(fmt.Sprintf(" %s ", tag)))
 		} else {
-			parts = append(parts, colors.tag.Render(fmt.Sprintf(" %s ", t.Tag)))
+			parts = append(parts, colors.tag.Render(fmt.Sprintf(" %s ", tag)))
 		}
 	}
 

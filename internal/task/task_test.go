@@ -98,7 +98,7 @@ func TestParseLineSomedayKeywords(t *testing.T) {
 			want: &Task{
 				Keyword:     "MAYBE",
 				Title:       "Visit Japan",
-				Tag:         "travel",
+				Tags:        []string{"travel"},
 				ScheduledAt: "2024-12-01",
 				Assignee:    "spouse",
 				Project:     "travel",
@@ -143,8 +143,14 @@ func TestParseLineSomedayKeywords(t *testing.T) {
 			if got.Title != tt.want.Title {
 				t.Errorf("ParseLine().Title = %v, want %v", got.Title, tt.want.Title)
 			}
-			if got.Tag != tt.want.Tag {
-				t.Errorf("ParseLine().Tag = %v, want %v", got.Tag, tt.want.Tag)
+			if len(got.Tags) != len(tt.want.Tags) {
+				t.Errorf("ParseLine().Tags = %v, want %v", got.Tags, tt.want.Tags)
+			} else {
+				for i := range got.Tags {
+					if got.Tags[i] != tt.want.Tags[i] {
+						t.Errorf("ParseLine().Tags[%d] = %v, want %v", i, got.Tags[i], tt.want.Tags[i])
+					}
+				}
 			}
 			if got.ScheduledAt != tt.want.ScheduledAt {
 				t.Errorf("ParseLine().ScheduledAt = %v, want %v", got.ScheduledAt, tt.want.ScheduledAt)

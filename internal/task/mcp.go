@@ -3,12 +3,14 @@ package task
 import (
 	"context"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/vinayprograms/karya/internal/config"
+	"github.com/vinayprograms/karya/internal/jira"
 )
 
 // MCP Tool Input/Output types
@@ -27,7 +29,7 @@ type TaskInfo struct {
 	Keyword     string   `json:"keyword" jsonschema:"task status keyword (e.g., TODO, DOING, DONE)"`
 	ID          string   `json:"id,omitempty" jsonschema:"task unique identifier"`
 	Title       string   `json:"title" jsonschema:"task title/description"`
-	Tag         string   `json:"tag,omitempty" jsonschema:"task tag (without #)"`
+	Tags        []string `json:"tags,omitempty" jsonschema:"task tags (without #)"`
 	References  []string `json:"references,omitempty" jsonschema:"IDs of tasks this task depends on (^id syntax)"`
 	ScheduledAt string   `json:"scheduled_at,omitempty" jsonschema:"scheduled date"`
 	DueAt       string   `json:"due_at,omitempty" jsonschema:"due date"`
@@ -222,8 +224,9 @@ type ClockTaskResult struct {
 
 // MCPServer wraps the MCP server with task operations
 type MCPServer struct {
-	config *config.Config
-	server *mcp.Server
+	config      *config.Config
+	server      *mcp.Server
+	jiraClients []*jira.Client
 }
 
 // NewMCPServer creates a new MCP server for task operations
@@ -241,9 +244,52 @@ func NewMCPServer(cfg *config.Config) *MCPServer {
 	return s
 }
 
-// Run starts the MCP server on stdio transport
+// Run starts the MCP server on stdio transport, with optional JIRA background sync.
 func (s *MCPServer) Run(ctx context.Context) error {
+	if s.config.HasJira() {
+		for _, conn := range s.config.Jira.Connections {
+			client, err := jira.NewClient(conn.Name)
+			if err != nil {
+				log.Printf("JIRA sync disabled for %q: %v", conn.Name, err)
+				continue
+			}
+			if err := client.Init(ctx); err != nil {
+				log.Printf("JIRA sync disabled for %q: %v", conn.Name, err)
+				continue
+			}
+			s.jiraClients = append(s.jiraClients, client)
+		}
+		if len(s.jiraClients) > 0 {
+			go s.runJiraSync(ctx)
+		}
+	}
 	return s.server.Run(ctx, &mcp.StdioTransport{})
+}
+
+func (s *MCPServer) runJiraSync(ctx context.Context) {
+	interval := s.config.JiraSyncInterval()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	// Run once immediately on startup
+	s.doJiraSync(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.doJiraSync(ctx)
+		}
+	}
+}
+
+func (s *MCPServer) doJiraSync(ctx context.Context) {
+	for _, client := range s.jiraClients {
+		if err := SyncFromJira(ctx, s.config, client); err != nil {
+			log.Printf("JIRA sync error: %v", err)
+		}
+	}
 }
 
 func (s *MCPServer) registerTools() {
@@ -342,6 +388,12 @@ func (s *MCPServer) registerTools() {
 		Name:        "get_clock_table",
 		Description: "PREFERRED: Get time tracking data aggregated by project and task for a date range. Shows how time was spent.",
 	}, s.getClockTable)
+
+	// Sync JIRA
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "sync_jira",
+		Description: "Force an immediate sync of JIRA tickets assigned to you. Pulls open tickets, updates existing ones, and marks resolved/reassigned tickets as done. Only works when JIRA integration is configured.",
+	}, s.syncJira)
 }
 
 func (s *MCPServer) taskToInfo(t *Task) TaskInfo {
@@ -365,7 +417,7 @@ func (s *MCPServer) taskToInfo(t *Task) TaskInfo {
 		Keyword:     t.Keyword,
 		ID:          t.ID,
 		Title:       t.Title,
-		Tag:         t.Tag,
+		Tags:        t.Tags,
 		References:  t.References,
 		ScheduledAt: t.ScheduledAt,
 		DueAt:       t.DueAt,
@@ -885,4 +937,23 @@ func equalIgnoreCase(a, b string) bool {
 		}
 	}
 	return true
+}
+
+type SyncJiraArgs struct{}
+type SyncJiraResult struct {
+	Message string `json:"message"`
+}
+
+func (s *MCPServer) syncJira(ctx context.Context, req *mcp.CallToolRequest, args SyncJiraArgs) (*mcp.CallToolResult, SyncJiraResult, error) {
+	if len(s.jiraClients) == 0 {
+		return nil, SyncJiraResult{Message: "JIRA integration not configured or authentication failed. Run 'todo jira-auth <name>' to set up."}, nil
+	}
+
+	for _, client := range s.jiraClients {
+		if err := SyncFromJira(ctx, s.config, client); err != nil {
+			return nil, SyncJiraResult{}, fmt.Errorf("sync failed: %w", err)
+		}
+	}
+
+	return nil, SyncJiraResult{Message: "JIRA sync completed successfully"}, nil
 }

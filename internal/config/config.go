@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/charmbracelet/lipgloss"
@@ -110,6 +111,17 @@ type GeneralConfig struct {
 	Verbose bool   `toml:"verbose"`
 }
 
+type JiraConnection struct {
+	Name     string `toml:"name"`
+	Endpoint string `toml:"endpoint"` // MCP server URL, e.g. "https://mcp.atlassian.com/v1/mcp"
+}
+
+type Jira struct {
+	Connections  []JiraConnection  `toml:"connections"`
+	SyncInterval string            `toml:"sync_interval"`
+	StatusMap    map[string]string `toml:"status_map"`
+}
+
 type Config struct {
 	GeneralConfig GeneralConfig `toml:"general"`
 	Directories   Directories   `toml:"directories"`
@@ -117,6 +129,7 @@ type Config struct {
 	Goals         Goals         `toml:"goals"`
 	Schedule      Schedule      `toml:"schedule"`
 	Colors        ColorScheme   `toml:"colors"`
+	Jira          Jira          `toml:"jira"`
 }
 
 func Load() (*Config, error) {
@@ -210,6 +223,11 @@ func Load() (*Config, error) {
 		cfg.Schedule.DefaultView = "week"
 	}
 
+	// JIRA defaults
+	if cfg.HasJira() && len(cfg.Jira.StatusMap) == 0 {
+		cfg.Jira.StatusMap = DefaultJiraStatusMap()
+	}
+
 	// Initialize colors with defaults
 	cfg.initializeColors()
 
@@ -252,6 +270,51 @@ func (c *Config) GetInboxFilePath() string {
 	// Default to home directory
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, "inbox.md")
+}
+
+// HasJira returns true if JIRA integration is configured.
+func (c *Config) HasJira() bool {
+	return len(c.Jira.Connections) > 0
+}
+
+// JiraSyncInterval returns the configured sync interval duration, defaulting to 15m.
+func (c *Config) JiraSyncInterval() time.Duration {
+	if c.Jira.SyncInterval == "" {
+		return 15 * time.Minute
+	}
+	d, err := time.ParseDuration(c.Jira.SyncInterval)
+	if err != nil {
+		return 15 * time.Minute
+	}
+	return d
+}
+
+// JiraStatusToKeyword maps a JIRA status name to a karya keyword using the configured
+// status map. Falls back to TODO for non-done categories and DONE for done categories.
+func (c *Config) JiraStatusToKeyword(jiraStatus string, isDoneCategory bool) string {
+	if kw, ok := c.Jira.StatusMap[jiraStatus]; ok {
+		return kw
+	}
+	if isDoneCategory {
+		return "DONE"
+	}
+	return "TODO"
+}
+
+// DefaultJiraStatusMap returns the default status mapping when none is configured.
+func DefaultJiraStatusMap() map[string]string {
+	return map[string]string{
+		"To Do":                "TODO",
+		"Open":                 "TODO",
+		"Backlog":              "TODO",
+		"In Progress":          "DOING",
+		"In Review":            "DOING",
+		"Blocked":              "WAITING",
+		"Waiting for Customer": "WAITING",
+		"Done":                 "DONE",
+		"Closed":               "DONE",
+		"Resolved":             "DONE",
+	}
 }
 
 func expandEnv(s string) string {
