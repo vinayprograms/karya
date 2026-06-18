@@ -12,6 +12,7 @@ The term "karya" means "work" or "creation" in several Indian languages, reflect
 - **Live File Monitoring**: Task list automatically updates when files change (no refresh needed)
 - **Zettelkasten Support**: Built-in support for zettelkasten note-taking methodology
 - **Git Integration**: Automatic git commits for notes and zettels using go-git
+- **JIRA Integration**: Pull assigned tickets via Atlassian MCP server with background sync and multi-org support
 - **Beautiful TUI**: Interactive terminal UI powered by Bubble Tea and Glamour
 - **Flexible Configuration**: TOML-based config with environment variable support
 
@@ -85,6 +86,14 @@ completed = [
 someday = [
     "SOMEDAY", "MAYBE", "LATER", "WISHLIST"
 ]
+
+# JIRA integration (optional)
+[jira]
+sync_interval = "15m"
+
+[[jira.connections]]
+name = "myorg"
+endpoint = "https://mcp.atlassian.com/v1/mcp"
 
 # Customize TUI colors (optional)
 [colors]
@@ -164,6 +173,7 @@ Karya provides a suite of commands for different workflows. Below is a quick ove
 todo                    # Interactive TUI with live monitoring
 todo ls                 # List all tasks
 todo projects           # Show project summary
+todo jira-auth myorg    # Authenticate JIRA connection (one-time)
 
 # Zettelkasten
 zet new "Note Title"    # Create new zettel
@@ -218,6 +228,8 @@ The task processing system uses an adaptive worker pool calculation to maximize 
 - **[charmbracelet/glamour](https://github.com/charmbracelet/glamour)**: Markdown rendering
 - **[charmbracelet/lipgloss](https://github.com/charmbracelet/lipgloss)**: Terminal styling
 - **[willyv3/gogh-themes](https://github.com/WillyV3/gogh-themes)**: 361 professional terminal color themes
+- **[modelcontextprotocol/go-sdk](https://github.com/modelcontextprotocol/go-sdk)**: MCP client/server for JIRA integration
+- **[golang.org/x/oauth2](https://pkg.go.dev/golang.org/x/oauth2)**: OAuth 2.0 with PKCE for Atlassian auth
 
 ## Contributing
 
@@ -256,5 +268,6 @@ Contributions are welcome! Please follow these guidelines:
 - [ ] Mobile app integration
 - [ ] Cloud sync support
 - [x] Task dependencies and workflows
+- [x] JIRA integration
 - [ ] Time tracking integration
 - [ ] Export to various formats (JSON, CSV, etc.)
