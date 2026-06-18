@@ -269,5 +269,5 @@ Contributions are welcome! Please follow these guidelines:
 - [ ] Cloud sync support
 - [x] Task dependencies and workflows
 - [x] JIRA integration
-- [ ] Time tracking integration
+- [x] Time tracking (clock in/out with aggregated reports)
 - [ ] Export to various formats (JSON, CSV, etc.)
