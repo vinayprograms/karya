@@ -304,6 +304,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.termWidth = msg.Width
 			m.termHeight = msg.Height
 			return m, nil
+		case fileChangedMsg:
+			// Re-render picks up fresh content via ReadRawBlock
+			return m, waitForFileChange(m.watcher)
 		}
 		return m, nil
 	}
