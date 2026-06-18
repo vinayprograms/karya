@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/vinayprograms/karya/internal/config"
@@ -35,7 +37,9 @@ type TaskInfo struct {
 	FilePath    string   `json:"file_path" jsonschema:"file path where task is defined"`
 	Priority    int      `json:"priority" jsonschema:"priority level (1=in_progress, 2=active, 3=someday, 4=completed)"`
 	Status      string   `json:"status" jsonschema:"status category (active, in_progress, completed, someday)"`
-	InCycle     bool     `json:"in_cycle,omitempty" jsonschema:"true if task participates in a circular dependency"`
+	InCycle     bool       `json:"in_cycle,omitempty" jsonschema:"true if task participates in a circular dependency"`
+	Children    []TaskInfo `json:"children,omitempty" jsonschema:"child tasks nested under this task"`
+	RawContent  string     `json:"raw_content,omitempty" jsonschema:"raw file content of task and all indented lines below it"`
 }
 
 type GetTaskArgs struct {
@@ -162,6 +166,60 @@ type GetCycleTasksResult struct {
 	Count int        `json:"count" jsonschema:"number of tasks in cycles"`
 }
 
+type ScheduleTaskArgs struct {
+	Project         string `json:"project" jsonschema:"project name"`
+	Keyword         string `json:"keyword" jsonschema:"current task keyword"`
+	Title           string `json:"title" jsonschema:"task title to identify the task"`
+	ScheduledAt     string `json:"scheduled_at,omitempty" jsonschema:"scheduled date to set (e.g. 2026-06-20, 2026-06-20T09:00, 2026-06-20+1w). Omit to leave unchanged."`
+	DueAt           string `json:"due_at,omitempty" jsonschema:"due date to set (same format). Omit to leave unchanged."`
+	RemoveScheduled bool   `json:"remove_scheduled,omitempty" jsonschema:"if true, removes the existing scheduled date"`
+	RemoveDue       bool   `json:"remove_due,omitempty" jsonschema:"if true, removes the existing due date"`
+}
+
+type ScheduleTaskResult struct {
+	Message string `json:"message" jsonschema:"result message"`
+	Success bool   `json:"success" jsonschema:"whether the operation succeeded"`
+}
+
+type ClockInArgs struct {
+	Project string `json:"project" jsonschema:"project name"`
+	Keyword string `json:"keyword" jsonschema:"task keyword"`
+	Title   string `json:"title" jsonschema:"task title"`
+}
+
+type ClockOutArgs struct {
+	Project string `json:"project" jsonschema:"project name"`
+	Keyword string `json:"keyword" jsonschema:"task keyword"`
+	Title   string `json:"title" jsonschema:"task title"`
+}
+
+type ClockResult struct {
+	Message string `json:"message" jsonschema:"result message"`
+	Success bool   `json:"success" jsonschema:"whether the operation succeeded"`
+}
+
+type GetClockTableArgs struct {
+	Start string `json:"start" jsonschema:"start date (YYYY-MM-DD)"`
+	End   string `json:"end" jsonschema:"end date (YYYY-MM-DD)"`
+}
+
+type ClockTableResult struct {
+	GrandTotal string               `json:"grand_total" jsonschema:"total time as H:MM"`
+	Projects   []ClockProjectResult `json:"projects" jsonschema:"per-project breakdown"`
+}
+
+type ClockProjectResult struct {
+	Project string             `json:"project" jsonschema:"project name"`
+	Total   string             `json:"total" jsonschema:"project total time as H:MM"`
+	Tasks   []ClockTaskResult  `json:"tasks" jsonschema:"per-task breakdown"`
+}
+
+type ClockTaskResult struct {
+	Keyword  string `json:"keyword" jsonschema:"task keyword"`
+	Title    string `json:"title" jsonschema:"task title"`
+	Duration string `json:"duration" jsonschema:"time spent as H:MM"`
+}
+
 // MCPServer wraps the MCP server with task operations
 type MCPServer struct {
 	config *config.Config
@@ -260,6 +318,30 @@ func (s *MCPServer) registerTools() {
 		Name:        "get_cycle_tasks",
 		Description: "PREFERRED: Find all tasks involved in circular dependencies. Returns tasks where A depends on B and B depends on A (directly or indirectly). Use this to identify and resolve dependency cycles.",
 	}, s.getCycleTasks)
+
+	// Schedule task
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "schedule_task",
+		Description: "PREFERRED: Set, update, or remove scheduled/due dates on a task. Use scheduled_at/due_at to set dates (YYYY-MM-DD with optional time, recurrence, warning). Use remove_scheduled/remove_due to clear dates.",
+	}, s.scheduleTask)
+
+	// Clock in
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "clock_in",
+		Description: "PREFERRED: Start a clock timer on a task. Records the current time as clock-in. Use this to track time spent on tasks.",
+	}, s.clockIn)
+
+	// Clock out
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "clock_out",
+		Description: "PREFERRED: Stop the clock timer on a task. Completes the open clock entry with the current time.",
+	}, s.clockOut)
+
+	// Get clock table
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "get_clock_table",
+		Description: "PREFERRED: Get time tracking data aggregated by project and task for a date range. Shows how time was spent.",
+	}, s.getClockTable)
 }
 
 func (s *MCPServer) taskToInfo(t *Task) TaskInfo {
@@ -272,6 +354,11 @@ func (s *MCPServer) taskToInfo(t *Task) TaskInfo {
 		status = "someday"
 	} else if t.IsCompleted(s.config) {
 		status = "completed"
+	}
+
+	var children []TaskInfo
+	for _, child := range t.Children {
+		children = append(children, s.taskToInfo(child))
 	}
 
 	return TaskInfo{
@@ -289,6 +376,7 @@ func (s *MCPServer) taskToInfo(t *Task) TaskInfo {
 		Priority:    t.Priority(s.config),
 		Status:      status,
 		InCycle:     t.InCycle,
+		Children:    children,
 	}
 }
 
@@ -338,6 +426,7 @@ func (s *MCPServer) getTask(ctx context.Context, req *mcp.CallToolRequest, args 
 	for _, t := range tasks {
 		if t.Keyword == args.Keyword && (t.Title == args.Title || containsIgnoreCase(t.Title, args.Title)) {
 			info := s.taskToInfo(t)
+			info.RawContent, _ = ReadRawBlock(t)
 			return nil, GetTaskResult{Task: &info, Found: true}, nil
 		}
 	}
@@ -546,6 +635,7 @@ func (s *MCPServer) getTaskByID(ctx context.Context, req *mcp.CallToolRequest, a
 	}
 
 	info := s.taskToInfo(task)
+	info.RawContent, _ = ReadRawBlock(task)
 	return nil, GetTaskByIDResult{Task: &info, Found: true}, nil
 }
 
@@ -629,6 +719,133 @@ func (s *MCPServer) getCycleTasks(ctx context.Context, req *mcp.CallToolRequest,
 	return nil, GetCycleTasksResult{
 		Tasks: cycleTasks,
 		Count: len(cycleTasks),
+	}, nil
+}
+
+func (s *MCPServer) scheduleTask(ctx context.Context, req *mcp.CallToolRequest, args ScheduleTaskArgs) (*mcp.CallToolResult, ScheduleTaskResult, error) {
+	tasks, err := ListTasks(s.config, args.Project, true)
+	if err != nil {
+		return nil, ScheduleTaskResult{
+			Success: false,
+			Message: fmt.Sprintf("failed to list tasks: %v", err),
+		}, nil
+	}
+
+	var targetTask *Task
+	for _, t := range tasks {
+		if t.Keyword == args.Keyword && (t.Title == args.Title || containsIgnoreCase(t.Title, args.Title)) {
+			targetTask = t
+			break
+		}
+	}
+
+	if targetTask == nil {
+		return nil, ScheduleTaskResult{
+			Success: false,
+			Message: fmt.Sprintf("task not found: %s: %s", args.Keyword, args.Title),
+		}, nil
+	}
+
+	if err := SetTaskDate(targetTask, args.ScheduledAt, args.DueAt, args.RemoveScheduled, args.RemoveDue); err != nil {
+		return nil, ScheduleTaskResult{
+			Success: false,
+			Message: fmt.Sprintf("failed to update dates: %v", err),
+		}, nil
+	}
+
+	var changes []string
+	if args.ScheduledAt != "" {
+		changes = append(changes, fmt.Sprintf("scheduled=%s", args.ScheduledAt))
+	}
+	if args.DueAt != "" {
+		changes = append(changes, fmt.Sprintf("due=%s", args.DueAt))
+	}
+	if args.RemoveScheduled {
+		changes = append(changes, "scheduled removed")
+	}
+	if args.RemoveDue {
+		changes = append(changes, "due removed")
+	}
+
+	return nil, ScheduleTaskResult{
+		Success: true,
+		Message: fmt.Sprintf("Updated: %s", strings.Join(changes, ", ")),
+	}, nil
+}
+
+func (s *MCPServer) clockIn(ctx context.Context, req *mcp.CallToolRequest, args ClockInArgs) (*mcp.CallToolResult, ClockResult, error) {
+	tasks, err := ListTasks(s.config, args.Project, true)
+	if err != nil {
+		return nil, ClockResult{}, fmt.Errorf("failed to list tasks: %w", err)
+	}
+
+	for _, t := range tasks {
+		if t.Keyword == args.Keyword && (t.Title == args.Title || containsIgnoreCase(t.Title, args.Title)) {
+			if err := ClockIn(t); err != nil {
+				return nil, ClockResult{Message: err.Error(), Success: false}, nil
+			}
+			return nil, ClockResult{Message: "Clocked in: " + t.Title, Success: true}, nil
+		}
+	}
+
+	return nil, ClockResult{Message: "task not found", Success: false}, nil
+}
+
+func (s *MCPServer) clockOut(ctx context.Context, req *mcp.CallToolRequest, args ClockOutArgs) (*mcp.CallToolResult, ClockResult, error) {
+	tasks, err := ListTasks(s.config, args.Project, true)
+	if err != nil {
+		return nil, ClockResult{}, fmt.Errorf("failed to list tasks: %w", err)
+	}
+
+	for _, t := range tasks {
+		if t.Keyword == args.Keyword && (t.Title == args.Title || containsIgnoreCase(t.Title, args.Title)) {
+			if err := ClockOut(t); err != nil {
+				return nil, ClockResult{Message: err.Error(), Success: false}, nil
+			}
+			return nil, ClockResult{Message: "Clocked out: " + t.Title, Success: true}, nil
+		}
+	}
+
+	return nil, ClockResult{Message: "task not found", Success: false}, nil
+}
+
+func (s *MCPServer) getClockTable(ctx context.Context, req *mcp.CallToolRequest, args GetClockTableArgs) (*mcp.CallToolResult, ClockTableResult, error) {
+	start, err := time.Parse("2006-01-02", args.Start)
+	if err != nil {
+		return nil, ClockTableResult{}, fmt.Errorf("invalid start date: %w", err)
+	}
+	end, err := time.Parse("2006-01-02", args.End)
+	if err != nil {
+		return nil, ClockTableResult{}, fmt.Errorf("invalid end date: %w", err)
+	}
+
+	end = end.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+
+	table, err := QueryClockTable(s.config, start, end)
+	if err != nil {
+		return nil, ClockTableResult{}, fmt.Errorf("failed to query clock table: %w", err)
+	}
+
+	var projects []ClockProjectResult
+	for _, p := range table.Projects {
+		var tasks []ClockTaskResult
+		for _, e := range p.Entries {
+			tasks = append(tasks, ClockTaskResult{
+				Keyword:  e.Task.Keyword,
+				Title:    e.Task.Title,
+				Duration: FormatDuration(e.Duration),
+			})
+		}
+		projects = append(projects, ClockProjectResult{
+			Project: p.Project,
+			Total:   FormatDuration(p.Total),
+			Tasks:   tasks,
+		})
+	}
+
+	return nil, ClockTableResult{
+		GrandTotal: FormatDuration(table.GrandTotal),
+		Projects:   projects,
 	}, nil
 }
 
