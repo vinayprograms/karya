@@ -222,8 +222,23 @@ func updateTaskContent(t *Task, issue *jira.Issue, allIssues map[string]*jira.Is
 		return nil
 	}
 
+	// Check if the URL link already exists in the indented block — if so, nothing to do
+	ticketURL := jiraTicketURL(issue.Key)
+	for i := t.LineNum; i < len(lines); i++ {
+		line := lines[i]
+		if line == "" {
+			continue
+		}
+		if len(line) > 0 && (line[0] != ' ' && line[0] != '\t') {
+			break
+		}
+		if strings.Contains(line, ticketURL) {
+			return nil
+		}
+	}
+
 	// Find the extent of the current indented block
-	blockEnd := t.LineNum // exclusive, 0-indexed end of block
+	blockEnd := t.LineNum
 	for i := t.LineNum; i < len(lines); i++ {
 		line := lines[i]
 		if line == "" {
