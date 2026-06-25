@@ -94,6 +94,17 @@ func IsClockActive(t *Task) bool {
 	return false
 }
 
+// FindActiveClocks returns all tasks that have an open (running) clock entry.
+func FindActiveClocks(tasks []*Task) []*Task {
+	var active []*Task
+	for _, t := range tasks {
+		if IsClockActive(t) {
+			active = append(active, t)
+		}
+	}
+	return active
+}
+
 // ClipDuration returns the duration of a clock entry clipped to [rangeStart, rangeEnd].
 // Open entries use time.Now() as end. Returns 0 if entry doesn't overlap the range.
 func ClipDuration(entry ClockEntry, rangeStart, rangeEnd time.Time) time.Duration {
@@ -128,7 +139,7 @@ func ClipDuration(entry ClockEntry, rangeStart, rangeEnd time.Time) time.Duratio
 
 // QueryClockTable aggregates clock data for all tasks within [start, end].
 func QueryClockTable(c *config.Config, start, end time.Time) (*ClockTable, error) {
-	tasks, err := ListTasks(c, "", false)
+	tasks, err := ListTasks(c, "", true)
 	if err != nil {
 		return nil, err
 	}
