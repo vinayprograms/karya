@@ -404,11 +404,14 @@ func ListTasks(c *config.Config, project string, showCompleted bool) ([]*Task, e
 		}
 	}
 
-	// Load tasks from inbox file
-	inboxFilePath := c.GetInboxFilePath()
-	inboxTasks, err := readInboxFile(inboxFilePath, c)
-	if err != nil && !os.IsNotExist(err) {
-		return nil, err
+	// Load tasks from inbox file (only when listing all projects, not a specific one)
+	var inboxTasks []*Task
+	if project == "" || project == "*" {
+		inboxFilePath := c.GetInboxFilePath()
+		inboxTasks, err = readInboxFile(inboxFilePath, c)
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
 	}
 
 	// Filter inbox tasks if showCompleted is false
