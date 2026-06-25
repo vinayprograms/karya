@@ -57,10 +57,11 @@ type colorScheme struct {
 	date       lipgloss.Style
 	overdue    lipgloss.Style
 	deadline   lipgloss.Style
-	assignee   lipgloss.Style
-	header     lipgloss.Style
-	schedInfo  lipgloss.Style
-	dimText    lipgloss.Style
+	assignee    lipgloss.Style
+	header      lipgloss.Style
+	schedInfo   lipgloss.Style
+	dimText     lipgloss.Style
+	clockActive lipgloss.Style
 }
 
 var colors colorScheme
@@ -76,12 +77,13 @@ func initColors(cfg *config.Config) {
 		tag:        lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TagColor)).Background(lipgloss.Color(cfg.Colors.TagBgColor)),
 		specialTag: lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.SpecialTagColor)).Background(lipgloss.Color(cfg.Colors.SpecialTagBgColor)).Bold(true),
 		date:       lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.DateColor)).Background(lipgloss.Color(cfg.Colors.DateBgColor)),
-		overdue:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.OverdueColor)),
-		deadline:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.OverdueColor)).Bold(true),
+		overdue:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.OverdueColor)).Bold(true),
+		deadline:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.DeadlineColor)).Bold(true),
 		assignee:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.AssigneeColor)).Background(lipgloss.Color(cfg.Colors.AssigneeBgColor)).Bold(true),
 		header:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.AgendaHeaderColor)).Bold(true),
-		schedInfo:  lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
-		dimText:    lipgloss.NewStyle().Foreground(lipgloss.Color("241")),
+		schedInfo:   lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
+		dimText:     lipgloss.NewStyle().Foreground(lipgloss.Color("241")),
+		clockActive: lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ClockActiveColor)).Bold(true),
 	}
 }
 
@@ -114,6 +116,11 @@ type model struct {
 	clockCursorToLine []int
 	clockTotalLines   int
 	clockTasks        []*task.Task // selectable task entries in clock table
+
+	// Clock resolution state (multiple active clocks)
+	activeClockedTasks []*task.Task
+	showClockResolve   bool
+	clockResolveCursor int
 }
 
 type fileChangedMsg struct{}
@@ -279,6 +286,51 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				loadAgendaCmd(m.config, m.focusDate, m.mode),
 				tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }),
 			)
+		case tea.WindowSizeMsg:
+			m.termWidth = msg.Width
+			m.termHeight = msg.Height
+			return m, nil
+		}
+		return m, nil
+	}
+
+	// Clock resolution mode (multiple active clocks)
+	if m.showClockResolve {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "ctrl+c":
+				m.quitting = true
+				return m, tea.Quit
+			case "esc":
+				m.showClockResolve = false
+				return m, nil
+			case "j", "down":
+				if m.clockResolveCursor < len(m.activeClockedTasks)-1 {
+					m.clockResolveCursor++
+				}
+				return m, nil
+			case "k", "up":
+				if m.clockResolveCursor > 0 {
+					m.clockResolveCursor--
+				}
+				return m, nil
+			case "o":
+				if m.clockResolveCursor < len(m.activeClockedTasks) {
+					t := m.activeClockedTasks[m.clockResolveCursor]
+					if err := task.ClockOut(t); err == nil {
+						m.activeClockedTasks = append(m.activeClockedTasks[:m.clockResolveCursor], m.activeClockedTasks[m.clockResolveCursor+1:]...)
+						if m.clockResolveCursor >= len(m.activeClockedTasks) {
+							m.clockResolveCursor = max(0, len(m.activeClockedTasks)-1)
+						}
+						if len(m.activeClockedTasks) <= 1 {
+							m.showClockResolve = false
+							return m, loadAgendaCmd(m.config, m.focusDate, m.mode)
+						}
+					}
+				}
+				return m, nil
+			}
 		case tea.WindowSizeMsg:
 			m.termWidth = msg.Width
 			m.termHeight = msg.Height
@@ -591,6 +643,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor >= len(m.flatItems) {
 				m.cursor = max(0, len(m.flatItems)-1)
 			}
+
+			// Detect multiple active clocks
+			var activeTasks []*task.Task
+			seen := make(map[*task.Task]bool)
+			for _, item := range m.flatItems {
+				if item.ClockActive && !seen[item.Task] {
+					activeTasks = append(activeTasks, item.Task)
+					seen[item.Task] = true
+				}
+			}
+			m.activeClockedTasks = activeTasks
+			if len(activeTasks) > 1 {
+				m.showClockResolve = true
+				m.clockResolveCursor = 0
+			}
 		}
 
 	case fileChangedMsg:
@@ -902,6 +969,10 @@ func (m model) View() string {
 		return m.datePicker.View(m.termWidth / 2)
 	}
 
+	if m.showClockResolve {
+		return m.renderClockResolveView()
+	}
+
 	if m.showingDetailView {
 		return m.renderDetailView()
 	}
@@ -1022,12 +1093,18 @@ func (m model) renderItem(item task.AgendaItem, selected bool) string {
 	if len(proj) > 9 {
 		proj = proj[:9]
 	}
-	parts = append(parts, colors.project.Render(fmt.Sprintf("%-10s", proj+":")))
+	projStyle := colors.project
+	if item.ClockActive {
+		projStyle = colors.clockActive
+	}
+	parts = append(parts, projStyle.Render(fmt.Sprintf("%-10s", proj+":")))
 
 	// Schedule info column (14 chars)
 	schedStr := m.formatScheduleInfo(item)
 	schedStyle := colors.schedInfo
-	if item.IsOverdue {
+	if item.ClockActive {
+		schedStyle = colors.clockActive
+	} else if item.IsOverdue {
 		schedStyle = colors.deadline
 	} else if item.IsDeadline {
 		itemDay := time.Date(item.Date.Year(), item.Date.Month(), item.Date.Day(), 0, 0, 0, 0, time.Local)
@@ -1069,7 +1146,11 @@ func (m model) renderItem(item task.AgendaItem, selected bool) string {
 	if t.ID != "" {
 		displayTitle = fmt.Sprintf("[%s] %s", t.ID, t.Title)
 	}
-	formattedTitle := task.RenderMarkdownDescription(displayTitle, titleStyle)
+	if item.ClockActive {
+		displayTitle = "⏱ " + displayTitle
+		titleStyle = colors.clockActive
+	}
+	formattedTitle := titleStyle.Render(task.RenderMarkdownDescription(displayTitle, titleStyle))
 	// Fixed columns: selector(2) + project(10) + schedule(14) + keyword(12) + right-side(30)
 	maxTitle := m.termWidth - 2 - 10 - 14 - 12 - 30
 	if maxTitle < 20 {
@@ -1250,6 +1331,45 @@ func (m model) formatScheduleInfo(item task.AgendaItem) string {
 		return "DL: " + item.Date.Format("Jan 02")
 	}
 	return item.Date.Format("Jan 02")
+}
+
+func (m model) renderClockResolveView() string {
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11")).
+		Render("Multiple active clocks detected")
+
+	var lines []string
+	lines = append(lines, title)
+	lines = append(lines, "")
+	lines = append(lines, "The following tasks have open clock entries:")
+	lines = append(lines, "")
+
+	for i, t := range m.activeClockedTasks {
+		indicator := "  "
+		style := lipgloss.NewStyle()
+		if i == m.clockResolveCursor {
+			indicator = lipgloss.NewStyle().Foreground(lipgloss.Color("14")).Bold(true).Render("█ ")
+			style = colors.clockActive
+		}
+		proj := t.Project
+		if len(proj) > 12 {
+			proj = proj[:12]
+		}
+		line := fmt.Sprintf("%s%-13s %s", indicator, proj+":", style.Render(t.Title))
+		lines = append(lines, line)
+	}
+
+	lines = append(lines, "")
+	lines = append(lines, colors.dimText.Render("  j/k: navigate • o: clock out • esc: dismiss"))
+
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("11")).
+		Padding(1, 2).
+		Width(min(70, m.termWidth-4))
+
+	content := box.Render(strings.Join(lines, "\n"))
+
+	return lipgloss.Place(m.termWidth, m.termHeight, lipgloss.Center, lipgloss.Center, content)
 }
 
 func (m model) renderDetailView() string {

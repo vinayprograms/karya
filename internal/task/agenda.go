@@ -9,15 +9,16 @@ import (
 
 // AgendaItem represents a single entry in the agenda view.
 type AgendaItem struct {
-	Task       *Task
-	Date       time.Time
-	HasTime    bool
-	HasEnd     bool
-	EndTime    time.Time
-	IsOverdue  bool
-	IsDeadline bool
-	Warning    bool
-	Schedule   *Schedule
+	Task        *Task
+	Date        time.Time
+	HasTime     bool
+	HasEnd      bool
+	EndTime     time.Time
+	IsOverdue   bool
+	IsDeadline  bool
+	Warning     bool
+	ClockActive bool
+	Schedule    *Schedule
 }
 
 // AgendaDay groups agenda items appearing on a single date.
@@ -51,6 +52,19 @@ func QueryAgenda(c *config.Config, start, end time.Time, includeOverdue bool) ([
 		if t.DueAt != "" {
 			addAgendaEntries(c, t, t.DueAt, true, startDay, endDay, today, includeOverdue, dayMap)
 		}
+	}
+
+	// Mark items with active clocks (cache per task to avoid repeated I/O)
+	clockCache := make(map[*Task]bool)
+	for date, items := range dayMap {
+		for i := range items {
+			t := items[i].Task
+			if _, ok := clockCache[t]; !ok {
+				clockCache[t] = IsClockActive(t)
+			}
+			items[i].ClockActive = clockCache[t]
+		}
+		dayMap[date] = items
 	}
 
 	// Convert map to sorted slice of AgendaDay
