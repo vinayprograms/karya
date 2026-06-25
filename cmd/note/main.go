@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/vinayprograms/karya/internal/config"
 	"github.com/vinayprograms/karya/internal/note"
@@ -62,12 +63,14 @@ func InitializeColors(cfg *config.Config) {
 }
 
 type Project struct {
-	Name      string
-	Path      string
-	HasNotes  bool
-	HasTodos  bool
-	NoteCount int
-	TodoCount int
+	Name          string
+	Path          string
+	HasNotes      bool
+	HasTodos      bool
+	NoteCount     int
+	TodoCount     int
+	LastNoteTitle string
+	LastNoteID    string
 }
 
 type projectModel struct {
@@ -78,11 +81,19 @@ type projectModel struct {
 	editor        string
 	verbose       bool
 	launchProject string
+	launchFile    string
 	cfg           *config.Config
 	filtering     bool
 	filterMode    string
 	customFilter  string
 	allItems      []list.Item
+	sortField     string
+	sortAsc       bool
+	termWidth     *int
+	maxNameLen    int
+	showAll       bool
+	fullItems     []list.Item // all projects, unfiltered by notes status
+	watcher       *fsnotify.Watcher
 }
 
 type projectItem struct {
@@ -93,30 +104,142 @@ func (i projectItem) FilterValue() string {
 	return i.project.Name
 }
 
-func (i projectItem) renderWithSelection(isSelected bool) string {
-	var parts []string
+type matchedNoteItem struct {
+	projectName string
+	noteTitle   string
+	notePath    string
+}
 
-	// Name line
-	if isSelected {
-		parts = append(parts, colors.selectorStyle.Render("█ ")+i.project.Name)
+func (i matchedNoteItem) FilterValue() string {
+	return i.projectName + " " + i.noteTitle
+}
+
+func (i matchedNoteItem) renderWithSelection(isSelected bool, maxNameLen int, termWidth int) string {
+	name := i.projectName
+	var nameRendered string
+
+	if lastDot := strings.LastIndex(name, "."); lastDot != -1 {
+		prefix := name[:lastDot+1]
+		suffix := name[lastDot+1:]
+		if isSelected {
+			nameRendered = colors.grayStyle.Render(prefix) + colors.highlightStyle.Render(suffix)
+		} else {
+			nameRendered = colors.grayStyle.Render(prefix) + colors.projectStyle.Render(suffix)
+		}
 	} else {
-		parts = append(parts, "  "+i.project.Name)
+		if isSelected {
+			nameRendered = colors.highlightStyle.Render(name)
+		} else {
+			nameRendered = colors.projectStyle.Render(name)
+		}
 	}
 
-	// Stats line
-	stats := fmt.Sprintf("  %d notes • %d todos", i.project.NoteCount, i.project.TodoCount)
-	if isSelected {
-		statsStyle := colors.highlightStyle
-		parts = append(parts, statsStyle.Render(stats))
-	} else {
-		statsStyle := colors.grayStyle
-		parts = append(parts, statsStyle.Render(stats))
+	padding := maxNameLen - len(name)
+	if padding < 0 {
+		padding = 0
+	}
+	nameCol := nameRendered + strings.Repeat(" ", padding)
+
+	// Title fills remaining width after name + gap
+	fixedWidth := 2 + maxNameLen + 2
+	titleWidth := termWidth - fixedWidth
+	if titleWidth < 0 {
+		titleWidth = 0
+	}
+	title := i.noteTitle
+	titleRunes := []rune(title)
+	if len(titleRunes) > titleWidth {
+		if titleWidth > 1 {
+			title = string(titleRunes[:titleWidth-1]) + "…"
+		} else {
+			title = ""
+		}
 	}
 
-	// Add extra blank line for spacing
-	parts = append(parts, "")
+	var selector string
+	if isSelected {
+		selector = colors.selectorStyle.Render("█ ")
+	} else {
+		selector = "  "
+	}
 
-	return strings.Join(parts, "\n")
+	if isSelected {
+		return selector + nameCol + "  " + colors.highlightStyle.Render(title)
+	}
+	return selector + nameCol + "  " + title
+}
+
+func (i projectItem) renderWithSelection(isSelected bool, maxNameLen int, termWidth int) string {
+	name := i.project.Name
+	var nameRendered string
+
+	// Dim the namespace prefix (everything up to and including the last dot)
+	if lastDot := strings.LastIndex(name, "."); lastDot != -1 {
+		prefix := name[:lastDot+1]
+		suffix := name[lastDot+1:]
+		if isSelected {
+			nameRendered = colors.grayStyle.Render(prefix) + colors.highlightStyle.Render(suffix)
+		} else {
+			nameRendered = colors.grayStyle.Render(prefix) + colors.projectStyle.Render(suffix)
+		}
+	} else {
+		if isSelected {
+			nameRendered = colors.highlightStyle.Render(name)
+		} else {
+			nameRendered = colors.projectStyle.Render(name)
+		}
+	}
+
+	// Pad name column to fixed width
+	padding := maxNameLen - len(name)
+	if padding < 0 {
+		padding = 0
+	}
+	nameCol := nameRendered + strings.Repeat(" ", padding)
+
+	// Notes column (right-aligned, 4 chars)
+	notesStr := fmt.Sprintf("%4d", i.project.NoteCount)
+
+	// Todos column (right-aligned, 4 chars)
+	todosStr := fmt.Sprintf("%4d", i.project.TodoCount)
+
+	// Modified date column (6 chars)
+	dateStr := "   -- "
+	if i.project.LastNoteID != "" && len(i.project.LastNoteID) >= 8 {
+		if t, err := time.Parse("20060102", i.project.LastNoteID[:8]); err == nil {
+			dateStr = t.Format("Jan 02")
+		}
+	}
+
+	// Last note title — fill remaining width
+	// Fixed columns: selector(2) + name(maxNameLen) + gap(2) + notes(4) + gap(2) + todos(4) + gap(2) + date(6) + gap(2) + border(2)
+	fixedWidth := 2 + maxNameLen + 2 + 4 + 2 + 4 + 2 + 6 + 2
+	titleWidth := termWidth - fixedWidth
+	if titleWidth < 0 {
+		titleWidth = 0
+	}
+	title := i.project.LastNoteTitle
+	titleRunes := []rune(title)
+	if len(titleRunes) > titleWidth {
+		if titleWidth > 1 {
+			title = string(titleRunes[:titleWidth-1]) + "…"
+		} else {
+			title = ""
+		}
+	}
+
+	// Compose the row
+	var selector string
+	if isSelected {
+		selector = colors.selectorStyle.Render("█ ")
+	} else {
+		selector = "  "
+	}
+
+	if isSelected {
+		return selector + nameCol + "  " + colors.highlightStyle.Render(notesStr) + "  " + colors.highlightStyle.Render(todosStr) + "  " + colors.highlightStyle.Render(dateStr) + "  " + colors.highlightStyle.Render(title)
+	}
+	return selector + nameCol + "  " + colors.grayStyle.Render(notesStr) + "  " + colors.grayStyle.Render(todosStr) + "  " + colors.grayStyle.Render(dateStr) + "  " + colors.grayStyle.Render(title)
 }
 
 func (i projectItem) Title() string {
@@ -129,21 +252,23 @@ func (i projectItem) Description() string {
 
 type projectDelegate struct {
 	list.DefaultDelegate
+	maxNameLen *int
+	termWidth  *int
 }
 
 func (d projectDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
-	projectItem, ok := item.(projectItem)
-	if !ok {
-		return
-	}
-
 	isSelected := index == m.Index()
-	content := projectItem.renderWithSelection(isSelected)
-	fmt.Fprint(w, content)
+
+	switch it := item.(type) {
+	case projectItem:
+		fmt.Fprint(w, it.renderWithSelection(isSelected, *d.maxNameLen, *d.termWidth))
+	case matchedNoteItem:
+		fmt.Fprint(w, it.renderWithSelection(isSelected, *d.maxNameLen, *d.termWidth))
+	}
 }
 
 func (m projectModel) Init() tea.Cmd {
-	return nil
+	return waitForFileChange(m.watcher)
 }
 
 func (m projectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -197,21 +322,80 @@ func (m projectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		if msg.String() == "a" {
+			m.showAll = !m.showAll
+			m.applyViewFilter()
+			return m, nil
+		}
+
+		if msg.String() == "s" {
+			switch m.sortField {
+			case "name":
+				m.sortField = "notes"
+				m.sortAsc = false
+			case "notes":
+				m.sortField = "todos"
+				m.sortAsc = false
+			case "todos":
+				m.sortField = "modified"
+				m.sortAsc = false
+			default:
+				m.sortField = "name"
+				m.sortAsc = true
+			}
+			m.applySortOrder()
+			return m, nil
+		}
+
+		if msg.String() == "S" {
+			m.sortAsc = !m.sortAsc
+			m.applySortOrder()
+			return m, nil
+		}
+
 		if msg.String() == "q" {
 			m.quitting = true
 			return m, tea.Quit
 		}
 
 		if msg.String() == "enter" {
-			if i, ok := m.list.SelectedItem().(projectItem); ok {
+			switch i := m.list.SelectedItem().(type) {
+			case projectItem:
 				m.launchProject = i.project.Name
+				m.quitting = true
+				return m, tea.Quit
+			case matchedNoteItem:
+				m.launchFile = i.notePath
 				m.quitting = true
 				return m, tea.Quit
 			}
 		}
 	case tea.WindowSizeMsg:
+		*m.termWidth = msg.Width
 		m.list.SetWidth(msg.Width)
-		m.list.SetHeight(msg.Height - 3) // Reduce by 3 for title and help lines
+		// Reserve: title(1) + blank(1) + col-header(1) + separator(1) + help(2)
+		m.list.SetHeight(msg.Height - 6)
+	case fileChangedMsg:
+		projects, err := listProjects(m.prjDir, m.cfg)
+		if err == nil {
+			m.projects = projects
+			maxNameLen := 0
+			for _, prj := range projects {
+				if len(prj.Name) > maxNameLen {
+					maxNameLen = len(prj.Name)
+				}
+			}
+			m.maxNameLen = maxNameLen
+
+			allProjectItems := make([]list.Item, len(projects))
+			for i, prj := range projects {
+				allProjectItems[i] = projectItem{project: prj}
+			}
+			m.fullItems = allProjectItems
+			m.applyViewFilter()
+			updateProjectWatcher(m.watcher, m.prjDir)
+		}
+		return m, waitForFileChange(m.watcher)
 	}
 
 	var cmd tea.Cmd
@@ -219,58 +403,141 @@ func (m projectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// Remove unused functions
-
 func (m projectModel) View() string {
 	if m.quitting {
 		return ""
 	}
-	
+
 	view := m.list.View()
-	
-	// Add filter line if filtering
-	if m.filtering || m.customFilter != "" {
-		lines := strings.Split(view, "\n")
-		if len(lines) > 0 {
-			header := []string{lines[0]}
-			
-			var filterText string
-			modeLabel := "Filter projects"
-			if m.filterMode == "fulltext" {
-				modeLabel = "Fulltext search"
-			}
-			if m.filtering {
-				filterText = fmt.Sprintf("%s: %s▓", modeLabel, m.customFilter)
-			} else {
-				filterText = fmt.Sprintf("%s: %s", modeLabel, m.customFilter)
-			}
-			filterLine := colors.filterStyle.
-				Padding(0, 1).
-				Render(filterText)
-			header = append(header, filterLine)
-			
-			result := header
-			result = append(result, lines[1:]...)
-			view = strings.Join(result, "\n")
-		}
-	}
-	
-	// Customize the status bar to show "projects" instead of "items"
 	lines := strings.Split(view, "\n")
-	if len(lines) > 0 {
-		// Look for the status line (usually contains "item" or "items")
-		for i, line := range lines {
-			if strings.Contains(line, "item") || strings.Contains(line, "Item") {
-				// Replace "item(s)" with "project(s)"
-				lines[i] = strings.Replace(line, "item", "project", -1)
-				lines[i] = strings.Replace(lines[i], "Item", "Project", -1)
-				break
+	if len(lines) == 0 {
+		return view
+	}
+
+	// Build injected header lines (after title)
+	var injected []string
+
+	// Filter line
+	if m.filtering || m.customFilter != "" {
+		var filterText string
+		modeLabel := "Filter projects"
+		if m.filterMode == "fulltext" {
+			modeLabel = "Fulltext search"
+		}
+		if m.filtering {
+			filterText = fmt.Sprintf("%s: %s▓", modeLabel, m.customFilter)
+		} else {
+			filterText = fmt.Sprintf("%s: %s", modeLabel, m.customFilter)
+		}
+		injected = append(injected, colors.filterStyle.Padding(0, 1).Render(filterText))
+	}
+
+	// Column header
+	sortArrow := func(field string) string {
+		if m.sortField == field {
+			if m.sortAsc {
+				return "↑"
+			}
+			return "↓"
+		}
+		return " "
+	}
+	var header string
+	if m.filterMode == "fulltext" && m.customFilter != "" {
+		nameHeader := fmt.Sprintf("%-*s", m.maxNameLen, "Project")
+		header = fmt.Sprintf("  %s  %s",
+			colors.grayStyle.Render(nameHeader),
+			colors.grayStyle.Render("Note"))
+	} else {
+		nameHeader := fmt.Sprintf("%-*s", m.maxNameLen, "Name"+sortArrow("name"))
+		header = fmt.Sprintf("  %s  %s%s  %s%s  %s%s  %s",
+			colors.grayStyle.Render(nameHeader),
+			colors.grayStyle.Render("Notes"), colors.grayStyle.Render(sortArrow("notes")),
+			colors.grayStyle.Render("Todo"), colors.grayStyle.Render(sortArrow("todos")),
+			colors.grayStyle.Render("Mod"), colors.grayStyle.Render(sortArrow("modified")),
+			colors.grayStyle.Render("Last Note"))
+	}
+	injected = append(injected, header)
+
+	// Separator
+	sepWidth := *m.termWidth
+	if sepWidth <= 0 {
+		sepWidth = 80
+	}
+	injected = append(injected, colors.grayStyle.Render(strings.Repeat("─", sepWidth-2)))
+
+	// Inject after title line (bubbles/list puts a blank line after title)
+	insertAt := 1
+	if len(lines) > 1 && strings.TrimSpace(lines[1]) == "" {
+		insertAt = 2
+	}
+	result := make([]string, 0, len(lines)+len(injected))
+	result = append(result, lines[:insertAt]...)
+	result = append(result, injected...)
+	result = append(result, lines[insertAt:]...)
+	view = strings.Join(result, "\n")
+	return view
+}
+
+func (m *projectModel) applySortOrder() {
+	items := make([]list.Item, len(m.allItems))
+	copy(items, m.allItems)
+
+	sort.SliceStable(items, func(i, j int) bool {
+		a := items[i].(projectItem).project
+		b := items[j].(projectItem).project
+		var less bool
+		switch m.sortField {
+		case "notes":
+			less = a.NoteCount < b.NoteCount
+		case "todos":
+			less = a.TodoCount < b.TodoCount
+		case "modified":
+			less = a.LastNoteID < b.LastNoteID
+		default:
+			less = a.Name < b.Name
+		}
+		if !m.sortAsc {
+			return !less
+		}
+		return less
+	})
+
+	m.allItems = items
+	if m.customFilter != "" {
+		m.applyProjectFilter()
+	} else {
+		m.list.SetItems(items)
+	}
+}
+
+func (m *projectModel) applyViewFilter() {
+	if m.showAll {
+		m.allItems = m.fullItems
+	} else {
+		var filtered []list.Item
+		for _, item := range m.fullItems {
+			if prjItem, ok := item.(projectItem); ok {
+				if prjItem.project.NoteCount > 0 {
+					filtered = append(filtered, item)
+				}
 			}
 		}
-		view = strings.Join(lines, "\n")
+		m.allItems = filtered
 	}
-	
-	return view
+
+	count := len(m.allItems)
+	if m.showAll {
+		m.list.Title = fmt.Sprintf("Projects (%d) [all]", count)
+	} else {
+		m.list.Title = fmt.Sprintf("Projects (%d)", count)
+	}
+
+	if m.customFilter != "" {
+		m.applyProjectFilter()
+	} else {
+		m.list.SetItems(m.allItems)
+	}
 }
 
 func (m *projectModel) applyProjectFilter() {
@@ -283,14 +550,17 @@ func (m *projectModel) applyProjectFilter() {
 	var filteredItems []list.Item
 
 	if m.filterMode == "fulltext" {
-		// Search across all notes in all projects
+		// Search across all notes in all projects — one row per matching note
 		for _, item := range m.allItems {
 			if prjItem, ok := item.(projectItem); ok {
 				notesPath := filepath.Join(prjItem.project.Path, "notes")
 				if _, err := os.Stat(notesPath); err == nil {
-					// Check if this project has any matching notes
-					if hasMatchingNotes(notesPath, filterLower) {
-						filteredItems = append(filteredItems, item)
+					for _, match := range findMatchingNotes(notesPath, filterLower) {
+						filteredItems = append(filteredItems, matchedNoteItem{
+							projectName: prjItem.project.Name,
+							noteTitle:   match.title,
+							notePath:    match.path,
+						})
 					}
 				}
 			}
@@ -309,19 +579,25 @@ func (m *projectModel) applyProjectFilter() {
 	m.list.SetItems(filteredItems)
 }
 
-func hasMatchingNotes(notesPath, searchTerm string) bool {
+type matchedNote struct {
+	title string
+	path  string
+}
+
+func findMatchingNotes(notesPath, searchTerm string) []matchedNote {
 	zettels, err := zet.ListZettels(notesPath)
 	if err != nil {
-		return false
+		return nil
 	}
 
+	var matches []matchedNote
 	for _, z := range zettels {
 		results := zet.SearchInFile(z.Path, searchTerm)
 		if len(results) > 0 {
-			return true
+			matches = append(matches, matchedNote{title: z.Title, path: z.Path})
 		}
 	}
-	return false
+	return matches
 }
 
 type zettelItem struct {
@@ -980,6 +1256,47 @@ func openEditorCmd(editor, filePath, searchTerm string) tea.Cmd {
 	})
 }
 
+func openFileInEditor(editor, filePath, searchTerm string) {
+	if strings.HasPrefix(editor, "~/") {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			editor = filepath.Join(home, editor[2:])
+		}
+	}
+
+	editorParts := strings.Fields(editor)
+	editorCmd := editorParts[0]
+	editorArgs := editorParts[1:]
+
+	if searchTerm != "" {
+		editorName := filepath.Base(editorCmd)
+		switch editorName {
+		case "vim", "nvim", "vi":
+			editorArgs = append(editorArgs, fmt.Sprintf("+/%s", searchTerm))
+		case "emacs":
+			editorArgs = append(editorArgs, "--eval", fmt.Sprintf("(progn (goto-char (point-min)) (search-forward \"%s\" nil t))", searchTerm))
+		}
+	}
+
+	editorArgs = append(editorArgs, filePath)
+	c := exec.Command(editorCmd, editorArgs...)
+	c.Stdin = os.Stdin
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	_ = c.Run()
+
+	dir := filepath.Dir(filePath)
+	zetID := filepath.Base(dir)
+	zetDir := filepath.Dir(dir)
+	if zet.IsValidZettelID(zetID) {
+		zet.UpdateReadme(zetDir)
+		title, _ := zet.GetZettelTitle(zetDir, zetID)
+		if title != "" {
+			zet.GitCommit(zetDir, zetID, title)
+		}
+	}
+}
+
 func listProjects(prjDir string, cfg *config.Config) ([]Project, error) {
 	entries, err := os.ReadDir(prjDir)
 	if err != nil {
@@ -1006,10 +1323,15 @@ func listProjects(prjDir string, cfg *config.Config) ([]Project, error) {
 
 			// Count notes
 			noteCount := 0
+			var lastNoteID, lastNoteTitle string
 			if hasNotes {
 				notes, err := zet.ListZettels(notesPath)
 				if err == nil {
 					noteCount = len(notes)
+				}
+				if id, title, err := zet.GetLatestFromIndex(notesPath); err == nil {
+					lastNoteID = id
+					lastNoteTitle = title
 				}
 			}
 
@@ -1023,12 +1345,14 @@ func listProjects(prjDir string, cfg *config.Config) ([]Project, error) {
 			}
 
 			projects = append(projects, Project{
-				Name:      entry.Name(),
-				Path:      prjPath,
-				HasNotes:  hasNotes,
-				HasTodos:  hasTodos,
-				NoteCount: noteCount,
-				TodoCount: todoCount,
+				Name:          entry.Name(),
+				Path:          prjPath,
+				HasNotes:      hasNotes,
+				HasTodos:      hasTodos,
+				NoteCount:     noteCount,
+				TodoCount:     todoCount,
+				LastNoteTitle: lastNoteTitle,
+				LastNoteID:    lastNoteID,
 			})
 		}
 	}
@@ -1077,7 +1401,19 @@ func getNotesDir(prjDir, prjName string) string {
 func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 	var savedFilterMode string
 	var savedFilter string
-	
+	savedSortField := "name"
+	savedSortAsc := true
+
+	prjWatcher, err := setupProjectWatcher(prjDir)
+	if err != nil {
+		log.Printf("Warning: Could not create project watcher: %v", err)
+	}
+	defer func() {
+		if prjWatcher != nil {
+			prjWatcher.Close()
+		}
+	}()
+
 	for {
 		projects, err := listProjects(prjDir, cfg)
 		if err != nil {
@@ -1089,29 +1425,53 @@ func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 			return
 		}
 
-		// Convert projects to items
-		items := make([]list.Item, len(projects))
-		for i, prj := range projects {
-			items[i] = projectItem{project: prj}
+		// Compute max project name length for column alignment
+		maxNameLen := 0
+		for _, prj := range projects {
+			if len(prj.Name) > maxNameLen {
+				maxNameLen = len(prj.Name)
+			}
 		}
 
-		// Create delegate
-		delegate := projectDelegate{DefaultDelegate: list.NewDefaultDelegate()}
-		delegate.ShowDescription = true // Show description for stats
-		delegate.SetHeight(3) // Three lines per item (name, stats, blank)
-		delegate.SetSpacing(0) // No extra spacing since we're adding blank line manually
+		// Convert projects to items (full list)
+		allProjectItems := make([]list.Item, len(projects))
+		for i, prj := range projects {
+			allProjectItems[i] = projectItem{project: prj}
+		}
+
+		// Default view: only projects with notes
+		var items []list.Item
+		for _, item := range allProjectItems {
+			if prjItem, ok := item.(projectItem); ok {
+				if prjItem.project.NoteCount > 0 {
+					items = append(items, item)
+				}
+			}
+		}
+		if len(items) == 0 {
+			items = allProjectItems
+		}
+
+		// Create delegate with shared pointers for dynamic width
+		termWidth := 80
+		delegate := projectDelegate{
+			DefaultDelegate: list.NewDefaultDelegate(),
+			maxNameLen:      &maxNameLen,
+			termWidth:       &termWidth,
+		}
+		delegate.ShowDescription = false
+		delegate.SetHeight(1)
+		delegate.SetSpacing(0)
 
 		// Create list
 		l := list.New(items, delegate, 0, 0)
-		l.Title = "Projects"
+		l.Title = fmt.Sprintf("Projects (%d)", len(items))
 		l.SetShowTitle(true)
-		l.SetShowStatusBar(true) // Show status bar for pagination info
+		l.SetShowStatusBar(false)
 		l.SetFilteringEnabled(false)
 		l.KeyMap.Quit.SetKeys("q")
 		l.KeyMap.ForceQuit.SetKeys("ctrl+c")
-		
-		// Set initial height
-		l.SetHeight(15) // Will be updated on window resize
+		l.SetHeight(20)
 
 		// Match vim-style keybindings
 		l.KeyMap.NextPage.SetKeys("pgdown", "ctrl+f", "ctrl+d")
@@ -1135,12 +1495,8 @@ func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 					key.WithHelp("*", "search"),
 				),
 				key.NewBinding(
-					key.WithKeys("j"),
-					key.WithHelp("j", "down"),
-				),
-				key.NewBinding(
-					key.WithKeys("k"),
-					key.WithHelp("k", "up"),
+					key.WithKeys("s"),
+					key.WithHelp("s/S", "sort"),
 				),
 			}
 		}
@@ -1158,6 +1514,14 @@ func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 				key.NewBinding(
 					key.WithKeys("*"),
 					key.WithHelp("*", "fulltext search across all notes"),
+				),
+				key.NewBinding(
+					key.WithKeys("s"),
+					key.WithHelp("s", "cycle sort field"),
+				),
+				key.NewBinding(
+					key.WithKeys("S"),
+					key.WithHelp("S", "reverse sort"),
 				),
 				key.NewBinding(
 					key.WithKeys("j", "down"),
@@ -1184,14 +1548,6 @@ func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 					key.WithHelp("ctrl+u", "page up"),
 				),
 				key.NewBinding(
-					key.WithKeys("pgdown"),
-					key.WithHelp("pgdn", "page down"),
-				),
-				key.NewBinding(
-					key.WithKeys("pgup"),
-					key.WithHelp("pgup", "page up"),
-				),
-				key.NewBinding(
 					key.WithKeys("q"),
 					key.WithHelp("q", "quit"),
 				),
@@ -1207,10 +1563,17 @@ func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 			launchProject: "",
 			cfg:           cfg,
 			allItems:      items,
+			fullItems:     allProjectItems,
 			filterMode:    savedFilterMode,
 			customFilter:  savedFilter,
+			sortField:     savedSortField,
+			sortAsc:       savedSortAsc,
+			termWidth:     &termWidth,
+			maxNameLen:    maxNameLen,
+			watcher:       prjWatcher,
 		}
 		
+		m.applySortOrder()
 		// Restore filter if it was active
 		if savedFilter != "" {
 			m.applyProjectFilter()
@@ -1222,12 +1585,28 @@ func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 			log.Fatal(err)
 		}
 
-		if finalModel, ok := finalModel.(projectModel); ok && finalModel.launchProject != "" {
-			// Save filter state before launching project
-			savedFilterMode = finalModel.filterMode
-			savedFilter = finalModel.customFilter
-			
-			projectName := finalModel.launchProject
+		fm, ok := finalModel.(projectModel)
+		if !ok {
+			return
+		}
+
+		// Save view state before launching
+		savedFilterMode = fm.filterMode
+		savedFilter = fm.customFilter
+		savedSortField = fm.sortField
+		savedSortAsc = fm.sortAsc
+
+		if fm.launchFile != "" {
+			openFileInEditor(editor, fm.launchFile, fm.customFilter)
+			continue
+		}
+
+		if fm.launchProject == "" {
+			return
+		}
+
+		projectName := fm.launchProject
+		{
 
 			exists, err := checkProjectDir(prjDir, projectName)
 			if err != nil {
@@ -1270,8 +1649,6 @@ func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 			if !backToProjects {
 				return
 			}
-		} else {
-			return
 		}
 	}
 }
@@ -1659,6 +2036,39 @@ func printTitleSearchResults(results []Zettel) {
 		fmt.Printf("%s: %s\n",
 			colors.zettelIDStyle.Render(z.ID),
 			z.Title)
+	}
+}
+
+func setupProjectWatcher(prjDir string) (*fsnotify.Watcher, error) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return nil, err
+	}
+
+	updateProjectWatcher(watcher, prjDir)
+	return watcher, nil
+}
+
+func updateProjectWatcher(watcher *fsnotify.Watcher, prjDir string) {
+	if watcher == nil {
+		return
+	}
+
+	// Watch the projects dir itself and each project's notes dir (1 level of subdirs + notes)
+	watcher.Add(prjDir)
+	entries, err := os.ReadDir(prjDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
+			prjPath := filepath.Join(prjDir, entry.Name())
+			watcher.Add(prjPath)
+			notesPath := filepath.Join(prjPath, "notes")
+			if _, err := os.Stat(notesPath); err == nil {
+				watcher.Add(notesPath)
+			}
+		}
 	}
 }
 
