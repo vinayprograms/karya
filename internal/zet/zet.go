@@ -128,6 +128,34 @@ func ListZettelsFromIndex(zetDir string) ([]Zettel, error) {
 	return zettels, nil
 }
 
+func GetLatestFromIndex(zetDir string) (id string, title string, err error) {
+	readmePath := filepath.Join(zetDir, "README.md")
+	file, err := os.Open(readmePath)
+	if err != nil {
+		return "", "", err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "* [") {
+			continue
+		}
+		closeBracket := strings.Index(line, "]")
+		if closeBracket == -1 {
+			continue
+		}
+		id = line[3:closeBracket]
+		dashIdx := strings.Index(line, " - ")
+		if dashIdx != -1 {
+			title = line[dashIdx+3:]
+		}
+		return id, title, nil
+	}
+	return "", "", fmt.Errorf("no entries in index")
+}
+
 func CountZettels(zetDir string) (int, error) {
 	entries, err := os.ReadDir(zetDir)
 	if err != nil {
