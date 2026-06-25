@@ -99,3 +99,6 @@
 # assignee-bg       = "black"                 # Assignee badge background
 # cycle             = "bright-white"          # Circular dependency indicator text
 # cycle-bg          = "red"                   # Circular dependency indicator background
+# overdue           = "bright-red"            # Overdue items in agenda
+# deadline          = "magenta"               # Deadline today / within warning window
+# clock-active      = "bright-white"          # Currently clocked-in task (bold)

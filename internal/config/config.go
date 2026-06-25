@@ -77,6 +77,8 @@ type ColorScheme struct {
 	CycleBgColor       string `toml:"cycle-bg"`
 	OverdueColor       string `toml:"overdue"`
 	OverdueBgColor     string `toml:"overdue-bg"`
+	DeadlineColor      string `toml:"deadline"`
+	ClockActiveColor   string `toml:"clock-active"`
 	AgendaHeaderColor  string `toml:"agenda-header"`
 }
 
@@ -255,6 +257,8 @@ func Load() (*Config, error) {
 	cfg.Colors.CycleBgColor = resolveColorValue(cfg.Colors.CycleBgColor)
 	cfg.Colors.OverdueColor = resolveColorValue(cfg.Colors.OverdueColor)
 	cfg.Colors.OverdueBgColor = resolveColorValue(cfg.Colors.OverdueBgColor)
+	cfg.Colors.DeadlineColor = resolveColorValue(cfg.Colors.DeadlineColor)
+	cfg.Colors.ClockActiveColor = resolveColorValue(cfg.Colors.ClockActiveColor)
 	cfg.Colors.AgendaHeaderColor = resolveColorValue(cfg.Colors.AgendaHeaderColor)
 
 	return cfg, nil
@@ -471,10 +475,16 @@ func (c *Config) initializeColors() {
 			c.Colors.CycleBgColor = "1" // ANSI red - warning color for circular deps
 		}
 		if c.Colors.OverdueColor == "" {
-			c.Colors.OverdueColor = "1" // ANSI red
+			c.Colors.OverdueColor = "9" // ANSI bright red
 		}
 		if c.Colors.OverdueBgColor == "" {
 			c.Colors.OverdueBgColor = ""
+		}
+		if c.Colors.DeadlineColor == "" {
+			c.Colors.DeadlineColor = "5" // ANSI magenta
+		}
+		if c.Colors.ClockActiveColor == "" {
+			c.Colors.ClockActiveColor = "15" // ANSI bright white
 		}
 		if c.Colors.AgendaHeaderColor == "" {
 			c.Colors.AgendaHeaderColor = "4" // ANSI blue
