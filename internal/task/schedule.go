@@ -43,7 +43,7 @@ type Schedule struct {
 // Token grammar: DATE[TTIME][RECURRENCE][WARNING]
 // DATE: YYYY-MM-DD
 // TIME: THH:MM
-// RECURRENCE: +N[dwmy] | .+N[dwmy] | ++N[dwmy]
+// RECURRENCE: +N[dwmyb] | .+N[dwmyb] | ++N[dwmyb]
 // WARNING: !Nd
 func ParseSchedule(raw string) (*Schedule, error) {
 	if raw == "" {
@@ -64,7 +64,7 @@ func ParseSchedule(raw string) (*Schedule, error) {
 	// Extract recurrence suffix. Find the recurrence marker after the date portion.
 	// Date is at least 10 chars (YYYY-MM-DD), time adds 6 (THH:MM) = 16.
 	// Look for .+, ++, or + (in that order to avoid prefix conflicts).
-	recurrenceRe := regexp.MustCompile(`(\.\+|\+\+|\+)(\d+)([dwmy])$`)
+	recurrenceRe := regexp.MustCompile(`(\.\+|\+\+|\+)(\d+)([dwmyb])$`)
 	if m := recurrenceRe.FindStringSubmatch(remaining); len(m) > 0 {
 		matchStart := strings.LastIndex(remaining, m[0])
 		// Only treat as recurrence if it's after the date portion (pos >= 10)
@@ -174,8 +174,22 @@ func addInterval(t time.Time, interval int, unit byte) time.Time {
 		return addMonths(t, interval)
 	case 'y':
 		return t.AddDate(interval, 0, 0)
+	case 'b':
+		return addBusinessDays(t, interval)
 	}
 	return t
+}
+
+// addBusinessDays advances by N business days, skipping weekends.
+func addBusinessDays(t time.Time, days int) time.Time {
+	result := t
+	for days > 0 {
+		result = result.AddDate(0, 0, 1)
+		if result.Weekday() != time.Saturday && result.Weekday() != time.Sunday {
+			days--
+		}
+	}
+	return result
 }
 
 // addMonths adds N months, capping to last day of target month on overflow.
@@ -228,9 +242,15 @@ func (s *Schedule) NextOccurrence(completionDate time.Time) time.Time {
 // ExpandOccurrences generates all dates where this recurring schedule appears
 // within [rangeStart, rangeEnd]. For non-recurring schedules, returns the single date
 // if it falls within range. For .+ mode, only returns the stored date (cannot predict future).
+// Range comparisons use calendar-day granularity so timed tasks are included when
+// their day falls within the range, regardless of the time-of-day component.
 func (s *Schedule) ExpandOccurrences(rangeStart, rangeEnd time.Time) []time.Time {
+	startDay := truncateToDay(rangeStart)
+	endDay := truncateToDay(rangeEnd)
+
 	if s.Recurrence == nil {
-		if !s.Date.Before(rangeStart) && !s.Date.After(rangeEnd) {
+		day := truncateToDay(s.Date)
+		if !day.Before(startDay) && !day.After(endDay) {
 			return []time.Time{s.Date}
 		}
 		return nil
@@ -238,7 +258,8 @@ func (s *Schedule) ExpandOccurrences(rangeStart, rangeEnd time.Time) []time.Time
 
 	// .+ mode: can only show the current stored date (next depends on completion)
 	if s.Recurrence.Mode == RecurrenceFromDone {
-		if !s.Date.Before(rangeStart) && !s.Date.After(rangeEnd) {
+		day := truncateToDay(s.Date)
+		if !day.Before(startDay) && !day.After(endDay) {
 			return []time.Time{s.Date}
 		}
 		return nil
@@ -249,16 +270,16 @@ func (s *Schedule) ExpandOccurrences(rangeStart, rangeEnd time.Time) []time.Time
 	current := s.Date
 	r := s.Recurrence
 
-	// Advance past dates before rangeStart (but cap iterations)
-	for current.Before(rangeStart) {
+	// Advance past dates before rangeStart
+	for truncateToDay(current).Before(startDay) {
 		current = addInterval(current, r.Interval, r.Unit)
-		if current.After(rangeEnd) {
+		if truncateToDay(current).After(endDay) {
 			return nil
 		}
 	}
 
 	// Collect occurrences within range
-	for !current.After(rangeEnd) {
+	for !truncateToDay(current).After(endDay) {
 		occurrences = append(occurrences, current)
 		current = addInterval(current, r.Interval, r.Unit)
 		if len(occurrences) > 366 {
@@ -268,6 +289,7 @@ func (s *Schedule) ExpandOccurrences(rangeStart, rangeEnd time.Time) []time.Time
 
 	return occurrences
 }
+
 
 // CompleteRecurringTask handles advancing a recurring task's date on completion.
 // Returns advanced=true if the task was recurring and the date was advanced.
