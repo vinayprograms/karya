@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -743,8 +744,8 @@ func flattenItems(days []task.AgendaDay) []task.AgendaItem {
 	return items
 }
 
-// flattenDayItems reorders items for day view: untimed first, then timed sorted by start time.
-// This matches renderDayTimeGrid's output order so cursor indices align.
+// flattenDayItems reorders items for day view: untimed first, then timed sorted by hour.
+// This matches renderDayTimeGrid's output order so cursor indices align with rendered positions.
 func flattenDayItems(days []task.AgendaDay) []task.AgendaItem {
 	var all []task.AgendaItem
 	for _, day := range days {
@@ -764,6 +765,11 @@ func flattenDayItems(days []task.AgendaDay) []task.AgendaItem {
 	if len(timed) == 0 {
 		return all
 	}
+
+	// Sort timed items by hour to match renderDayTimeGrid's chronological rendering
+	sort.SliceStable(timed, func(i, j int) bool {
+		return timed[i].Date.Hour() < timed[j].Date.Hour()
+	})
 
 	var result []task.AgendaItem
 	result = append(result, untimed...)
@@ -1106,10 +1112,12 @@ func (m model) renderItem(item task.AgendaItem, selected bool) string {
 		schedStyle = colors.clockActive
 	} else if item.IsOverdue {
 		schedStyle = colors.deadline
+	} else if item.Warning {
+		schedStyle = colors.overdue
 	} else if item.IsDeadline {
 		itemDay := time.Date(item.Date.Year(), item.Date.Month(), item.Date.Day(), 0, 0, 0, 0, time.Local)
 		today := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 0, 0, 0, 0, time.Local)
-		if itemDay.Equal(today) || item.Warning {
+		if itemDay.Equal(today) {
 			schedStyle = colors.overdue
 		}
 	}
@@ -1135,10 +1143,12 @@ func (m model) renderItem(item task.AgendaItem, selected bool) string {
 		titleStyle = colors.completed
 	} else if item.IsOverdue {
 		titleStyle = colors.deadline
+	} else if item.Warning {
+		titleStyle = colors.overdue
 	} else if item.IsDeadline {
 		itemDay := time.Date(item.Date.Year(), item.Date.Month(), item.Date.Day(), 0, 0, 0, 0, time.Local)
 		today := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 0, 0, 0, 0, time.Local)
-		if itemDay.Equal(today) || item.Warning {
+		if itemDay.Equal(today) {
 			titleStyle = colors.overdue
 		}
 	}
@@ -1539,7 +1549,12 @@ func (m model) renderClockView() string {
 			if entry.Task.ID != "" {
 				displayTitle = fmt.Sprintf("[%s] %s", entry.Task.ID, entry.Task.Title)
 			}
-			formattedTitle := task.RenderMarkdownDescription(displayTitle, colors.taskText)
+			titleStyle := colors.taskText
+			if task.IsClockActive(entry.Task) {
+				displayTitle = "⏱ " + displayTitle
+				titleStyle = colors.clockActive
+			}
+			formattedTitle := task.RenderMarkdownDescription(displayTitle, titleStyle)
 			formattedTitle = task.TruncateString(formattedTitle, titleWidth)
 
 			var indicator string
@@ -1549,13 +1564,20 @@ func (m model) renderClockView() string {
 				indicator = " "
 			}
 
-			taskLine := fmt.Sprintf("%s%-*s %s %s %-*s %*s",
+			durationStr := task.FormatDuration(entry.Duration)
+			if task.IsClockActive(entry.Task) {
+				durationStr = colors.clockActive.Render(fmt.Sprintf("%*s", timeColWidth, durationStr))
+			} else {
+				durationStr = fmt.Sprintf("%*s", timeColWidth, durationStr)
+			}
+
+			taskLine := fmt.Sprintf("%s%-*s %s %s %-*s %s",
 				indicator,
 				projColWidth, "",
 				colors.dimText.Render("╰─"),
 				kwStyle.Render(fmt.Sprintf("%-*s", kwColWidth-1, entry.Task.Keyword)),
 				titleWidth, formattedTitle,
-				timeColWidth, task.FormatDuration(entry.Duration))
+				durationStr)
 			lines = append(lines, taskLine)
 			cursorIdx++
 		}
