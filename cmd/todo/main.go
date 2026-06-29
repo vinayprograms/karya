@@ -544,9 +544,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.statusMessage = msg.message
 			}
-			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
-				return clearStatusMsg{}
-			})
+			return m, tea.Batch(
+				tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }),
+				waitForFileChange(m.watcher),
+			)
+		case fileChangedMsg:
+			return m, waitForFileChange(m.watcher)
 		}
 		return m, nil
 	}
@@ -611,13 +614,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusMessage = msg.message
 				_ = dp // keep reference until msg handled
 			}
-			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
-				return clearStatusMsg{}
-			})
+			return m, tea.Batch(
+				tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }),
+				waitForFileChange(m.watcher),
+			)
 		case tea.WindowSizeMsg:
 			m.termWidth = msg.Width
 			m.termHeight = msg.Height
 			return m, nil
+		case fileChangedMsg:
+			return m, waitForFileChange(m.watcher)
 		}
 		return m, nil
 	}
@@ -662,9 +668,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.statusMessage = msg.message
 			}
-			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
-				return clearStatusMsg{}
-			})
+			return m, tea.Batch(
+				tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }),
+				waitForFileChange(m.watcher),
+			)
+		case fileChangedMsg:
+			return m, waitForFileChange(m.watcher)
 		}
 		return m, nil
 	}

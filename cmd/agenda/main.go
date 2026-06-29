@@ -287,6 +287,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.termWidth = msg.Width
 			m.termHeight = msg.Height
 			return m, nil
+		case fileChangedMsg:
+			return m, tea.Batch(
+				loadAgendaCmd(m.config, m.focusDate, m.mode),
+				waitForFileChange(m.watcher),
+			)
 		}
 		return m, nil
 	}
@@ -322,6 +327,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(
 				loadAgendaCmd(m.config, m.focusDate, m.mode),
 				tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }),
+			)
+		case fileChangedMsg:
+			return m, tea.Batch(
+				loadAgendaCmd(m.config, m.focusDate, m.mode),
+				waitForFileChange(m.watcher),
 			)
 		}
 		return m, nil
@@ -366,7 +376,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Batch(
 				loadAgendaCmd(m.config, m.focusDate, m.mode),
+				waitForFileChange(m.watcher),
 				tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }),
+			)
+		case fileChangedMsg:
+			return m, tea.Batch(
+				loadAgendaCmd(m.config, m.focusDate, m.mode),
+				waitForFileChange(m.watcher),
 			)
 		}
 		return m, nil
