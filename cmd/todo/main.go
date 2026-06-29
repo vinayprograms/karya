@@ -404,16 +404,6 @@ func (i noResultsItem) Title() string { return "No results found" }
 
 func (i noResultsItem) Description() string { return "" }
 
-// keywordItem represents a keyword in the status selector popup
-type keywordItem struct {
-	keyword  string
-	category string
-}
-
-func (i keywordItem) FilterValue() string { return strings.ToLower(i.keyword) }
-func (i keywordItem) Title() string       { return i.keyword }
-func (i keywordItem) Description() string { return i.category }
-
 type model struct {
 	list            list.Model
 	tasks           []*task.Task
@@ -434,7 +424,7 @@ type model struct {
 
 	// Status selector state
 	showingStatusSelector     bool
-	statusSelectorList        list.Model
+	statusPicker              *task.StatusPicker
 	selectedTask              *task.Task
 	statusMessage             string
 	statusMessageTimer        int
@@ -632,7 +622,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Handle status selector mode - forward all messages to it
+	// Handle status selector mode
 	if m.showingStatusSelector {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
@@ -643,67 +633,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, tea.Quit
 			}
-
-			// Check if the list is in filtering mode
-			isFiltering := m.statusSelectorList.FilterState() == list.Filtering
-			filterApplied := m.statusSelectorList.FilterState() == list.FilterApplied
-
-			switch msg.String() {
-			case "esc":
-				if isFiltering || filterApplied {
-					// Let the list handle esc to cancel/clear filtering
-					var cmd tea.Cmd
-					m.statusSelectorList, cmd = m.statusSelectorList.Update(msg)
-					return m, cmd
-				}
-				// Close the selector
+			m.statusPicker.Update(msg.String())
+			if m.statusPicker.Cancelled {
 				m.showingStatusSelector = false
 				m.selectedTask = nil
 				return m, nil
-			case "q":
-				if isFiltering {
-					// Let the list handle q as a filter character
-					var cmd tea.Cmd
-					m.statusSelectorList, cmd = m.statusSelectorList.Update(msg)
-					return m, cmd
-				}
-				// Close the selector
-				m.showingStatusSelector = false
-				m.selectedTask = nil
-				return m, nil
-			case "enter":
-				if isFiltering {
-					// Let the list handle enter to confirm filter
-					var cmd tea.Cmd
-					m.statusSelectorList, cmd = m.statusSelectorList.Update(msg)
-					return m, cmd
-				}
-				// Apply the selected status (works for both unfiltered and filter-applied states)
-				if i, ok := m.statusSelectorList.SelectedItem().(keywordItem); ok {
-					if isCompletedKeyword(m.config, i.keyword) && hasActiveChildren(m.selectedTask, m.config) {
-						m.showingStatusSelector = false
-						m.showingPendingChildWarning = true
-						m.pendingWarningKeyword = i.keyword
-						return m, nil
-					}
-					return m, updateTaskStatusCmd(m.config, m.selectedTask, i.keyword)
-				}
-				m.showingStatusSelector = false
-				return m, nil
-			default:
-				// Let the list handle navigation and filtering
-				var cmd tea.Cmd
-				m.statusSelectorList, cmd = m.statusSelectorList.Update(msg)
-				return m, cmd
 			}
+			if m.statusPicker.Confirmed {
+				kw := m.statusPicker.Selected
+				if isCompletedKeyword(m.config, kw) && hasActiveChildren(m.selectedTask, m.config) {
+					m.showingStatusSelector = false
+					m.showingPendingChildWarning = true
+					m.pendingWarningKeyword = kw
+					return m, nil
+				}
+				return m, updateTaskStatusCmd(m.config, m.selectedTask, kw)
+			}
+			return m, nil
 		case tea.WindowSizeMsg:
 			m.termWidth = msg.Width
 			m.termHeight = msg.Height
-			m.statusSelectorList.SetWidth(msg.Width / 2)
-			m.statusSelectorList.SetHeight(msg.Height / 2)
 			return m, nil
 		case statusUpdateMsg:
-			// Handle status update result - close selector and show message
 			m.showingStatusSelector = false
 			m.selectedTask = nil
 			if msg.err != nil {
@@ -711,16 +662,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.statusMessage = msg.message
 			}
-			// Clear status message after 3 seconds
 			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 				return clearStatusMsg{}
 			})
-		default:
-			// Forward other messages to the list
-			var cmd tea.Cmd
-			m.statusSelectorList, cmd = m.statusSelectorList.Update(msg)
-			return m, cmd
 		}
+		return m, nil
 	}
 
 	switch msg := msg.(type) {
@@ -841,7 +787,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if i, ok := m.list.SelectedItem().(taskItem); ok {
 						m.selectedTask = i.task
 						m.showingStatusSelector = true
-						m.statusSelectorList = createStatusSelectorList(m.config, i.task.Keyword)
+						m.statusPicker = task.NewStatusPicker(i.task, m.config)
 						return m, nil
 					}
 				}
@@ -1286,34 +1232,7 @@ func (m model) View() string {
 
 // renderStatusSelector renders the status selector popup
 func (m model) renderStatusSelector() string {
-	// Style for the popup box
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("62")).
-		Padding(1, 2)
-
-	// Build the content
-	var content strings.Builder
-
-	if m.selectedTask != nil {
-		taskInfo := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241")).
-			Render(fmt.Sprintf("Task: %s", m.selectedTask.Title))
-		content.WriteString(taskInfo)
-		content.WriteString("\n\n")
-	}
-
-	content.WriteString(m.statusSelectorList.View())
-
-	// Add help text
-	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
-		MarginTop(1)
-	help := helpStyle.Render("↑/↓: navigate • enter: select • esc: cancel • /: filter")
-	content.WriteString("\n")
-	content.WriteString(help)
-
-	return boxStyle.Render(content.String())
+	return m.statusPicker.View(m.termWidth)
 }
 
 // renderPendingChildWarning renders the warning overlay for completing a parent with active children
@@ -1495,58 +1414,13 @@ func (m model) renderDetailLine(line string) string {
 
 type editorFinishedMsg struct{ err error }
 
-// createStatusSelectorList creates a list.Model for the status selector popup
-func createStatusSelectorList(cfg *configpkg.Config, currentKeyword string) list.Model {
-	keywords := task.GetAllKeywordsFlat(cfg)
-	items := make([]list.Item, 0, len(keywords))
-
-	// Find which item to select (the one matching current keyword)
-	selectedIdx := 0
-	idx := 0
-	for _, entry := range keywords {
-		items = append(items, keywordItem{
-			keyword:  entry.Keyword,
-			category: entry.Category,
-		})
-		if entry.Keyword == currentKeyword {
-			selectedIdx = idx
-		}
-		idx++
-	}
-
-	delegate := list.NewDefaultDelegate()
-	delegate.ShowDescription = true
-	delegate.SetHeight(2)
-	delegate.SetSpacing(0)
-
-	l := list.New(items, delegate, 40, 20)
-	l.Title = "Select Status"
-	l.SetShowStatusBar(false)
-	l.SetFilteringEnabled(true)
-	l.Select(selectedIdx)
-
-	return l
-}
 
 func isCompletedKeyword(cfg *configpkg.Config, keyword string) bool {
-	for _, k := range cfg.Todo.Completed {
-		if k == keyword {
-			return true
-		}
-	}
-	return false
+	return task.IsCompletedKeyword(cfg, keyword)
 }
 
 func hasActiveChildren(t *task.Task, cfg *configpkg.Config) bool {
-	if t == nil {
-		return false
-	}
-	for _, child := range t.Children {
-		if child.IsActive(cfg) || child.IsInProgress(cfg) {
-			return true
-		}
-	}
-	return false
+	return task.HasActiveChildren(t, cfg)
 }
 
 type datePickerResultMsg struct {
@@ -2486,6 +2360,18 @@ func showInteractiveTUI(config *configpkg.Config, project string) {
 				key.WithHelp("u", "unstructured"),
 			),
 			key.NewBinding(
+				key.WithKeys("v"),
+				key.WithHelp("v", "detail"),
+			),
+			key.NewBinding(
+				key.WithKeys("S"),
+				key.WithHelp("S", "schedule"),
+			),
+			key.NewBinding(
+				key.WithKeys("D"),
+				key.WithHelp("D", "due date"),
+			),
+			key.NewBinding(
 				key.WithKeys("i"),
 				key.WithHelp("i", "clock in"),
 			),
@@ -2507,8 +2393,32 @@ func showInteractiveTUI(config *configpkg.Config, project string) {
 				key.WithHelp("t", "change task status"),
 			),
 			key.NewBinding(
+				key.WithKeys("v"),
+				key.WithHelp("v", "show task detail view"),
+			),
+			key.NewBinding(
+				key.WithKeys("S"),
+				key.WithHelp("S", "set scheduled date"),
+			),
+			key.NewBinding(
+				key.WithKeys("D"),
+				key.WithHelp("D", "set due date"),
+			),
+			key.NewBinding(
+				key.WithKeys("i"),
+				key.WithHelp("i", "clock in"),
+			),
+			key.NewBinding(
+				key.WithKeys("o"),
+				key.WithHelp("o", "clock out"),
+			),
+			key.NewBinding(
 				key.WithKeys("/"),
 				key.WithHelp("/", "start filtering"),
+			),
+			key.NewBinding(
+				key.WithKeys("*"),
+				key.WithHelp("*", "fulltext search"),
 			),
 			key.NewBinding(
 				key.WithKeys("esc"),
