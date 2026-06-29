@@ -18,8 +18,9 @@ type ClockEntry struct {
 }
 
 type ClockTableEntry struct {
-	Task     *Task
-	Duration time.Duration
+	Task         *Task
+	Duration     time.Duration
+	WasCompleted bool
 }
 
 type ClockTableProject struct {
@@ -33,8 +34,13 @@ type ClockTable struct {
 	Projects   []ClockTableProject
 }
 
+type CompletionEntry struct {
+	Timestamp time.Time
+}
+
 var clockLineRe = regexp.MustCompile(`^\s*(?:[-*+]\s*)?CLOCK:\s*(.+)$`)
 var clockTimestampRe = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})--(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})?$`)
+var completedLineRe = regexp.MustCompile(`^\s*(?:[-*+]\s*)?COMPLETED:\s*(.+)$`)
 
 // ParseClockEntries reads a task's sub-lines and extracts CLOCK entries.
 func ParseClockEntries(t *Task) ([]ClockEntry, error) {
@@ -163,10 +169,30 @@ func QueryClockTable(c *config.Config, start, end time.Time) (*ClockTable, error
 			continue
 		}
 
-		projectMap[t.Project] = append(projectMap[t.Project], ClockTableEntry{
+		entry := ClockTableEntry{
 			Task:     t,
 			Duration: total,
-		})
+		}
+
+		// Check if this recurring task was completed during the view range
+		dateField := t.ScheduledAt
+		if dateField == "" {
+			dateField = t.DueAt
+		}
+		if dateField != "" {
+			if sched, err := ParseSchedule(dateField); err == nil && sched.Recurrence != nil {
+				if completions, err := ParseCompletionEntries(t); err == nil {
+					for _, comp := range completions {
+						if !comp.Timestamp.Before(start) && !comp.Timestamp.After(rangeEnd) {
+							entry.WasCompleted = true
+							break
+						}
+					}
+				}
+			}
+		}
+
+		projectMap[t.Project] = append(projectMap[t.Project], entry)
 	}
 
 	var table ClockTable
@@ -276,6 +302,119 @@ func ClockOut(t *Task) error {
 	}
 
 	return os.WriteFile(t.FilePath, []byte(strings.Join(lines, "\n")), 0644)
+}
+
+// ParseCompletionEntries reads a task's sub-lines and extracts COMPLETED entries.
+func ParseCompletionEntries(t *Task) ([]CompletionEntry, error) {
+	raw, err := ReadRawBlock(t)
+	if err != nil {
+		return nil, err
+	}
+	if raw == "" {
+		return nil, nil
+	}
+
+	lines := strings.Split(raw, "\n")
+	var entries []CompletionEntry
+
+	for _, line := range lines[1:] {
+		m := completedLineRe.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		ts := strings.TrimSpace(m[1])
+		t, err := time.ParseInLocation("2006-01-02T15:04", ts, time.Local)
+		if err != nil {
+			continue
+		}
+		entries = append(entries, CompletionEntry{Timestamp: t})
+	}
+
+	return entries, nil
+}
+
+// recordOrUpdateCompletion records a completion for the given scheduled day.
+// If a COMPLETED entry already exists for that day, its timestamp is updated.
+// Otherwise a new entry is appended.
+func recordOrUpdateCompletion(t *Task, schedDay time.Time) error {
+	if t.FilePath == "" || t.LineNum == 0 {
+		return fmt.Errorf("task has no file location")
+	}
+
+	content, err := os.ReadFile(t.FilePath)
+	if err != nil {
+		return err
+	}
+
+	lines := strings.Split(string(content), "\n")
+	taskIdx := t.LineNum - 1
+	if taskIdx >= len(lines) {
+		return fmt.Errorf("line number out of range")
+	}
+
+	now := time.Now().Format("2006-01-02T15:04")
+	dayStr := schedDay.Format("2006-01-02")
+
+	// Search for an existing COMPLETED entry on the same day
+	for i := taskIdx + 1; i < len(lines); i++ {
+		line := lines[i]
+		if line == "" {
+			continue
+		}
+		_, level := StripLinePrefix(line)
+		if level <= t.IndentLevel {
+			break
+		}
+		m := completedLineRe.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		ts := strings.TrimSpace(m[1])
+		if strings.HasPrefix(ts, dayStr) {
+			// Update existing entry's timestamp
+			indent := strings.Repeat(" ", t.IndentLevel+2)
+			lines[i] = fmt.Sprintf("%s* COMPLETED: %s", indent, now)
+			return os.WriteFile(t.FilePath, []byte(strings.Join(lines, "\n")), 0644)
+		}
+	}
+
+	// No existing entry for this day — append new one
+	indent := strings.Repeat(" ", t.IndentLevel+2)
+	completedLine := fmt.Sprintf("%s* COMPLETED: %s", indent, now)
+
+	newLines := make([]string, 0, len(lines)+1)
+	newLines = append(newLines, lines[:t.LineNum]...)
+	newLines = append(newLines, completedLine)
+	newLines = append(newLines, lines[t.LineNum:]...)
+
+	return os.WriteFile(t.FilePath, []byte(strings.Join(newLines, "\n")), 0644)
+}
+
+// RecordCompletion appends a COMPLETED entry after the task line.
+func RecordCompletion(t *Task) error {
+	if t.FilePath == "" || t.LineNum == 0 {
+		return fmt.Errorf("task has no file location")
+	}
+
+	content, err := os.ReadFile(t.FilePath)
+	if err != nil {
+		return err
+	}
+
+	lines := strings.Split(string(content), "\n")
+	if t.LineNum-1 >= len(lines) {
+		return fmt.Errorf("line number out of range")
+	}
+
+	indent := strings.Repeat(" ", t.IndentLevel+2)
+	completedLine := fmt.Sprintf("%s* COMPLETED: %s", indent, time.Now().Format("2006-01-02T15:04"))
+
+	newLines := make([]string, 0, len(lines)+1)
+	newLines = append(newLines, lines[:t.LineNum]...)
+	newLines = append(newLines, completedLine)
+	newLines = append(newLines, lines[t.LineNum:]...)
+
+	return os.WriteFile(t.FilePath, []byte(strings.Join(newLines, "\n")), 0644)
 }
 
 // FormatDuration formats a duration as H:MM.

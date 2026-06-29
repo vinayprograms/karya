@@ -380,3 +380,126 @@ func TestClockInIndented(t *testing.T) {
 		t.Errorf("expected 6-space indent with bullet, got %q", clockLine)
 	}
 }
+
+func TestParseCompletionEntries(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "test.md")
+	content := `TODO: Weekly meeting @s:2026-07-13+1w
+  * CLOCK: 2026-07-06T09:00--2026-07-06T10:15
+  * COMPLETED: 2026-07-06T10:15
+  * CLOCK: 2026-06-29T09:00--2026-06-29T10:00
+  * COMPLETED: 2026-06-29T10:00
+`
+	os.WriteFile(f, []byte(content), 0644)
+
+	task := &Task{
+		Keyword:     "TODO",
+		Title:       "Weekly meeting",
+		FilePath:    f,
+		LineNum:     1,
+		IndentLevel: 0,
+	}
+
+	entries, err := ParseCompletionEntries(task)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+
+	if entries[0].Timestamp.Day() != 6 || entries[0].Timestamp.Month() != 7 {
+		t.Errorf("first entry: got %v", entries[0].Timestamp)
+	}
+	if entries[1].Timestamp.Day() != 29 || entries[1].Timestamp.Month() != 6 {
+		t.Errorf("second entry: got %v", entries[1].Timestamp)
+	}
+}
+
+func TestParseCompletionEntriesNone(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "test.md")
+	content := "TODO: No completions\n  * CLOCK: 2026-06-29T09:00--2026-06-29T10:00\n"
+	os.WriteFile(f, []byte(content), 0644)
+
+	task := &Task{
+		Keyword:  "TODO",
+		Title:    "No completions",
+		FilePath: f,
+		LineNum:  1,
+	}
+
+	entries, err := ParseCompletionEntries(task)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected 0 entries, got %d", len(entries))
+	}
+}
+
+func TestRecordCompletion(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "test.md")
+	content := "TODO: Weekly meeting @s:2026-07-06+1w\n  Some notes\n"
+	os.WriteFile(f, []byte(content), 0644)
+
+	task := &Task{
+		Keyword:     "TODO",
+		Title:       "Weekly meeting",
+		FilePath:    f,
+		LineNum:     1,
+		IndentLevel: 0,
+	}
+
+	err := RecordCompletion(task)
+	if err != nil {
+		t.Fatalf("record completion failed: %v", err)
+	}
+
+	result, _ := os.ReadFile(f)
+	lines := strings.Split(string(result), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("expected at least 3 lines, got %d", len(lines))
+	}
+
+	completedLine := strings.TrimSpace(lines[1])
+	if !strings.HasPrefix(completedLine, "* COMPLETED:") {
+		t.Errorf("expected * COMPLETED line, got %q", completedLine)
+	}
+
+	now := time.Now().Format("2006-01-02T15:04")
+	if !strings.Contains(completedLine, now) {
+		t.Errorf("expected current timestamp %s in line %q", now, completedLine)
+	}
+}
+
+func TestRecordCompletionIndented(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "test.md")
+	content := "- TODO: Parent\n  - TODO: Child @s:2026-07-06+1d\n    Notes\n"
+	os.WriteFile(f, []byte(content), 0644)
+
+	task := &Task{
+		Keyword:     "TODO",
+		Title:       "Child",
+		FilePath:    f,
+		LineNum:     2,
+		IndentLevel: 4,
+	}
+
+	err := RecordCompletion(task)
+	if err != nil {
+		t.Fatalf("record completion failed: %v", err)
+	}
+
+	result, _ := os.ReadFile(f)
+	lines := strings.Split(string(result), "\n")
+	if len(lines) < 4 {
+		t.Fatalf("expected at least 4 lines, got %d", len(lines))
+	}
+	// Should be indented 6 spaces (4 + 2)
+	if !strings.HasPrefix(lines[2], "      * COMPLETED:") {
+		t.Errorf("expected 6-space indent, got %q", lines[2])
+	}
+}

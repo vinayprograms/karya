@@ -3,6 +3,7 @@ package task
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -300,6 +301,8 @@ func TestCompleteRecurringTask(t *testing.T) {
 		Title:       "Weekly meeting",
 		ScheduledAt: "2025-03-15+1w",
 		FilePath:    fp,
+		LineNum:     1,
+		IndentLevel: 0,
 	}
 
 	cfg := createTestConfig()
@@ -313,13 +316,63 @@ func TestCompleteRecurringTask(t *testing.T) {
 
 	// Verify file was updated
 	data, _ := os.ReadFile(fp)
-	line := string(data)
-	if !contains(line, "2025-03-22+1w") {
-		t.Errorf("expected date advanced to 2025-03-22, got: %s", line)
+	fileContent := string(data)
+	if !contains(fileContent, "2025-03-22+1w") {
+		t.Errorf("expected date advanced to 2025-03-22, got: %s", fileContent)
 	}
 	// Keyword should NOT have changed
-	if !contains(line, "TODO:") {
-		t.Errorf("keyword should remain TODO, got: %s", line)
+	if !contains(fileContent, "TODO:") {
+		t.Errorf("keyword should remain TODO, got: %s", fileContent)
+	}
+	// Should have a COMPLETED entry
+	if !contains(fileContent, "* COMPLETED:") {
+		t.Errorf("expected COMPLETED entry, got: %s", fileContent)
+	}
+}
+
+func TestCompleteRecurringTask_AutoClockOut(t *testing.T) {
+	dir := t.TempDir()
+	fp := filepath.Join(dir, "test.md")
+	content := "TODO: Daily standup @s:2025-06-20+1d\n  * CLOCK: 2025-06-20T09:00--\n"
+	os.WriteFile(fp, []byte(content), 0644)
+
+	task := &Task{
+		Keyword:     "TODO",
+		Title:       "Daily standup",
+		ScheduledAt: "2025-06-20+1d",
+		FilePath:    fp,
+		LineNum:     1,
+		IndentLevel: 0,
+	}
+
+	cfg := createTestConfig()
+	advanced, err := CompleteRecurringTask(task, cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !advanced {
+		t.Fatal("expected advanced=true")
+	}
+
+	data, _ := os.ReadFile(fp)
+	fileContent := string(data)
+
+	// Clock should be closed (no trailing --)
+	lines := strings.Split(fileContent, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if contains(trimmed, "CLOCK:") && strings.HasSuffix(trimmed, "--") {
+			t.Errorf("expected clock to be auto-closed, found open: %s", trimmed)
+		}
+	}
+
+	// Should have COMPLETED entry
+	if !contains(fileContent, "* COMPLETED:") {
+		t.Errorf("expected COMPLETED entry, got: %s", fileContent)
+	}
+	// Date should be advanced
+	if !contains(fileContent, "2025-06-21+1d") {
+		t.Errorf("expected date advanced to 2025-06-21, got: %s", fileContent)
 	}
 }
 
