@@ -54,7 +54,7 @@ func QueryAgenda(c *config.Config, start, end time.Time, includeOverdue bool) ([
 		}
 	}
 
-	// Mark items with active clocks (cache per task to avoid repeated I/O)
+	// Mark items with active clocks only on today's occurrence
 	clockCache := make(map[*Task]bool)
 	for date, items := range dayMap {
 		for i := range items {
@@ -62,7 +62,7 @@ func QueryAgenda(c *config.Config, start, end time.Time, includeOverdue bool) ([
 			if _, ok := clockCache[t]; !ok {
 				clockCache[t] = IsClockActive(t)
 			}
-			items[i].ClockActive = clockCache[t]
+			items[i].ClockActive = clockCache[t] && date.Equal(today)
 		}
 		dayMap[date] = items
 	}
@@ -112,7 +112,7 @@ func addAgendaEntries(c *config.Config, t *Task, dateToken string, isDeadline bo
 				IsDeadline: isDeadline,
 				Schedule:   sched,
 			}
-			if isDeadline && warningDays > 0 {
+			if warningDays > 0 {
 				warningStart := day.AddDate(0, 0, -warningDays)
 				item.Warning = !today.Before(warningStart) && today.Before(day)
 			}
@@ -127,18 +127,11 @@ func addAgendaEntries(c *config.Config, t *Task, dateToken string, isDeadline bo
 		if includeOverdue {
 			schedDay := truncateToDay(sched.Date)
 			if schedDay.Before(today) && schedDay.Before(start) {
-				current := sched.Date
-				var lastMissed time.Time
-				for !current.After(today) {
-					if truncateToDay(current).Before(today) {
-						lastMissed = current
-					}
-					current = addInterval(current, sched.Recurrence.Interval, sched.Recurrence.Unit)
-				}
-				if !lastMissed.IsZero() && truncateToDay(lastMissed).Before(start) {
+				if sched.Recurrence.Mode == RecurrenceFromDone {
+					// .+ mode: only the stored date matters (no predictable series)
 					item := AgendaItem{
 						Task:       t,
-						Date:       lastMissed,
+						Date:       sched.Date,
 						HasTime:    sched.HasTime,
 						HasEnd:     sched.HasEnd,
 						EndTime:    sched.EndTime,
@@ -146,7 +139,33 @@ func addAgendaEntries(c *config.Config, t *Task, dateToken string, isDeadline bo
 						IsDeadline: isDeadline,
 						Schedule:   sched,
 					}
+					if warningDays > 0 {
+						item.Warning = true
+					}
 					dayMap[today] = append(dayMap[today], item)
+				} else {
+					// + and ++ modes: walk forward to find most recent missed occurrence
+					current := sched.Date
+					var lastMissed time.Time
+					for !truncateToDay(current).After(today) {
+						if truncateToDay(current).Before(today) {
+							lastMissed = current
+						}
+						current = addInterval(current, sched.Recurrence.Interval, sched.Recurrence.Unit)
+					}
+					if !lastMissed.IsZero() && truncateToDay(lastMissed).Before(start) {
+						item := AgendaItem{
+							Task:       t,
+							Date:       lastMissed,
+							HasTime:    sched.HasTime,
+							HasEnd:     sched.HasEnd,
+							EndTime:    sched.EndTime,
+							IsOverdue:  true,
+							IsDeadline: isDeadline,
+							Schedule:   sched,
+						}
+						dayMap[today] = append(dayMap[today], item)
+					}
 				}
 			}
 		}
@@ -169,7 +188,7 @@ func addAgendaEntries(c *config.Config, t *Task, dateToken string, isDeadline bo
 				IsDeadline: isDeadline,
 				Schedule:   sched,
 			}
-			if isDeadline && warningDays > 0 {
+			if warningDays > 0 {
 				warningStart := schedDay.AddDate(0, 0, -warningDays)
 				item.Warning = !today.Before(warningStart) && today.Before(schedDay)
 			}
@@ -189,7 +208,7 @@ func addAgendaEntries(c *config.Config, t *Task, dateToken string, isDeadline bo
 				IsDeadline: isDeadline,
 				Schedule:   sched,
 			}
-			if isDeadline && warningDays > 0 {
+			if warningDays > 0 {
 				item.Warning = true
 			}
 			dayMap[today] = append(dayMap[today], item)
