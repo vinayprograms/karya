@@ -916,6 +916,29 @@ func GetAllKeywordsFlat(c *config.Config) []KeywordEntry {
 	return entries
 }
 
+// IsCompletedKeyword checks whether the given keyword is in the configured Completed list.
+func IsCompletedKeyword(c *config.Config, keyword string) bool {
+	for _, k := range c.Todo.Completed {
+		if k == keyword {
+			return true
+		}
+	}
+	return false
+}
+
+// HasActiveChildren returns true if any direct child of t is active or in-progress.
+func HasActiveChildren(t *Task, c *config.Config) bool {
+	if t == nil {
+		return false
+	}
+	for _, child := range t.Children {
+		if child.IsActive(c) || child.IsInProgress(c) {
+			return true
+		}
+	}
+	return false
+}
+
 // DetectCycles finds all tasks that participate in circular dependencies.
 // It builds a directed graph from task references and uses DFS to detect cycles.
 // Tasks participating in cycles will have their InCycle field set to true.
