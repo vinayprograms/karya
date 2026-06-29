@@ -19,6 +19,8 @@ type AgendaItem struct {
 	Warning     bool
 	ClockActive bool
 	Schedule    *Schedule
+	IsCompleted bool
+	CompletedAt time.Time
 }
 
 // AgendaDay groups agenda items appearing on a single date.
@@ -51,6 +53,54 @@ func QueryAgenda(c *config.Config, start, end time.Time, includeOverdue bool) ([
 		// Process deadline date
 		if t.DueAt != "" {
 			addAgendaEntries(c, t, t.DueAt, true, startDay, endDay, today, includeOverdue, dayMap)
+		}
+	}
+
+	// Surface historical completions for recurring tasks
+	coveredDays := make(map[*Task]map[time.Time]bool)
+	for _, items := range dayMap {
+		for _, item := range items {
+			if item.Schedule != nil && item.Schedule.Recurrence != nil {
+				if coveredDays[item.Task] == nil {
+					coveredDays[item.Task] = make(map[time.Time]bool)
+				}
+				coveredDays[item.Task][truncateToDay(item.Date)] = true
+			}
+		}
+	}
+	for _, t := range tasks {
+		if t.ScheduledAt == "" && t.DueAt == "" {
+			continue
+		}
+		dateField := t.ScheduledAt
+		if dateField == "" {
+			dateField = t.DueAt
+		}
+		sched, err := ParseSchedule(dateField)
+		if err != nil || sched.Recurrence == nil {
+			continue
+		}
+		completions, err := ParseCompletionEntries(t)
+		if err != nil || len(completions) == 0 {
+			continue
+		}
+		for _, comp := range completions {
+			compDay := truncateToDay(comp.Timestamp)
+			if compDay.Before(startDay) || compDay.After(endDay) {
+				continue
+			}
+			if coveredDays[t] != nil && coveredDays[t][compDay] {
+				continue
+			}
+			item := AgendaItem{
+				Task:        t,
+				Date:        comp.Timestamp,
+				HasTime:     true,
+				IsCompleted: true,
+				CompletedAt: comp.Timestamp,
+				Schedule:    sched,
+			}
+			dayMap[compDay] = append(dayMap[compDay], item)
 		}
 	}
 
@@ -216,9 +266,17 @@ func addAgendaEntries(c *config.Config, t *Task, dateToken string, isDeadline bo
 	}
 }
 
-// sortAgendaItems sorts items within a day: overdue first, then timed (by time), then untimed (by priority).
+// sortAgendaItems sorts items within a day: overdue first, then timed (by time), then untimed (by priority), completed last.
 func sortAgendaItems(items []AgendaItem, c *config.Config) {
 	sort.SliceStable(items, func(i, j int) bool {
+		// Completed items last
+		if items[i].IsCompleted != items[j].IsCompleted {
+			return !items[i].IsCompleted
+		}
+		// Among completed, sort by completion time
+		if items[i].IsCompleted && items[j].IsCompleted {
+			return items[i].CompletedAt.Before(items[j].CompletedAt)
+		}
 		// Overdue items first
 		if items[i].IsOverdue != items[j].IsOverdue {
 			return items[i].IsOverdue
