@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/vinayprograms/karya/internal/config"
+	kgit "github.com/vinayprograms/karya/internal/git"
 	"github.com/vinayprograms/karya/internal/task"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -122,6 +123,16 @@ type model struct {
 	activeClockedTasks []*task.Task
 	showClockResolve   bool
 	clockResolveCursor int
+
+	// Status picker state
+	showingStatusPicker        bool
+	statusPicker               *task.StatusPicker
+	statusPickerTask           *task.Task
+	showingPendingChildWarning bool
+	pendingWarningKeyword      string
+
+	// Help overlay
+	showingHelp bool
 }
 
 type fileChangedMsg struct{}
@@ -254,7 +265,113 @@ type datePickerResultMsg struct {
 
 type clearStatusMsg struct{}
 
+type statusUpdateMsg struct {
+	message string
+	err     error
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Help overlay
+	if m.showingHelp {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "?", "esc", "q":
+				m.showingHelp = false
+				return m, nil
+			case "ctrl+c":
+				m.quitting = true
+				return m, tea.Quit
+			}
+		case tea.WindowSizeMsg:
+			m.termWidth = msg.Width
+			m.termHeight = msg.Height
+			return m, nil
+		}
+		return m, nil
+	}
+
+	// Pending-child warning confirmation
+	if m.showingPendingChildWarning {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "ctrl+c":
+				m.quitting = true
+				return m, tea.Quit
+			case "y", "Y":
+				t, kw := m.statusPickerTask, m.pendingWarningKeyword
+				m.showingPendingChildWarning = false
+				m.pendingWarningKeyword = ""
+				return m, updateTaskStatusCmd(m.config, t, kw)
+			case "n", "N", "esc":
+				m.showingPendingChildWarning = false
+				m.statusPickerTask = nil
+				m.pendingWarningKeyword = ""
+				return m, nil
+			}
+		case statusUpdateMsg:
+			m.showingPendingChildWarning = false
+			m.statusPickerTask = nil
+			m.pendingWarningKeyword = ""
+			if msg.err != nil {
+				m.statusMessage = fmt.Sprintf("Error: %v", msg.err)
+			} else {
+				m.statusMessage = msg.message
+			}
+			return m, tea.Batch(
+				loadAgendaCmd(m.config, m.focusDate, m.mode),
+				tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }),
+			)
+		}
+		return m, nil
+	}
+
+	// Status selector mode
+	if m.showingStatusPicker {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			if msg.String() == "ctrl+c" {
+				m.quitting = true
+				return m, tea.Quit
+			}
+			m.statusPicker.Update(msg.String())
+			if m.statusPicker.Cancelled {
+				m.showingStatusPicker = false
+				m.statusPickerTask = nil
+				return m, nil
+			}
+			if m.statusPicker.Confirmed {
+				kw := m.statusPicker.Selected
+				if task.IsCompletedKeyword(m.config, kw) && task.HasActiveChildren(m.statusPickerTask, m.config) {
+					m.showingStatusPicker = false
+					m.showingPendingChildWarning = true
+					m.pendingWarningKeyword = kw
+					return m, nil
+				}
+				return m, updateTaskStatusCmd(m.config, m.statusPickerTask, kw)
+			}
+			return m, nil
+		case tea.WindowSizeMsg:
+			m.termWidth = msg.Width
+			m.termHeight = msg.Height
+			return m, nil
+		case statusUpdateMsg:
+			m.showingStatusPicker = false
+			m.statusPickerTask = nil
+			if msg.err != nil {
+				m.statusMessage = fmt.Sprintf("Error: %v", msg.err)
+			} else {
+				m.statusMessage = msg.message
+			}
+			return m, tea.Batch(
+				loadAgendaCmd(m.config, m.focusDate, m.mode),
+				tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }),
+			)
+		}
+		return m, nil
+	}
+
 	// Date picker mode
 	if m.showingDatePicker {
 		switch msg := msg.(type) {
@@ -465,11 +582,37 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.clockCursor < len(m.clockTasks) {
 					return m, clockOutAgendaCmd(m.clockTasks[m.clockCursor])
 				}
+
+			// Status change
+			case "s":
+				if m.clockCursor < len(m.clockTasks) {
+					t := m.clockTasks[m.clockCursor]
+					m.statusPickerTask = t
+					m.showingStatusPicker = true
+					m.statusPicker = task.NewStatusPicker(t, m.config)
+					return m, nil
+				}
+
+			// Help
+			case "?":
+				m.showingHelp = !m.showingHelp
+				return m, nil
 			}
 
 		case tea.WindowSizeMsg:
 			m.termWidth = msg.Width
 			m.termHeight = msg.Height
+
+		case statusUpdateMsg:
+			if msg.err != nil {
+				m.statusMessage = fmt.Sprintf("Error: %v", msg.err)
+			} else {
+				m.statusMessage = msg.message
+			}
+			return m, tea.Batch(
+				loadClockTableCmd(m.config, m.focusDate, m.mode),
+				tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }),
+			)
 
 		case clockTableLoadedMsg:
 			if msg.err != nil {
@@ -618,6 +761,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, clockOutAgendaCmd(m.flatItems[m.cursor].Task)
 			}
 
+		// Status change
+		case "s":
+			if m.cursor < len(m.flatItems) {
+				t := m.flatItems[m.cursor].Task
+				m.statusPickerTask = t
+				m.showingStatusPicker = true
+				m.statusPicker = task.NewStatusPicker(t, m.config)
+				return m, nil
+			}
+
+		// Help
+		case "?":
+			m.showingHelp = !m.showingHelp
+			return m, nil
+
 		// Open editor
 		case "enter":
 			if m.cursor < len(m.flatItems) {
@@ -677,6 +835,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Reload after clock operation
 		return m, loadAgendaCmd(m.config, m.focusDate, m.mode)
 
+	case statusUpdateMsg:
+		m.statusPickerTask = nil
+		if msg.err != nil {
+			m.statusMessage = fmt.Sprintf("Error: %v", msg.err)
+		} else {
+			m.statusMessage = msg.message
+		}
+		return m, tea.Batch(
+			loadAgendaCmd(m.config, m.focusDate, m.mode),
+			tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }),
+		)
+
 	case clearStatusMsg:
 		m.statusMessage = ""
 		return m, nil
@@ -701,6 +871,151 @@ func applyDatePickerCmd(dp *task.DatePicker) tea.Cmd {
 		}
 		return datePickerResultMsg{message: msg}
 	}
+}
+
+func updateTaskStatusCmd(cfg *config.Config, t *task.Task, newKeyword string) tea.Cmd {
+	return func() tea.Msg {
+		if t == nil {
+			return statusUpdateMsg{err: fmt.Errorf("no task selected")}
+		}
+
+		if task.IsCompletedKeyword(cfg, newKeyword) {
+			advanced, err := task.CompleteRecurringTask(t, cfg)
+			if err != nil {
+				return statusUpdateMsg{err: fmt.Errorf("recurring advance failed: %w", err)}
+			}
+			if advanced {
+				commitMsg := fmt.Sprintf("Advance recurring task: %s", t.Title)
+				kgit.CommitFile(t.FilePath, commitMsg, true)
+				return statusUpdateMsg{
+					message: fmt.Sprintf("Recurring task advanced → %s", t.ScheduledAt),
+				}
+			}
+		}
+
+		oldKeyword := t.Keyword
+
+		if err := task.UpdateTaskStatus(t, newKeyword); err != nil {
+			return statusUpdateMsg{err: err}
+		}
+
+		commitMsg := fmt.Sprintf("Update task status: %s -> %s", oldKeyword, newKeyword)
+		if err := kgit.CommitFile(t.FilePath, commitMsg, true); err != nil {
+			return statusUpdateMsg{
+				message: fmt.Sprintf("Status updated to %s (git commit failed: %v)", newKeyword, err),
+			}
+		}
+
+		return statusUpdateMsg{
+			message: fmt.Sprintf("Status updated: %s → %s", oldKeyword, newKeyword),
+		}
+	}
+}
+
+func (m model) renderStatusSelector() string {
+	return m.statusPicker.View(m.termWidth)
+}
+
+func (m model) renderPendingChildWarning() string {
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("9")).
+		Padding(1, 2)
+
+	activeCount := 0
+	if m.statusPickerTask != nil {
+		for _, child := range m.statusPickerTask.Children {
+			if child.IsActive(m.config) || child.IsInProgress(m.config) {
+				activeCount++
+			}
+		}
+	}
+
+	var content strings.Builder
+
+	warningStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
+	content.WriteString(warningStyle.Render("⚠  Incomplete children"))
+	content.WriteString("\n\n")
+
+	infoStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	content.WriteString(infoStyle.Render(fmt.Sprintf(
+		"%d active/in-progress child task(s) still pending.\nMark parent as %s anyway?",
+		activeCount, m.pendingWarningKeyword,
+	)))
+	content.WriteString("\n\n")
+
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	content.WriteString(helpStyle.Render("y: confirm • n/esc: cancel"))
+
+	return boxStyle.Render(content.String())
+}
+
+func (m model) renderHelp() string {
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("62")).
+		Padding(1, 2)
+
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("62"))
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Bold(true)
+	descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+
+	var b strings.Builder
+
+	if m.showingClockView {
+		b.WriteString(titleStyle.Render("Clock View Keybindings"))
+	} else {
+		b.WriteString(titleStyle.Render("Agenda Keybindings"))
+	}
+	b.WriteString("\n\n")
+
+	type binding struct{ key, desc string }
+
+	common := []binding{
+		{"d/w/t/m/y", "switch view (day/week/fortnight/month/year)"},
+		{"f, l, →", "navigate forward"},
+		{"b, h, ←", "navigate backward"},
+		{"., space", "jump to today"},
+		{"j, ↓", "cursor down"},
+		{"k, ↑", "cursor up"},
+		{"C-d", "half-page down"},
+		{"C-u", "half-page up"},
+		{"v", "detail view"},
+		{"enter", "open in editor"},
+		{"s", "change status"},
+		{"S", "set scheduled date"},
+		{"D", "set due date"},
+		{"i", "clock in"},
+		{"o", "clock out"},
+		{"?", "toggle this help"},
+		{"q", "quit"},
+	}
+
+	agenda := []binding{
+		{"c", "switch to clock view"},
+	}
+
+	clock := []binding{
+		{"esc, a", "back to agenda"},
+	}
+
+	bindings := common
+	if m.showingClockView {
+		bindings = append(bindings, clock...)
+	} else {
+		bindings = append(bindings, agenda...)
+	}
+
+	for _, kb := range bindings {
+		b.WriteString(fmt.Sprintf("  %s  %s\n",
+			keyStyle.Render(fmt.Sprintf("%-12s", kb.key)),
+			descStyle.Render(kb.desc)))
+	}
+
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("Press ? or esc to close"))
+
+	return boxStyle.Render(b.String())
 }
 
 func (m *model) ensureVisible() {
@@ -971,6 +1286,18 @@ func (m model) View() string {
 		return ""
 	}
 
+	if m.showingHelp {
+		return m.renderHelp()
+	}
+
+	if m.showingPendingChildWarning {
+		return m.renderPendingChildWarning()
+	}
+
+	if m.showingStatusPicker {
+		return m.renderStatusSelector()
+	}
+
 	if m.showingDatePicker && m.datePicker != nil {
 		return m.datePicker.View(m.termWidth / 2)
 	}
@@ -1077,7 +1404,7 @@ func (m model) View() string {
 	}
 
 	// Footer (anchored to bottom)
-	footer := colors.dimText.Render("d/w/t/m/y: view • f/b: navigate • .: today • S/D: schedule/due • c: clock • i/o: clock in/out • v: detail • q: quit")
+	footer := colors.dimText.Render("s: status • S/D: schedule/due • c: clock • i/o: in/out • v: detail • enter: edit • ?: help • q: quit")
 	b.WriteString(footer)
 
 	return b.String()
@@ -1100,7 +1427,9 @@ func (m model) renderItem(item task.AgendaItem, selected bool) string {
 		proj = proj[:9]
 	}
 	projStyle := colors.project
-	if item.ClockActive {
+	if item.IsCompleted {
+		projStyle = colors.completed
+	} else if item.ClockActive {
 		projStyle = colors.clockActive
 	}
 	parts = append(parts, projStyle.Render(fmt.Sprintf("%-10s", proj+":")))
@@ -1108,7 +1437,9 @@ func (m model) renderItem(item task.AgendaItem, selected bool) string {
 	// Schedule info column (14 chars)
 	schedStr := m.formatScheduleInfo(item)
 	schedStyle := colors.schedInfo
-	if item.ClockActive {
+	if item.IsCompleted {
+		schedStyle = colors.completed
+	} else if item.ClockActive {
 		schedStyle = colors.clockActive
 	} else if item.IsOverdue {
 		schedStyle = colors.deadline
@@ -1125,8 +1456,14 @@ func (m model) renderItem(item task.AgendaItem, selected bool) string {
 
 	// Keyword column
 	kwWidth := 12
+	displayKeyword := t.Keyword
 	var kwStyle lipgloss.Style
-	if t.IsInProgress(m.config) {
+	if item.IsCompleted {
+		kwStyle = colors.completed
+		if len(m.config.Todo.Completed) > 0 {
+			displayKeyword = m.config.Todo.Completed[0]
+		}
+	} else if t.IsInProgress(m.config) {
 		kwStyle = colors.inProgress
 	} else if t.IsActive(m.config) {
 		kwStyle = colors.active
@@ -1135,11 +1472,13 @@ func (m model) renderItem(item task.AgendaItem, selected bool) string {
 	} else {
 		kwStyle = colors.completed
 	}
-	parts = append(parts, kwStyle.Render(fmt.Sprintf("%-*s", kwWidth, t.Keyword)))
+	parts = append(parts, kwStyle.Render(fmt.Sprintf("%-*s", kwWidth, displayKeyword)))
 
 	// Title (truncated to fit terminal)
 	titleStyle := colors.taskText
-	if t.IsCompleted(m.config) {
+	if item.IsCompleted {
+		titleStyle = colors.completed
+	} else if t.IsCompleted(m.config) {
 		titleStyle = colors.completed
 	} else if item.IsOverdue {
 		titleStyle = colors.deadline
@@ -1156,7 +1495,9 @@ func (m model) renderItem(item task.AgendaItem, selected bool) string {
 	if t.ID != "" {
 		displayTitle = fmt.Sprintf("[%s] %s", t.ID, t.Title)
 	}
-	if item.ClockActive {
+	if item.IsCompleted {
+		displayTitle = "✓ " + displayTitle
+	} else if item.ClockActive {
 		displayTitle = "⏱ " + displayTitle
 		titleStyle = colors.clockActive
 	}
@@ -1295,6 +1636,10 @@ func (m model) renderDayTimeGrid(items []task.AgendaItem, startIdx int) ([]strin
 func (m model) formatScheduleInfo(item task.AgendaItem) string {
 	today := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 0, 0, 0, 0, time.Local)
 	itemDay := time.Date(item.Date.Year(), item.Date.Month(), item.Date.Day(), 0, 0, 0, 0, time.Local)
+
+	if item.IsCompleted {
+		return "Done " + item.CompletedAt.Format("15:04")
+	}
 
 	if item.IsOverdue {
 		daysAgo := int(math.Round(today.Sub(itemDay).Hours() / 24))
@@ -1487,7 +1832,7 @@ func (m model) renderClockView() string {
 		for i := 1; i < contentHeight-1; i++ {
 			b.WriteString("\n")
 		}
-		footer := colors.dimText.Render("d/w/t/m/y: view • f/b: navigate • .: today • esc/a: agenda • q: quit")
+		footer := colors.dimText.Render("s: status • i/o: in/out • v: detail • enter: edit • esc/a: agenda • ?: help • q: quit")
 		b.WriteString(footer)
 		return b.String()
 	}
@@ -1534,8 +1879,14 @@ func (m model) renderClockView() string {
 		for _, entry := range proj.Entries {
 			selected := cursorIdx == m.clockCursor
 
+			displayKeyword := entry.Task.Keyword
 			var kwStyle lipgloss.Style
-			if entry.Task.IsInProgress(m.config) {
+			if entry.WasCompleted {
+				kwStyle = colors.completed
+				if len(m.config.Todo.Completed) > 0 {
+					displayKeyword = m.config.Todo.Completed[0]
+				}
+			} else if entry.Task.IsInProgress(m.config) {
 				kwStyle = colors.inProgress
 			} else if entry.Task.IsActive(m.config) {
 				kwStyle = colors.active
@@ -1575,7 +1926,7 @@ func (m model) renderClockView() string {
 				indicator,
 				projColWidth, "",
 				colors.dimText.Render("╰─"),
-				kwStyle.Render(fmt.Sprintf("%-*s", kwColWidth-1, entry.Task.Keyword)),
+				kwStyle.Render(fmt.Sprintf("%-*s", kwColWidth-1, displayKeyword)),
 				titleWidth, formattedTitle,
 				durationStr)
 			lines = append(lines, taskLine)
@@ -1607,7 +1958,7 @@ func (m model) renderClockView() string {
 	}
 
 	// Footer
-	footer := colors.dimText.Render("j/k: navigate • C-d/C-u: scroll • v: detail • enter: edit • i: clock in • o: clock out • esc/a: agenda • q: quit")
+	footer := colors.dimText.Render("s: status • i/o: in/out • v: detail • enter: edit • esc/a: agenda • ?: help • q: quit")
 	b.WriteString(footer)
 
 	return b.String()
