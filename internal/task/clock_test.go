@@ -376,8 +376,8 @@ func TestClockInIndented(t *testing.T) {
 		t.Fatalf("expected at least 4 lines, got %d: %v", len(lines), lines)
 	}
 	clockLine := lines[2]
-	if !strings.HasPrefix(clockLine, "      * CLOCK:") {
-		t.Errorf("expected 6-space indent with bullet, got %q", clockLine)
+	if !strings.HasPrefix(clockLine, "    * CLOCK:") {
+		t.Errorf("expected 4-space indent with bullet (matching sub-item indent), got %q", clockLine)
 	}
 }
 
@@ -498,8 +498,8 @@ func TestRecordCompletionIndented(t *testing.T) {
 	if len(lines) < 4 {
 		t.Fatalf("expected at least 4 lines, got %d", len(lines))
 	}
-	// Should be indented 6 spaces (4 + 2)
-	if !strings.HasPrefix(lines[2], "      * COMPLETED:") {
-		t.Errorf("expected 6-space indent, got %q", lines[2])
+	// Should match existing sub-item indent (4 spaces from "    Notes")
+	if !strings.HasPrefix(lines[2], "    * COMPLETED:") {
+		t.Errorf("expected 4-space indent (matching sub-item indent), got %q", lines[2])
 	}
 }
