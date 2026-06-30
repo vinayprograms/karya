@@ -54,16 +54,16 @@ func ParseClockEntries(t *Task) ([]ClockEntry, error) {
 
 	lines := strings.Split(raw, "\n")
 	var entries []ClockEntry
-	// Only consider direct sub-items: lines whose leading whitespace
-	// matches what ClockIn writes (IndentLevel + 2 spaces).
-	expectedIndent := t.IndentLevel + 2
+	expectedRawIndent := detectSubItemRawIndent(lines)
+	if expectedRawIndent < 0 {
+		return nil, nil
+	}
 
 	for _, line := range lines[1:] { // skip task line itself
 		if line == "" {
 			continue
 		}
-		ws := countLeadingSpaces(line)
-		if ws != expectedIndent {
+		if countLeadingSpaces(line) != expectedRawIndent {
 			continue
 		}
 		m := clockLineRe.FindStringSubmatch(line)
@@ -102,6 +102,78 @@ func countLeadingSpaces(s string) int {
 		n++
 	}
 	return n
+}
+
+// detectSubItemRawIndent returns the raw leading-whitespace count of the
+// task's direct sub-items. It finds the first line whose StripLinePrefix
+// level exceeds the task's, then returns that line's countLeadingSpaces.
+// This correctly handles both bulleted ("  * CLOCK:") and non-bulleted
+// ("  CLOCK:") entries at the same raw indent. Returns -1 if no sub-items.
+func detectSubItemRawIndent(lines []string) int {
+	if len(lines) == 0 {
+		return -1
+	}
+	_, taskLevel := StripLinePrefix(lines[0])
+	for _, line := range lines[1:] {
+		if line == "" {
+			continue
+		}
+		_, level := StripLinePrefix(line)
+		if level > taskLevel {
+			return countLeadingSpaces(line)
+		}
+	}
+	return -1
+}
+
+// subItemWriteIndent determines the number of leading spaces to use when
+// writing a bulleted sub-item (CLOCK, COMPLETED) under the task.
+// Uses detectSubItemRawIndent if sub-items exist, otherwise falls back to
+// raw whitespace detection and then a computed default.
+func subItemWriteIndent(lines []string) int {
+	if len(lines) == 0 {
+		return 2
+	}
+	if indent := detectSubItemRawIndent(lines); indent >= 0 {
+		return indent
+	}
+	// Fallback: find first line with more raw whitespace than task
+	taskRawSpaces := countLeadingSpaces(lines[0])
+	for _, line := range lines[1:] {
+		if line == "" {
+			continue
+		}
+		ws := countLeadingSpaces(line)
+		if ws > taskRawSpaces {
+			return ws
+		}
+	}
+	return taskRawSpaces + 2
+}
+
+// subItemIndentForTask reads the task's raw block and returns the indent string
+// to use when writing direct sub-items (CLOCK, COMPLETED entries).
+func subItemIndentForTask(t *Task) (string, error) {
+	raw, err := ReadRawBlock(t)
+	if err != nil {
+		return strings.Repeat(" ", countLeadingSpaces("")+2), err
+	}
+	if raw == "" {
+		// No existing block — use task line's raw whitespace + 2
+		content, err := os.ReadFile(t.FilePath)
+		if err != nil {
+			return "  ", err
+		}
+		filelines := strings.Split(string(content), "\n")
+		if t.LineNum-1 < len(filelines) {
+			ws := countLeadingSpaces(filelines[t.LineNum-1])
+			return strings.Repeat(" ", ws+2), nil
+		}
+		return "  ", nil
+	}
+	lines := strings.Split(raw, "\n")
+	indent := subItemWriteIndent(lines)
+	return strings.Repeat(" ", indent), nil
 }
 
 // IsClockActive returns true if the task has an open (running) clock entry.
@@ -261,7 +333,7 @@ func ClockIn(t *Task) error {
 		return fmt.Errorf("line number out of range")
 	}
 
-	indent := strings.Repeat(" ", t.IndentLevel+2)
+	indent, _ := subItemIndentForTask(t)
 	clockLine := fmt.Sprintf("%s* CLOCK: %s--", indent, time.Now().Format("2006-01-02T15:04"))
 
 	// Insert after task line
@@ -334,13 +406,16 @@ func ParseCompletionEntries(t *Task) ([]CompletionEntry, error) {
 
 	lines := strings.Split(raw, "\n")
 	var entries []CompletionEntry
-	expectedIndent := t.IndentLevel + 2
+	expectedRawIndent := detectSubItemRawIndent(lines)
+	if expectedRawIndent < 0 {
+		return nil, nil
+	}
 
 	for _, line := range lines[1:] {
 		if line == "" {
 			continue
 		}
-		if countLeadingSpaces(line) != expectedIndent {
+		if countLeadingSpaces(line) != expectedRawIndent {
 			continue
 		}
 		m := completedLineRe.FindStringSubmatch(line)
@@ -377,6 +452,7 @@ func recordOrUpdateCompletion(t *Task, schedDay time.Time) error {
 		return fmt.Errorf("line number out of range")
 	}
 
+	indent, _ := subItemIndentForTask(t)
 	now := time.Now().Format("2006-01-02T15:04")
 	dayStr := schedDay.Format("2006-01-02")
 
@@ -396,15 +472,12 @@ func recordOrUpdateCompletion(t *Task, schedDay time.Time) error {
 		}
 		ts := strings.TrimSpace(m[1])
 		if strings.HasPrefix(ts, dayStr) {
-			// Update existing entry's timestamp
-			indent := strings.Repeat(" ", t.IndentLevel+2)
 			lines[i] = fmt.Sprintf("%s* COMPLETED: %s", indent, now)
 			return os.WriteFile(t.FilePath, []byte(strings.Join(lines, "\n")), 0644)
 		}
 	}
 
 	// No existing entry for this day — append new one
-	indent := strings.Repeat(" ", t.IndentLevel+2)
 	completedLine := fmt.Sprintf("%s* COMPLETED: %s", indent, now)
 
 	newLines := make([]string, 0, len(lines)+1)
@@ -431,7 +504,7 @@ func RecordCompletion(t *Task) error {
 		return fmt.Errorf("line number out of range")
 	}
 
-	indent := strings.Repeat(" ", t.IndentLevel+2)
+	indent, _ := subItemIndentForTask(t)
 	completedLine := fmt.Sprintf("%s* COMPLETED: %s", indent, time.Now().Format("2006-01-02T15:04"))
 
 	newLines := make([]string, 0, len(lines)+1)
