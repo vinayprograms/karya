@@ -33,7 +33,7 @@ type AgendaDay struct {
 // grouped by day. Only tasks with scheduled or due dates are included.
 // When includeOverdue is true, past-due items appear on today's date.
 func QueryAgenda(c *config.Config, start, end time.Time, includeOverdue bool) ([]AgendaDay, error) {
-	tasks, err := ListTasks(c, "", false)
+	tasks, err := ListTasks(c, "", true)
 	if err != nil {
 		return nil, err
 	}
@@ -222,21 +222,23 @@ func addAgendaEntries(c *config.Config, t *Task, dateToken string, isDeadline bo
 	} else {
 		// Non-recurring: single date
 		schedDay := truncateToDay(sched.Date)
-		isOverdue := schedDay.Before(today) && !t.IsCompleted(c)
+		completed := t.IsCompleted(c)
+		isOverdue := schedDay.Before(today) && !completed
 
 		inRange := (schedDay.Before(end) || schedDay.Equal(end)) && (schedDay.After(start) || schedDay.Equal(start))
 
 		if inRange {
 			displaced := isOverdue && includeOverdue
 			item := AgendaItem{
-				Task:       t,
-				Date:       sched.Date,
-				HasTime:    sched.HasTime,
-				HasEnd:     sched.HasEnd,
-				EndTime:    sched.EndTime,
-				IsOverdue:  displaced,
-				IsDeadline: isDeadline,
-				Schedule:   sched,
+				Task:        t,
+				Date:        sched.Date,
+				HasTime:     sched.HasTime,
+				HasEnd:      sched.HasEnd,
+				EndTime:     sched.EndTime,
+				IsOverdue:   displaced,
+				IsDeadline:  isDeadline,
+				IsCompleted: completed,
+				Schedule:    sched,
 			}
 			if warningDays > 0 {
 				warningStart := schedDay.AddDate(0, 0, -warningDays)
