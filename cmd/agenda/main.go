@@ -290,6 +290,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case fileChangedMsg:
 			return m, tea.Batch(
 				loadAgendaCmd(m.config, m.focusDate, m.mode),
+				loadClockTableCmd(m.config, m.focusDate, m.mode),
 				waitForFileChange(m.watcher),
 			)
 		}
@@ -326,11 +327,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Batch(
 				loadAgendaCmd(m.config, m.focusDate, m.mode),
+				loadClockTableCmd(m.config, m.focusDate, m.mode),
 				tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }),
 			)
 		case fileChangedMsg:
 			return m, tea.Batch(
 				loadAgendaCmd(m.config, m.focusDate, m.mode),
+				loadClockTableCmd(m.config, m.focusDate, m.mode),
 				waitForFileChange(m.watcher),
 			)
 		}
@@ -376,12 +379,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Batch(
 				loadAgendaCmd(m.config, m.focusDate, m.mode),
+				loadClockTableCmd(m.config, m.focusDate, m.mode),
 				waitForFileChange(m.watcher),
 				tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }),
 			)
 		case fileChangedMsg:
 			return m, tea.Batch(
 				loadAgendaCmd(m.config, m.focusDate, m.mode),
+				loadClockTableCmd(m.config, m.focusDate, m.mode),
 				waitForFileChange(m.watcher),
 			)
 		}
@@ -838,6 +843,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fileChangedMsg:
 		return m, tea.Batch(
 			loadAgendaCmd(m.config, m.focusDate, m.mode),
+			loadClockTableCmd(m.config, m.focusDate, m.mode),
 			waitForFileChange(m.watcher),
 		)
 
@@ -1654,6 +1660,9 @@ func (m model) formatScheduleInfo(item task.AgendaItem) string {
 	itemDay := time.Date(item.Date.Year(), item.Date.Month(), item.Date.Day(), 0, 0, 0, 0, time.Local)
 
 	if item.IsCompleted {
+		if item.CompletedAt.IsZero() {
+			return "Done"
+		}
 		return "Done " + item.CompletedAt.Format("15:04")
 	}
 

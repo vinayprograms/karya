@@ -240,6 +240,9 @@ func addAgendaEntries(c *config.Config, t *Task, dateToken string, isDeadline bo
 				IsCompleted: completed,
 				Schedule:    sched,
 			}
+			if completed {
+				item.CompletedAt = lastClockOut(t, schedDay)
+			}
 			if warningDays > 0 {
 				warningStart := schedDay.AddDate(0, 0, -warningDays)
 				item.Warning = !today.Before(warningStart) && today.Before(schedDay)
@@ -266,6 +269,32 @@ func addAgendaEntries(c *config.Config, t *Task, dateToken string, isDeadline bo
 			dayMap[today] = append(dayMap[today], item)
 		}
 	}
+}
+
+// lastClockOut returns the end time of the last closed clock entry on the given day.
+// Falls back to the day at 00:00 if no clock entries exist.
+func lastClockOut(t *Task, day time.Time) time.Time {
+	entries, err := ParseClockEntries(t)
+	if err != nil {
+		return day
+	}
+	dayStart := truncateToDay(day)
+	dayEnd := dayStart.Add(24 * time.Hour)
+	var latest time.Time
+	for _, e := range entries {
+		if e.Open || e.End.IsZero() {
+			continue
+		}
+		if !e.End.Before(dayStart) && e.End.Before(dayEnd) {
+			if e.End.After(latest) {
+				latest = e.End
+			}
+		}
+	}
+	if latest.IsZero() {
+		return day
+	}
+	return latest
 }
 
 // sortAgendaItems sorts items within a day: overdue first, then timed (by time), then untimed (by priority), completed last.
