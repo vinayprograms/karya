@@ -330,12 +330,17 @@ func CompleteRecurringTask(t *Task, c *config.Config) (advanced bool, err error)
 	now := time.Now()
 	nextDate := sched.NextOccurrence(now)
 
-	// Build new token
+	// Build new token, preserving end time on the new date
 	newSched := &Schedule{
 		Date:       nextDate,
 		HasTime:    sched.HasTime,
+		HasEnd:     sched.HasEnd,
 		Recurrence: sched.Recurrence,
 		Warning:    sched.Warning,
+	}
+	if sched.HasEnd {
+		newSched.EndTime = time.Date(nextDate.Year(), nextDate.Month(), nextDate.Day(),
+			sched.EndTime.Hour(), sched.EndTime.Minute(), 0, 0, time.Local)
 	}
 	newToken := newSched.FormatToken()
 	oldToken := dateField
