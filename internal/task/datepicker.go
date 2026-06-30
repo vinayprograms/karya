@@ -29,6 +29,8 @@ type timeFocus int
 const (
 	timeFocusHour timeFocus = iota
 	timeFocusMinute
+	timeFocusEndHour
+	timeFocusEndMinute
 )
 
 type recurrenceFocus int
@@ -53,10 +55,13 @@ type DatePicker struct {
 	Section pickerSection
 
 	// Time
-	HasTime   bool
-	Hour      int
-	Minute    int
-	TimeFocus timeFocus
+	HasTime    bool
+	Hour       int
+	Minute     int
+	HasEndTime bool
+	EndHour    int
+	EndMinute  int
+	TimeFocus  timeFocus
 
 	// Recurrence
 	HasRecurrence      bool
@@ -96,6 +101,11 @@ func NewDatePicker(t *Task, field DatePickerField) *DatePicker {
 				dp.HasTime = true
 				dp.Hour = s.Date.Hour()
 				dp.Minute = s.Date.Minute()
+			}
+			if s.HasEnd {
+				dp.HasEndTime = true
+				dp.EndHour = s.EndTime.Hour()
+				dp.EndMinute = s.EndTime.Minute()
 			}
 			if s.Recurrence != nil {
 				dp.HasRecurrence = true
@@ -171,6 +181,11 @@ func (dp *DatePicker) loadFromToken(raw string) {
 			dp.Hour = s.Date.Hour()
 			dp.Minute = s.Date.Minute()
 		}
+		dp.HasEndTime = s.HasEnd
+		if s.HasEnd {
+			dp.EndHour = s.EndTime.Hour()
+			dp.EndMinute = s.EndTime.Minute()
+		}
 		dp.HasRecurrence = s.Recurrence != nil
 		if s.Recurrence != nil {
 			dp.RecurrenceMode = s.Recurrence.Mode
@@ -219,30 +234,71 @@ func (dp *DatePicker) updateDate(key string) {
 func (dp *DatePicker) updateTime(key string) {
 	switch key {
 	case "backspace":
-		dp.HasTime = false
-		dp.Hour = 0
-		dp.Minute = 0
+		if dp.TimeFocus == timeFocusEndHour || dp.TimeFocus == timeFocusEndMinute {
+			dp.HasEndTime = false
+			dp.EndHour = 0
+			dp.EndMinute = 0
+			dp.TimeFocus = timeFocusMinute
+		} else {
+			dp.HasTime = false
+			dp.HasEndTime = false
+			dp.Hour = 0
+			dp.Minute = 0
+			dp.EndHour = 0
+			dp.EndMinute = 0
+			dp.TimeFocus = timeFocusHour
+		}
 		return
 	case "left", "h":
-		dp.TimeFocus = timeFocusHour
+		switch dp.TimeFocus {
+		case timeFocusEndMinute:
+			dp.TimeFocus = timeFocusEndHour
+		case timeFocusEndHour:
+			dp.TimeFocus = timeFocusMinute
+		case timeFocusMinute:
+			dp.TimeFocus = timeFocusHour
+		}
 		return
 	case "right", "l":
-		dp.TimeFocus = timeFocusMinute
+		switch dp.TimeFocus {
+		case timeFocusHour:
+			dp.TimeFocus = timeFocusMinute
+		case timeFocusMinute:
+			dp.TimeFocus = timeFocusEndHour
+			dp.HasTime = true
+			dp.HasEndTime = true
+		case timeFocusEndHour:
+			dp.TimeFocus = timeFocusEndMinute
+		}
 		return
 	case "up", "k":
 		dp.HasTime = true
-		if dp.TimeFocus == timeFocusHour {
+		switch dp.TimeFocus {
+		case timeFocusHour:
 			dp.Hour = (dp.Hour + 1) % 24
-		} else {
+		case timeFocusMinute:
 			dp.Minute = (dp.Minute + 5) % 60
+		case timeFocusEndHour:
+			dp.HasEndTime = true
+			dp.EndHour = (dp.EndHour + 1) % 24
+		case timeFocusEndMinute:
+			dp.HasEndTime = true
+			dp.EndMinute = (dp.EndMinute + 5) % 60
 		}
 		return
 	case "down", "j":
 		dp.HasTime = true
-		if dp.TimeFocus == timeFocusHour {
+		switch dp.TimeFocus {
+		case timeFocusHour:
 			dp.Hour = (dp.Hour + 23) % 24
-		} else {
+		case timeFocusMinute:
 			dp.Minute = (dp.Minute + 55) % 60
+		case timeFocusEndHour:
+			dp.HasEndTime = true
+			dp.EndHour = (dp.EndHour + 23) % 24
+		case timeFocusEndMinute:
+			dp.HasEndTime = true
+			dp.EndMinute = (dp.EndMinute + 55) % 60
 		}
 		return
 	}
@@ -251,18 +307,33 @@ func (dp *DatePicker) updateTime(key string) {
 	if len(key) == 1 && key[0] >= '0' && key[0] <= '9' {
 		dp.HasTime = true
 		digit := int(key[0] - '0')
-		if dp.TimeFocus == timeFocusHour {
+		switch dp.TimeFocus {
+		case timeFocusHour:
 			newHour := (dp.Hour%10)*10 + digit
 			if newHour > 23 {
 				newHour = digit
 			}
 			dp.Hour = newHour
-		} else {
+		case timeFocusMinute:
 			newMin := (dp.Minute%10)*10 + digit
 			if newMin > 59 {
 				newMin = digit
 			}
 			dp.Minute = newMin
+		case timeFocusEndHour:
+			dp.HasEndTime = true
+			newHour := (dp.EndHour%10)*10 + digit
+			if newHour > 23 {
+				newHour = digit
+			}
+			dp.EndHour = newHour
+		case timeFocusEndMinute:
+			dp.HasEndTime = true
+			newMin := (dp.EndMinute%10)*10 + digit
+			if newMin > 59 {
+				newMin = digit
+			}
+			dp.EndMinute = newMin
 		}
 	}
 }
@@ -421,6 +492,11 @@ func (dp *DatePicker) buildToken() string {
 			dp.Hour, dp.Minute, 0, 0, time.Local)
 		sched.HasTime = true
 	}
+	if dp.HasTime && dp.HasEndTime {
+		sched.HasEnd = true
+		sched.EndTime = time.Date(dp.Cursor.Year(), dp.Cursor.Month(), dp.Cursor.Day(),
+			dp.EndHour, dp.EndMinute, 0, 0, time.Local)
+	}
 	if dp.HasRecurrence {
 		sched.Recurrence = &RecurrenceSpec{
 			Mode:     dp.RecurrenceMode,
@@ -564,6 +640,22 @@ func (dp *DatePicker) View(width int) string {
 		} else {
 			b.WriteString(dimStyle.Render(minStr))
 		}
+		if dp.HasEndTime {
+			b.WriteString(dimStyle.Render(" - "))
+			endHourStr := fmt.Sprintf("%02d", dp.EndHour)
+			endMinStr := fmt.Sprintf("%02d", dp.EndMinute)
+			if dp.Section == sectionTime && dp.TimeFocus == timeFocusEndHour {
+				b.WriteString(sectionActiveStyle.Render(endHourStr))
+			} else {
+				b.WriteString(dimStyle.Render(endHourStr))
+			}
+			b.WriteString(dimStyle.Render(":"))
+			if dp.Section == sectionTime && dp.TimeFocus == timeFocusEndMinute {
+				b.WriteString(sectionActiveStyle.Render(endMinStr))
+			} else {
+				b.WriteString(dimStyle.Render(endMinStr))
+			}
+		}
 	} else {
 		b.WriteString(dimStyle.Render("--:--"))
 	}
@@ -632,7 +724,7 @@ func (dp *DatePicker) View(width int) string {
 	case sectionDate:
 		b.WriteString(dimStyle.Render("arrows: navigate • [/]: month • .: today • f: field"))
 	case sectionTime:
-		b.WriteString(dimStyle.Render("h/l: hour/min • j/k: adjust • 0-9: type • backspace: clear"))
+		b.WriteString(dimStyle.Render("h/l: navigate • j/k: adjust • 0-9: type • l past min: end time • backspace: clear"))
 	case sectionRecurrence:
 		b.WriteString(dimStyle.Render("h/l: mode/interval/unit • j/k: adjust • b/d/w/m/y: unit • backspace: clear"))
 	case sectionWarning:
