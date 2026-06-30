@@ -746,6 +746,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
+		// Jump to top/bottom
+		case "g":
+			m.cursor = 0
+			m.scrollOffset = 0
+		case "G":
+			if len(m.flatItems) > 0 {
+				m.cursor = len(m.flatItems) - 1
+				m.ensureVisible()
+			}
+
+		// Jump between day groups
+		case "{":
+			m.cursor = prevDayStart(m.days, m.cursor)
+			m.ensureVisible()
+		case "}":
+			m.cursor = nextDayStart(m.days, m.cursor)
+			m.ensureVisible()
+
 		// Detail view
 		case "v":
 			if m.cursor < len(m.flatItems) {
@@ -1000,6 +1018,10 @@ func (m model) renderHelp() string {
 		{"., space", "jump to today"},
 		{"j, ↓", "cursor down"},
 		{"k, ↑", "cursor up"},
+		{"g", "go to top"},
+		{"G", "go to bottom"},
+		{"{", "previous day group"},
+		{"}", "next day group"},
 		{"C-d", "half-page down"},
 		{"C-u", "half-page up"},
 		{"v", "detail view"},
@@ -1071,6 +1093,58 @@ func advanceFocus(focus time.Time, mode viewMode, direction int) time.Time {
 		return focus.AddDate(direction, 0, 0)
 	}
 	return focus
+}
+
+// prevDayStart returns the cursor index of the first item in the previous day group.
+func prevDayStart(days []task.AgendaDay, cursor int) int {
+	offset := 0
+	for _, day := range days {
+		end := offset + len(day.Items)
+		if cursor >= offset && cursor < end {
+			if cursor > offset {
+				return offset
+			}
+			// Already at start of this day — go to previous day
+			if offset > 0 {
+				// Find start of previous day
+				prev := 0
+				for _, d := range days {
+					next := prev + len(d.Items)
+					if next == offset {
+						return prev
+					}
+					prev = next
+				}
+			}
+			return 0
+		}
+		offset = end
+	}
+	return 0
+}
+
+// nextDayStart returns the cursor index of the first item in the next day group.
+func nextDayStart(days []task.AgendaDay, cursor int) int {
+	offset := 0
+	for _, day := range days {
+		end := offset + len(day.Items)
+		if cursor >= offset && cursor < end {
+			if end < totalItems(days) {
+				return end
+			}
+			return cursor
+		}
+		offset = end
+	}
+	return cursor
+}
+
+func totalItems(days []task.AgendaDay) int {
+	n := 0
+	for _, d := range days {
+		n += len(d.Items)
+	}
+	return n
 }
 
 func flattenItems(days []task.AgendaDay) []task.AgendaItem {
