@@ -54,8 +54,18 @@ func ParseClockEntries(t *Task) ([]ClockEntry, error) {
 
 	lines := strings.Split(raw, "\n")
 	var entries []ClockEntry
+	// Only consider direct sub-items: lines whose leading whitespace
+	// matches what ClockIn writes (IndentLevel + 2 spaces).
+	expectedIndent := t.IndentLevel + 2
 
 	for _, line := range lines[1:] { // skip task line itself
+		if line == "" {
+			continue
+		}
+		ws := countLeadingSpaces(line)
+		if ws != expectedIndent {
+			continue
+		}
 		m := clockLineRe.FindStringSubmatch(line)
 		if m == nil {
 			continue
@@ -84,6 +94,14 @@ func ParseClockEntries(t *Task) ([]ClockEntry, error) {
 	}
 
 	return entries, nil
+}
+
+func countLeadingSpaces(s string) int {
+	n := 0
+	for n < len(s) && s[n] == ' ' {
+		n++
+	}
+	return n
 }
 
 // IsClockActive returns true if the task has an open (running) clock entry.
@@ -316,18 +334,25 @@ func ParseCompletionEntries(t *Task) ([]CompletionEntry, error) {
 
 	lines := strings.Split(raw, "\n")
 	var entries []CompletionEntry
+	expectedIndent := t.IndentLevel + 2
 
 	for _, line := range lines[1:] {
+		if line == "" {
+			continue
+		}
+		if countLeadingSpaces(line) != expectedIndent {
+			continue
+		}
 		m := completedLineRe.FindStringSubmatch(line)
 		if m == nil {
 			continue
 		}
 		ts := strings.TrimSpace(m[1])
-		t, err := time.ParseInLocation("2006-01-02T15:04", ts, time.Local)
+		parsed, err := time.ParseInLocation("2006-01-02T15:04", ts, time.Local)
 		if err != nil {
 			continue
 		}
-		entries = append(entries, CompletionEntry{Timestamp: t})
+		entries = append(entries, CompletionEntry{Timestamp: parsed})
 	}
 
 	return entries, nil
