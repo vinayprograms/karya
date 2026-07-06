@@ -222,7 +222,7 @@ func Load() (*Config, error) {
 		cfg.Schedule.DefaultWarningDays = 3
 	}
 	if cfg.Schedule.DefaultView == "" {
-		cfg.Schedule.DefaultView = "week"
+		cfg.Schedule.DefaultView = "day"
 	}
 
 	// JIRA defaults
