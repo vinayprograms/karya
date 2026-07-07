@@ -1508,7 +1508,7 @@ func (m model) View() string {
 	}
 
 	// Footer (anchored to bottom)
-	footer := colors.dimText.Render("s: status • S/D: schedule/due • c: clock • i/o: in/out • v: detail • enter: edit • ?: help • q: quit")
+	footer := colors.dimText.Render("t: status • S/D: schedule/due • c: clock • i/o: in/out • v: detail • enter: edit • ?: help • q: quit")
 	b.WriteString(footer)
 
 	return b.String()
@@ -1746,9 +1746,9 @@ func (m model) renderDayTimeGrid(items []task.AgendaItem, startIdx int, isToday 
 			if isToday && !nowRendered && hour == now.Hour() {
 				lines = append(lines, nowMarker)
 				nowRendered = true
+			} else {
+				lines = append(lines, colors.dimText.Render(fmt.Sprintf("  %02d:00 ··················", hour)))
 			}
-			// Empty hour slot
-			lines = append(lines, colors.dimText.Render(fmt.Sprintf("  %02d:00 ··················", hour)))
 		}
 	}
 
@@ -1961,7 +1961,7 @@ func (m model) renderClockView() string {
 		for i := 1; i < contentHeight-1; i++ {
 			b.WriteString("\n")
 		}
-		footer := colors.dimText.Render("s: status • i/o: in/out • v: detail • enter: edit • esc/a: agenda • ?: help • q: quit")
+		footer := colors.dimText.Render("t: status • i/o: in/out • v: detail • enter: edit • esc/a: agenda • ?: help • q: quit")
 		b.WriteString(footer)
 		return b.String()
 	}
@@ -2087,7 +2087,7 @@ func (m model) renderClockView() string {
 	}
 
 	// Footer
-	footer := colors.dimText.Render("s: status • i/o: in/out • v: detail • enter: edit • esc/a: agenda • ?: help • q: quit")
+	footer := colors.dimText.Render("t: status • i/o: in/out • v: detail • enter: edit • esc/a: agenda • ?: help • q: quit")
 	b.WriteString(footer)
 
 	return b.String()
