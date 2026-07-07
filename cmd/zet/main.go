@@ -49,6 +49,81 @@ func InitializeColors(cfg *config.Config) {
 	}
 }
 
+// listView defines how a view loads and presents its items.
+type listView interface {
+	refresh(zetDir string, verbose bool) []list.Item
+	title(sortNewestFirst bool) string
+	cursorGlyph() string
+	helpLines() (commands string, nav string)
+	renderHeader(width int) string
+}
+
+type allZettelsView struct{}
+
+func (v allZettelsView) refresh(zetDir string, verbose bool) []list.Item {
+	zettels, err := zet.ListZettels(zetDir)
+	if err != nil {
+		return nil
+	}
+	items := make([]list.Item, len(zettels))
+	for i, z := range zettels {
+		items[i] = zettelItem{zettel: z, verbose: verbose}
+	}
+	return items
+}
+
+func (v allZettelsView) title(sortNewestFirst bool) string {
+	if sortNewestFirst {
+		return "Zettels (Newest First)"
+	}
+	return "Zettels (Oldest First)"
+}
+
+func (v allZettelsView) cursorGlyph() string { return "█" }
+
+func (v allZettelsView) helpLines() (string, string) {
+	return " Commands: n:new • l:last • d:delete • T:toc • P:pinboard • c:count",
+		" ↑↓/jk • g/G:top/bottom • Ctrl+d/u:page • /:title search • *:fulltext search • s:sort order • Enter:edit • q:quit • ?:more help "
+}
+
+func (v allZettelsView) renderHeader(width int) string { return "" }
+
+type pinboardView struct{}
+
+func (v pinboardView) refresh(zetDir string, verbose bool) []list.Item {
+	pinned, err := zet.ListPinnedZettels(zetDir)
+	if err != nil {
+		return nil
+	}
+	items := make([]list.Item, len(pinned))
+	for i, z := range pinned {
+		items[i] = zettelItem{zettel: z, verbose: verbose}
+	}
+	return items
+}
+
+func (v pinboardView) title(_ bool) string { return "Pinboard" }
+
+func (v pinboardView) cursorGlyph() string { return "░" }
+
+func (v pinboardView) helpLines() (string, string) {
+	return " Pinboard: d:delete • Enter:edit • P/Esc:back to all",
+		" ↑↓/jk • g/G:top/bottom • Ctrl+d/u:page • /:title search • *:fulltext search • q:quit"
+}
+
+func (v pinboardView) renderHeader(width int) string {
+	title := " ◆ Pinboard "
+	padding := width - lipgloss.Width(title)
+	if padding < 0 {
+		padding = 0
+	}
+	return lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("15")).
+		Background(lipgloss.Color("5")).
+		Render(title + strings.Repeat(" ", padding))
+}
+
 type zettelItem struct {
 	zettel        Zettel
 	verbose       bool
@@ -59,7 +134,7 @@ func (i zettelItem) FilterValue() string {
 	return i.zettel.ID + " " + i.zettel.Title
 }
 
-func (i zettelItem) renderWithSelection(isSelected bool) string {
+func (i zettelItem) renderWithSelection(isSelected bool, glyph string) string {
 	var parts []string
 
 	// Show match count if there are search results
@@ -73,7 +148,7 @@ func (i zettelItem) renderWithSelection(isSelected bool) string {
 	}
 
 	if isSelected {
-		indicator := colors.selectorStyle.Render("█ ")
+		indicator := colors.selectorStyle.Render(glyph + " ")
 		parts = append(parts, indicator+colors.titleStyle.Render(i.zettel.Title))
 	} else {
 		parts = append(parts, "  "+colors.titleStyle.Render(i.zettel.Title))
@@ -97,16 +172,21 @@ func (i zettelItem) Description() string { return "" }
 
 type zettelDelegate struct {
 	list.DefaultDelegate
+	cursorGlyph *string
 }
 
 func (d zettelDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
-	zettelItem, ok := item.(zettelItem)
+	zi, ok := item.(zettelItem)
 	if !ok {
 		return
 	}
 
 	isSelected := index == m.Index()
-	content := zettelItem.renderWithSelection(isSelected)
+	glyph := "█"
+	if d.cursorGlyph != nil {
+		glyph = *d.cursorGlyph
+	}
+	content := zi.renderWithSelection(isSelected, glyph)
 	fmt.Fprint(w, content)
 }
 
@@ -127,6 +207,9 @@ type model struct {
 	customFilter           string
 	allItems               []list.Item
 	searchResults          map[string][]SearchResult // Map zettel ID to search results
+	activeView             listView
+	views                  map[string]listView
+	cursorGlyph            *string
 }
 
 func (m model) Init() tea.Cmd {
@@ -262,8 +345,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Handle esc when not filtering
 		if msg.String() == "esc" {
+			if m.activeView != m.views["all"] {
+				m.switchView("all")
+				return m, nil
+			}
 			if m.customFilter != "" {
-				// Clear filter
 				m.customFilter = ""
 				m.list.SetItems(m.allItems)
 				return m, nil
@@ -317,6 +403,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, openEditorCmd(m.editor, tocPath, "")
 		}
 
+		if msg.String() == "shift+p" || msg.String() == "P" {
+			if m.activeView == m.views["pinboard"] {
+				m.switchView("all")
+			} else {
+				m.switchView("pinboard")
+			}
+			return m, nil
+		}
+
 		if msg.String() == "d" {
 			// Delete zettel - show confirmation
 			if i, ok := m.list.SelectedItem().(zettelItem); ok {
@@ -338,42 +433,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case fileChangedMsg:
-		zettels, err := zet.ListZettels(m.zetDir)
-		if err == nil {
-			m.zettels = zettels
-			items := make([]list.Item, len(m.zettels))
-			for i, z := range m.zettels {
-				items[i] = zettelItem{zettel: z, verbose: m.verbose}
-			}
-			m.allItems = items
-			if m.customFilter != "" {
-				m.applyFilter()
-			} else {
-				m.list.SetItems(items)
-			}
-			m.list.ResetSelected()
-			updateWatcher(m.watcher, m.zetDir)
-		}
+		m.refreshList()
+		updateWatcher(m.watcher, m.zetDir)
 		return m, waitForFileChange(m.watcher)
 	case editorFinishedMsg:
 		if msg.err != nil {
 			log.Printf("Editor error: %v", msg.err)
 		}
-		zettels, err := zet.ListZettels(m.zetDir)
-		if err == nil {
-			m.zettels = zettels
-			items := make([]list.Item, len(m.zettels))
-			for i, z := range m.zettels {
-				items[i] = zettelItem{zettel: z, verbose: m.verbose}
-			}
-			m.allItems = items
-			if m.customFilter != "" {
-				m.applyFilter()
-			} else {
-				m.list.SetItems(items)
-			}
-			m.list.ResetSelected()
-		}
+		m.refreshList()
 		return m, nil
 	case tea.WindowSizeMsg:
 		m.list.SetWidth(msg.Width)
@@ -394,7 +461,11 @@ func (m model) View() string {
 	lines := strings.Split(view, "\n")
 	if len(lines) > 0 {
 		// Build header in order: Title → Filter → Pagination
-		header := []string{lines[0]} // Title (first line from list)
+		titleLine := lines[0]
+		if h := m.activeView.renderHeader(m.list.Width()); h != "" {
+			titleLine = h
+		}
+		header := []string{titleLine}
 
 		// Add filter line (always reserve space)
 		var filterLine string
@@ -458,8 +529,9 @@ func (m model) View() string {
 			//Background(lipgloss.Color("236"))
 		navStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 
-		line1 := commandStyle.Render(" Commands: n:new • l:last • d:delete • T:toc • c:count")
-		line2 := navStyle.Render(" ↑↓/jk • g/G:top/bottom • Ctrl+d/u:page • /:title search • *:fulltext search • s:sort order • Enter:edit • q:quit • ?:more help ")
+		cmd, nav := m.activeView.helpLines()
+		line1 := commandStyle.Render(cmd)
+		line2 := navStyle.Render(nav)
 
 		lines = append(lines, line1, line2, "") // Add empty line for spacing
 		view = strings.Join(lines, "\n")
@@ -574,6 +646,40 @@ func (m *model) searchInFile(filePath, searchTerm string) []SearchResult {
 	return zet.SearchInFile(filePath, searchTerm)
 }
 
+func (m *model) switchView(name string) {
+	m.activeView = m.views[name]
+	*m.cursorGlyph = m.activeView.cursorGlyph()
+	m.customFilter = ""
+	m.list.Title = m.activeView.title(m.sortNewestFirst)
+	items := m.activeView.refresh(m.zetDir, m.verbose)
+	if name == "all" {
+		m.allItems = items
+	}
+	m.list.SetItems(items)
+	m.list.ResetSelected()
+}
+
+func (m *model) refreshList() {
+	zettels, err := zet.ListZettels(m.zetDir)
+	if err != nil {
+		return
+	}
+	m.zettels = zettels
+	items := make([]list.Item, len(m.zettels))
+	for i, z := range m.zettels {
+		items[i] = zettelItem{zettel: z, verbose: m.verbose}
+	}
+	m.allItems = items
+
+	viewItems := m.activeView.refresh(m.zetDir, m.verbose)
+	if m.customFilter != "" {
+		m.applyFilter()
+	} else {
+		m.list.SetItems(viewItems)
+	}
+	m.list.ResetSelected()
+}
+
 func (m *model) sortZettels() {
 	// Sort the zettels slice
 	sort.Slice(m.zettels, func(i, j int) bool {
@@ -583,12 +689,7 @@ func (m *model) sortZettels() {
 		return m.zettels[i].ID < m.zettels[j].ID
 	})
 
-	// Update title to reflect sort order
-	if m.sortNewestFirst {
-		m.list.Title = "Zettels (Newest First)"
-	} else {
-		m.list.Title = "Zettels (Oldest First)"
-	}
+	m.list.Title = m.activeView.title(m.sortNewestFirst)
 
 	// Recreate items with sorted zettels
 	items := make([]list.Item, len(m.zettels))
@@ -635,8 +736,9 @@ func newZettelCmd(zetDir, editor string) tea.Cmd {
 
 	c := exec.Command(editorCmd, editorArgs...)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
-		// Update README after editing
+		// Update README and pinboard after editing
 		zet.UpdateReadme(zetDir)
+		zet.UpdatePinboard(zetDir)
 
 		// Get actual title and commit
 		actualTitle, _ := zet.GetZettelTitle(zetDir, zetID)
@@ -672,7 +774,8 @@ func editLastZettelCmd(zetDir, editor string) tea.Cmd {
 
 	c := exec.Command(editorCmd, editorArgs...)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
-		// Commit changes
+		// Update pinboard and commit changes
+		zet.UpdatePinboard(zetDir)
 		title, _ := zet.GetZettelTitle(zetDir, zetID)
 		if title != "" {
 			zet.GitCommit(zetDir, zetID, title)
@@ -725,9 +828,10 @@ func openEditorCmd(editor, filePath, searchTerm string) tea.Cmd {
 		zetID := filepath.Base(dir)
 		zetDir := filepath.Dir(dir)
 
-		// Update README and commit
+		// Update README, pinboard, and commit
 		if zet.IsValidZettelID(zetID) {
 			zet.UpdateReadme(zetDir)
+			zet.UpdatePinboard(zetDir)
 			title, _ := zet.GetZettelTitle(zetDir, zetID)
 			if title != "" {
 				zet.GitCommit(zetDir, zetID, title)
@@ -1026,7 +1130,11 @@ func showInteractiveTUI(zetDir, editor string, verbose bool) {
 		items[i] = zettelItem{zettel: z, verbose: verbose}
 	}
 
-	delegate := zettelDelegate{DefaultDelegate: list.NewDefaultDelegate()}
+	cursorGlyph := "█"
+	delegate := zettelDelegate{
+		DefaultDelegate: list.NewDefaultDelegate(),
+		cursorGlyph:     &cursorGlyph,
+	}
 	delegate.ShowDescription = false
 	delegate.SetHeight(1)
 	delegate.SetSpacing(0)
@@ -1131,6 +1239,12 @@ func showInteractiveTUI(zetDir, editor string, verbose bool) {
 		}
 	}
 
+	views := map[string]listView{
+		"all":      allZettelsView{},
+		"pinboard": pinboardView{},
+	}
+	allView := views["all"]
+
 	m := model{
 		list:            l,
 		zettels:         zettels,
@@ -1140,6 +1254,9 @@ func showInteractiveTUI(zetDir, editor string, verbose bool) {
 		watcher:         watcher,
 		sortNewestFirst: true,
 		allItems:        items,
+		activeView:      allView,
+		views:           views,
+		cursorGlyph:     &cursorGlyph,
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())

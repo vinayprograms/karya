@@ -389,3 +389,46 @@ func WriteZettelContent(zetDir, zetID, content string) error {
 	readmePath := filepath.Join(zetDir, zetID, "README.md")
 	return os.WriteFile(readmePath, []byte(content), 0644)
 }
+
+// ListPinnedZettels returns all zettels whose content contains #pinned.
+func ListPinnedZettels(zetDir string) ([]Zettel, error) {
+	zettels, err := ListZettels(zetDir)
+	if err != nil {
+		return nil, err
+	}
+
+	pinned := parallel.Collect(zettels, func(z Zettel) (Zettel, bool) {
+		content, err := ReadZettelContent(zetDir, z.ID)
+		if err != nil {
+			return Zettel{}, false
+		}
+		if strings.Contains(content, "#pinned") {
+			return z, true
+		}
+		return Zettel{}, false
+	})
+
+	sort.Slice(pinned, func(i, j int) bool {
+		return pinned[i].ID > pinned[j].ID
+	})
+
+	return pinned, nil
+}
+
+// UpdatePinboard regenerates PINBOARD.md at the zettelkasten root.
+func UpdatePinboard(zetDir string) error {
+	pinned, err := ListPinnedZettels(zetDir)
+	if err != nil {
+		return err
+	}
+
+	var content strings.Builder
+	content.WriteString("# Pinboard\n")
+
+	for _, z := range pinned {
+		content.WriteString(fmt.Sprintf("* [%s](./%s/README.md) - %s\n", z.ID, z.ID, z.Title))
+	}
+
+	pinboardPath := filepath.Join(zetDir, "PINBOARD.md")
+	return os.WriteFile(pinboardPath, []byte(content.String()), 0644)
+}
