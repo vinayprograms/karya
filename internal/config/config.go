@@ -119,9 +119,10 @@ type JiraConnection struct {
 }
 
 type Jira struct {
-	Connections  []JiraConnection  `toml:"connections"`
-	SyncInterval string            `toml:"sync_interval"`
-	StatusMap    map[string]string `toml:"status_map"`
+	Connections     []JiraConnection  `toml:"connections"`
+	SyncInterval    string            `toml:"sync_interval"`
+	StatusMap       map[string]string `toml:"status_map"`
+	ExcludeProjects []string          `toml:"exclude_projects"`
 }
 
 type Config struct {

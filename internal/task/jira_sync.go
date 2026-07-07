@@ -13,6 +13,7 @@ import (
 )
 
 var jiraKeyRe = regexp.MustCompile(`^[A-Z][A-Z0-9]+-\d+$`)
+var jiraProjectKeyRe = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,9}$`)
 
 // IsJiraID returns true if the ID matches a JIRA issue key pattern.
 func IsJiraID(id string) bool {
@@ -22,7 +23,18 @@ func IsJiraID(id string) bool {
 // SyncFromJira pulls open JIRA tickets assigned to the user, creates or updates
 // corresponding tasks in karya, and handles disappeared tickets.
 func SyncFromJira(ctx context.Context, cfg *config.Config, client *jira.Client) error {
-	jql := "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC"
+	jql := "assignee = currentUser() AND resolution = Unresolved"
+	if len(cfg.Jira.ExcludeProjects) > 0 {
+		var valid []string
+		for _, p := range cfg.Jira.ExcludeProjects {
+			if !jiraProjectKeyRe.MatchString(p) {
+				return fmt.Errorf("invalid project key in exclude_projects: %q", p)
+			}
+			valid = append(valid, p)
+		}
+		jql += " AND project NOT IN (" + strings.Join(valid, ", ") + ")"
+	}
+	jql += " ORDER BY updated DESC"
 	issues, err := client.SearchIssues(ctx, jql)
 	if err != nil {
 		return fmt.Errorf("searching JIRA: %w", err)
