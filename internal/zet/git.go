@@ -81,6 +81,7 @@ func GitCommit(zetDir, zetID, title string) error {
 	if _, err := w.Add("README.md"); err != nil {
 		// Ignore error if README.md doesn't exist
 	}
+	w.Add("PINBOARD.md")
 
 	// Check if there are any changes to commit
 	status, err := w.Status()
@@ -154,6 +155,7 @@ func GitDeleteZettel(zetDir, zetID, title string) error {
 		}
 	}
 	w.Add("README.md")
+	w.Add("PINBOARD.md")
 
 	// Commit the deletion
 	commitMsg := fmt.Sprintf("Delete zettel '%s'", title)

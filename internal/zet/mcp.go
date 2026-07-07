@@ -357,6 +357,8 @@ func (s *MCPServer) deleteZettel(ctx context.Context, req *mcp.CallToolRequest, 
 		return nil, DeleteZettelResult{}, fmt.Errorf("failed to delete zettel: %w", err)
 	}
 
+	UpdatePinboard(s.zetDir)
+
 	// Git commit the deletion
 	if title != "" {
 		GitDeleteZettel(s.zetDir, args.ZettelID, title)
@@ -380,6 +382,8 @@ func (s *MCPServer) updateZettel(ctx context.Context, req *mcp.CallToolRequest, 
 	if err := UpdateReadme(s.zetDir); err != nil {
 		// Non-fatal
 	}
+
+	UpdatePinboard(s.zetDir)
 
 	// Git commit
 	title, _ := GetZettelTitle(s.zetDir, args.ZettelID)
