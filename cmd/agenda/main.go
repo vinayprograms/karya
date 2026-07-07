@@ -521,7 +521,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "w":
 				m.mode = viewWeek
 				return m, loadClockTableCmd(m.config, m.focusDate, m.mode)
-			case "t":
+			case "f":
 				m.mode = viewFortnight
 				return m, loadClockTableCmd(m.config, m.focusDate, m.mode)
 			case "m":
@@ -532,10 +532,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, loadClockTableCmd(m.config, m.focusDate, m.mode)
 
 			// Navigation
-			case "f", "l", "right":
+			case "l", "right":
 				m.focusDate = advanceFocus(m.focusDate, m.mode, 1)
 				return m, loadClockTableCmd(m.config, m.focusDate, m.mode)
-			case "b", "h", "left":
+			case "h", "left":
 				m.focusDate = advanceFocus(m.focusDate, m.mode, -1)
 				return m, loadClockTableCmd(m.config, m.focusDate, m.mode)
 			case ".", " ":
@@ -605,7 +605,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 			// Status change
-			case "s":
+			case "t":
 				if m.clockCursor < len(m.clockTasks) {
 					t := m.clockTasks[m.clockCursor]
 					m.statusPickerTask = t
@@ -680,7 +680,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "w":
 			m.mode = viewWeek
 			return m, loadAgendaCmd(m.config, m.focusDate, m.mode)
-		case "t":
+		case "f":
 			m.mode = viewFortnight
 			return m, loadAgendaCmd(m.config, m.focusDate, m.mode)
 		case "m":
@@ -691,10 +691,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, loadAgendaCmd(m.config, m.focusDate, m.mode)
 
 		// Navigation
-		case "f", "l", "right":
+		case "l", "right":
 			m.focusDate = advanceFocus(m.focusDate, m.mode, 1)
 			return m, loadAgendaCmd(m.config, m.focusDate, m.mode)
-		case "b", "h", "left":
+		case "h", "left":
 			m.focusDate = advanceFocus(m.focusDate, m.mode, -1)
 			return m, loadAgendaCmd(m.config, m.focusDate, m.mode)
 		case ".", " ":
@@ -801,7 +801,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		// Status change
-		case "s":
+		case "t":
 			if m.cursor < len(m.flatItems) {
 				t := m.flatItems[m.cursor].Task
 				m.statusPickerTask = t
@@ -1012,9 +1012,9 @@ func (m model) renderHelp() string {
 	type binding struct{ key, desc string }
 
 	common := []binding{
-		{"d/w/t/m/y", "switch view (day/week/fortnight/month/year)"},
-		{"f, l, →", "navigate forward"},
-		{"b, h, ←", "navigate backward"},
+		{"d/w/f/m/y", "switch view (day/week/fortnight/month/year)"},
+		{"l, →", "navigate forward"},
+		{"h, ←", "navigate backward"},
 		{"., space", "jump to today"},
 		{"j, ↓", "cursor down"},
 		{"k, ↑", "cursor up"},
@@ -1026,7 +1026,7 @@ func (m model) renderHelp() string {
 		{"C-u", "half-page up"},
 		{"v", "detail view"},
 		{"enter", "open in editor"},
-		{"s", "change status"},
+		{"t", "change status"},
 		{"S", "set scheduled date"},
 		{"D", "set due date"},
 		{"i", "clock in"},
