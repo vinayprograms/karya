@@ -152,6 +152,8 @@ type clockResultMsg struct {
 	err     error
 }
 
+type minuteTickMsg struct{}
+
 func initialModel(cfg *config.Config) model {
 	m := model{
 		config:    cfg,
@@ -176,6 +178,7 @@ func (m model) Init() tea.Cmd {
 	return tea.Batch(
 		loadAgendaCmd(m.config, m.focusDate, m.mode),
 		waitForFileChange(m.watcher),
+		tea.Tick(time.Minute, func(t time.Time) tea.Msg { return minuteTickMsg{} }),
 	)
 }
 
@@ -890,6 +893,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clearStatusMsg:
 		m.statusMessage = ""
 		return m, nil
+
+	case minuteTickMsg:
+		return m, tea.Tick(time.Minute, func(t time.Time) tea.Msg { return minuteTickMsg{} })
 	}
 
 	return m, nil
@@ -1444,10 +1450,12 @@ func (m model) View() string {
 	if m.mode == viewDay {
 		// Day view: time grid with empty hour slots interspersed
 		items := dayItemMap[start]
+		today := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 0, 0, 0, 0, time.Local)
+		isToday := start.Equal(today)
 		if len(items) == 0 {
 			lines = append(lines, colors.dimText.Render("  No scheduled items."))
 		} else {
-			lines, itemIdx = m.renderDayTimeGrid(items, itemIdx)
+			lines, itemIdx = m.renderDayTimeGrid(items, itemIdx, isToday)
 		}
 	} else {
 		// Multi-day views: show all days in range
@@ -1634,7 +1642,7 @@ func (m model) renderItem(item task.AgendaItem, selected bool) string {
 // Timed items are placed chronologically; empty hour slots fill the gaps.
 // Two padding slots are added before the first and after the last timed task,
 // except no trailing padding if the last task ends at/near midnight.
-func (m model) renderDayTimeGrid(items []task.AgendaItem, startIdx int) ([]string, int) {
+func (m model) renderDayTimeGrid(items []task.AgendaItem, startIdx int, isToday bool) ([]string, int) {
 	var timed []task.AgendaItem
 	var untimed []task.AgendaItem
 
@@ -1712,18 +1720,40 @@ func (m model) renderDayTimeGrid(items []task.AgendaItem, startIdx int) ([]strin
 	}
 
 	// Render the time grid
+	now := time.Now()
+	nowRendered := false
+	nowMarker := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11")).
+		Render(fmt.Sprintf("  %s now %s", now.Format("15:04"), strings.Repeat("─", 12)))
+
 	for hour := gridStart; hour < gridEnd; hour++ {
+		if isToday && !nowRendered && hour > now.Hour() {
+			lines = append(lines, nowMarker)
+			nowRendered = true
+		}
+
 		if indices, ok := hourItems[hour]; ok {
 			for _, idx := range indices {
 				item := timed[idx]
+				if isToday && !nowRendered && item.Date.After(now) {
+					lines = append(lines, nowMarker)
+					nowRendered = true
+				}
 				selected := itemIdx == m.cursor
 				lines = append(lines, m.renderItem(item, selected))
 				itemIdx++
 			}
 		} else {
+			if isToday && !nowRendered && hour == now.Hour() {
+				lines = append(lines, nowMarker)
+				nowRendered = true
+			}
 			// Empty hour slot
 			lines = append(lines, colors.dimText.Render(fmt.Sprintf("  %02d:00 ··················", hour)))
 		}
+	}
+
+	if isToday && !nowRendered {
+		lines = append(lines, nowMarker)
 	}
 
 	return lines, itemIdx
