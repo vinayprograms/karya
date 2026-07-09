@@ -217,7 +217,9 @@ func (s *MCPServer) createZettel(ctx context.Context, req *mcp.CallToolRequest, 
 	if actualTitle == "" {
 		actualTitle = "Untitled"
 	}
-	GitCommit(s.zetDir, zetID, actualTitle)
+	if err := GitCommit(s.zetDir, zetID, actualTitle); err != nil {
+		return nil, CreateZettelResult{}, fmt.Errorf("zettel created but git operation failed: %w", err)
+	}
 
 	result := CreateZettelResult{
 		ZettelID: zetID,
@@ -361,7 +363,9 @@ func (s *MCPServer) deleteZettel(ctx context.Context, req *mcp.CallToolRequest, 
 
 	// Git commit the deletion
 	if title != "" {
-		GitDeleteZettel(s.zetDir, args.ZettelID, title)
+		if err := GitDeleteZettel(s.zetDir, args.ZettelID, title); err != nil {
+			return nil, DeleteZettelResult{}, fmt.Errorf("zettel deleted but git operation failed: %w", err)
+		}
 	}
 
 	return nil, DeleteZettelResult{
@@ -390,7 +394,9 @@ func (s *MCPServer) updateZettel(ctx context.Context, req *mcp.CallToolRequest, 
 	if title == "" {
 		title = "Untitled"
 	}
-	GitCommit(s.zetDir, args.ZettelID, title)
+	if err := GitCommit(s.zetDir, args.ZettelID, title); err != nil {
+		return nil, UpdateZettelResult{}, fmt.Errorf("zettel updated but git operation failed: %w", err)
+	}
 
 	return nil, UpdateZettelResult{
 		Message: fmt.Sprintf("Updated zettel %s", args.ZettelID),

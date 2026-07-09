@@ -10,6 +10,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	kgit "github.com/vinayprograms/karya/internal/git"
 )
 
 // getSignature returns a git signature using the user's configured git identity.
@@ -108,9 +109,13 @@ func GitCommit(zetDir, zetID, title string) error {
 	}
 
 	// Push to remote
-	err = repo.Push(&git.PushOptions{})
+	auth, authErr := kgit.SSHAuthForRepo(repo)
+	if authErr != nil {
+		return fmt.Errorf("commit succeeded but push skipped: %w", authErr)
+	}
+	err = repo.Push(&git.PushOptions{Auth: auth})
 	if err != nil && err != git.NoErrAlreadyUpToDate {
-		return err
+		return fmt.Errorf("commit succeeded but push failed: %w", err)
 	}
 
 	return nil
@@ -173,9 +178,13 @@ func GitDeleteZettel(zetDir, zetID, title string) error {
 	}
 
 	// Push to remote
-	err = repo.Push(&git.PushOptions{})
+	auth, authErr := kgit.SSHAuthForRepo(repo)
+	if authErr != nil {
+		return fmt.Errorf("delete committed but push skipped: %w", authErr)
+	}
+	err = repo.Push(&git.PushOptions{Auth: auth})
 	if err != nil && err != git.NoErrAlreadyUpToDate {
-		return err
+		return fmt.Errorf("delete committed but push failed: %w", err)
 	}
 
 	return nil
