@@ -39,9 +39,10 @@ type TaskInfo struct {
 	FilePath    string   `json:"file_path" jsonschema:"file path where task is defined"`
 	Priority    int      `json:"priority" jsonschema:"priority level (1=in_progress, 2=active, 3=someday, 4=completed)"`
 	Status      string   `json:"status" jsonschema:"status category (active, in_progress, completed, someday)"`
-	InCycle     bool       `json:"in_cycle,omitempty" jsonschema:"true if task participates in a circular dependency"`
-	Children    []TaskInfo `json:"children,omitempty" jsonschema:"child tasks nested under this task"`
-	RawContent  string     `json:"raw_content,omitempty" jsonschema:"raw file content of task and all indented lines below it"`
+	InCycle    bool   `json:"in_cycle,omitempty" jsonschema:"true if task participates in a circular dependency"`
+	ParentID   string `json:"parent_id,omitempty" jsonschema:"ID of parent task (if this is a sub-task)"`
+	ChildCount int    `json:"child_count,omitempty" jsonschema:"number of direct child tasks"`
+	RawContent string `json:"raw_content,omitempty" jsonschema:"raw file content of task and all indented lines below it"`
 }
 
 type GetTaskArgs struct {
@@ -408,9 +409,9 @@ func (s *MCPServer) taskToInfo(t *Task) TaskInfo {
 		status = "completed"
 	}
 
-	var children []TaskInfo
-	for _, child := range t.Children {
-		children = append(children, s.taskToInfo(child))
+	var parentID string
+	if t.Parent != nil && t.Parent.ID != "" {
+		parentID = t.Parent.ID
 	}
 
 	return TaskInfo{
@@ -428,7 +429,8 @@ func (s *MCPServer) taskToInfo(t *Task) TaskInfo {
 		Priority:    t.Priority(s.config),
 		Status:      status,
 		InCycle:     t.InCycle,
-		Children:    children,
+		ParentID:    parentID,
+		ChildCount:  len(t.Children),
 	}
 }
 
