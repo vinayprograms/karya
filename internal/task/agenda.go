@@ -242,6 +242,10 @@ func addAgendaEntries(c *config.Config, t *Task, dateToken string, isDeadline bo
 			}
 			if completed {
 				item.CompletedAt = lastClockOut(t, schedDay)
+				if !item.CompletedAt.IsZero() && item.HasTime {
+					item.Date = item.CompletedAt
+					item.HasEnd = false
+				}
 			}
 			if warningDays > 0 {
 				warningStart := schedDay.AddDate(0, 0, -warningDays)

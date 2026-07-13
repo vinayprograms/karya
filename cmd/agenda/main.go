@@ -1169,12 +1169,14 @@ func flattenDayItems(days []task.AgendaDay) []task.AgendaItem {
 		all = append(all, day.Items...)
 	}
 
-	var timed, untimed []task.AgendaItem
+	var timed, overdue, todayUntimed []task.AgendaItem
 	for _, item := range all {
-		if item.HasTime {
+		if item.HasTime && !item.IsOverdue {
 			timed = append(timed, item)
+		} else if item.IsOverdue {
+			overdue = append(overdue, item)
 		} else {
-			untimed = append(untimed, item)
+			todayUntimed = append(todayUntimed, item)
 		}
 	}
 
@@ -1183,13 +1185,14 @@ func flattenDayItems(days []task.AgendaDay) []task.AgendaItem {
 		return all
 	}
 
-	// Sort timed items by hour to match renderDayTimeGrid's chronological rendering
+	// Sort timed items chronologically to match renderDayTimeGrid
 	sort.SliceStable(timed, func(i, j int) bool {
-		return timed[i].Date.Hour() < timed[j].Date.Hour()
+		return timed[i].Date.Before(timed[j].Date)
 	})
 
 	var result []task.AgendaItem
-	result = append(result, untimed...)
+	result = append(result, overdue...)
+	result = append(result, todayUntimed...)
 	result = append(result, timed...)
 	return result
 }
@@ -1230,13 +1233,16 @@ func (m *model) buildLineMapping() {
 // buildDayGridLineMapping mirrors renderDayTimeGrid's output structure for cursor mapping.
 func (m *model) buildDayGridLineMapping(items []task.AgendaItem, cursorToLine *[]int, lineIdx int) int {
 	var timed []task.AgendaItem
-	var untimed []task.AgendaItem
+	var overdue []task.AgendaItem
+	var todayUntimed []task.AgendaItem
 
 	for _, item := range items {
-		if item.HasTime {
+		if item.HasTime && !item.IsOverdue {
 			timed = append(timed, item)
+		} else if item.IsOverdue {
+			overdue = append(overdue, item)
 		} else {
-			untimed = append(untimed, item)
+			todayUntimed = append(todayUntimed, item)
 		}
 	}
 
@@ -1248,12 +1254,21 @@ func (m *model) buildDayGridLineMapping(items []task.AgendaItem, cursorToLine *[
 		return lineIdx
 	}
 
-	// Untimed items first
-	for range untimed {
+	// Overdue items
+	for range overdue {
 		*cursorToLine = append(*cursorToLine, lineIdx)
 		lineIdx++
 	}
-	if len(untimed) > 0 {
+	if len(overdue) > 0 {
+		lineIdx++ // separator line
+	}
+
+	// Today's untimed items
+	for range todayUntimed {
+		*cursorToLine = append(*cursorToLine, lineIdx)
+		lineIdx++
+	}
+	if len(todayUntimed) > 0 {
 		lineIdx++ // separator line
 	}
 
@@ -1288,18 +1303,47 @@ func (m *model) buildDayGridLineMapping(items []task.AgendaItem, cursorToLine *[
 		gridEnd = 24
 	}
 
-	hourItems := make(map[int]int) // hour -> count of items
-	for _, item := range timed {
-		hourItems[item.Date.Hour()]++
+	sort.SliceStable(timed, func(i, j int) bool {
+		return timed[i].Date.Before(timed[j].Date)
+	})
+
+	hourItemIndices := make(map[int][]int) // hour -> indices into timed slice
+	for i, item := range timed {
+		hourItemIndices[item.Date.Hour()] = append(hourItemIndices[item.Date.Hour()], i)
+	}
+
+	// Mirror gap computation from renderDayTimeGrid
+	gapAfter := make(map[int]bool)
+	hoursInGap := make(map[int]bool)
+	for i := 0; i < len(timed)-1; i++ {
+		if !timed[i].HasEnd || timed[i].IsCompleted {
+			continue
+		}
+		if timed[i+1].IsCompleted {
+			continue
+		}
+		endTime := timed[i].EndTime
+		nextStart := timed[i+1].Date
+		if nextStart.Sub(endTime) >= 15*time.Minute {
+			gapAfter[i] = true
+			for h := endTime.Hour(); h < nextStart.Hour(); h++ {
+				if _, occupied := hourItemIndices[h]; !occupied {
+					hoursInGap[h] = true
+				}
+			}
+		}
 	}
 
 	for hour := gridStart; hour < gridEnd; hour++ {
-		if count, ok := hourItems[hour]; ok {
-			for range count {
+		if indices, ok := hourItemIndices[hour]; ok {
+			for _, idx := range indices {
 				*cursorToLine = append(*cursorToLine, lineIdx)
 				lineIdx++
+				if gapAfter[idx] {
+					lineIdx++ // gap indicator line
+				}
 			}
-		} else {
+		} else if !hoursInGap[hour] {
 			lineIdx++ // empty slot line
 		}
 	}
@@ -1644,13 +1688,16 @@ func (m model) renderItem(item task.AgendaItem, selected bool) string {
 // except no trailing padding if the last task ends at/near midnight.
 func (m model) renderDayTimeGrid(items []task.AgendaItem, startIdx int, isToday bool) ([]string, int) {
 	var timed []task.AgendaItem
-	var untimed []task.AgendaItem
+	var overdue []task.AgendaItem
+	var todayUntimed []task.AgendaItem
 
 	for _, item := range items {
-		if item.HasTime {
+		if item.HasTime && !item.IsOverdue {
 			timed = append(timed, item)
+		} else if item.IsOverdue {
+			overdue = append(overdue, item)
 		} else {
-			untimed = append(untimed, item)
+			todayUntimed = append(todayUntimed, item)
 		}
 	}
 
@@ -1702,20 +1749,59 @@ func (m model) renderDayTimeGrid(items []task.AgendaItem, startIdx int, isToday 
 		gridEnd = 24
 	}
 
+	// Sort timed items strictly by time for chronological rendering
+	sort.SliceStable(timed, func(i, j int) bool {
+		return timed[i].Date.Before(timed[j].Date)
+	})
+
 	// Build a map: hour -> items starting in that hour
 	hourItems := make(map[int][]int) // hour -> indices into timed slice
 	for i, item := range timed {
 		hourItems[item.Date.Hour()] = append(hourItems[item.Date.Hour()], i)
 	}
 
-	// Render untimed items first (overdue, deadlines, all-day)
-	for _, item := range untimed {
+	// Pre-compute gaps between consecutive timed items (≥15 min free).
+	// Only consider items that occupy real calendar slots (have an end time,
+	// not overdue, not completed).
+	gapAfter := make(map[int]time.Duration) // index into timed -> gap duration
+	hoursInGap := make(map[int]bool)        // hours covered by a gap (suppress empty-hour markers)
+	for i := 0; i < len(timed)-1; i++ {
+		if !timed[i].HasEnd || timed[i].IsCompleted {
+			continue
+		}
+		if timed[i+1].IsCompleted {
+			continue
+		}
+		endTime := timed[i].EndTime
+		nextStart := timed[i+1].Date
+		gap := nextStart.Sub(endTime)
+		if gap >= 15*time.Minute {
+			gapAfter[i] = gap
+			for h := endTime.Hour(); h < nextStart.Hour(); h++ {
+				if _, occupied := hourItems[h]; !occupied {
+					hoursInGap[h] = true
+				}
+			}
+		}
+	}
+
+	// Render overdue items first
+	for _, item := range overdue {
 		selected := itemIdx == m.cursor
 		lines = append(lines, m.renderItem(item, selected))
 		itemIdx++
 	}
+	if len(overdue) > 0 {
+		lines = append(lines, colors.dimText.Render("  ─────────────────"))
+	}
 
-	if len(untimed) > 0 {
+	// Render today's untimed items (scheduled for today, no specific time)
+	for _, item := range todayUntimed {
+		selected := itemIdx == m.cursor
+		lines = append(lines, m.renderItem(item, selected))
+		itemIdx++
+	}
+	if len(todayUntimed) > 0 {
 		lines = append(lines, colors.dimText.Render("  ─────────────────"))
 	}
 
@@ -1741,8 +1827,13 @@ func (m model) renderDayTimeGrid(items []task.AgendaItem, startIdx int, isToday 
 				selected := itemIdx == m.cursor
 				lines = append(lines, m.renderItem(item, selected))
 				itemIdx++
+
+				if gap, hasGap := gapAfter[idx]; hasGap {
+					lines = append(lines, colors.dimText.Render(
+						fmt.Sprintf("  ··· %s free ···········", formatGapDuration(gap))))
+				}
 			}
-		} else {
+		} else if !hoursInGap[hour] {
 			if isToday && !nowRendered && hour == now.Hour() {
 				lines = append(lines, nowMarker)
 				nowRendered = true
@@ -1757,6 +1848,17 @@ func (m model) renderDayTimeGrid(items []task.AgendaItem, startIdx int, isToday 
 	}
 
 	return lines, itemIdx
+}
+
+func formatGapDuration(d time.Duration) string {
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	if h > 0 && m > 0 {
+		return fmt.Sprintf("%dh%dm", h, m)
+	} else if h > 0 {
+		return fmt.Sprintf("%dh", h)
+	}
+	return fmt.Sprintf("%dm", m)
 }
 
 func (m model) formatScheduleInfo(item task.AgendaItem) string {
