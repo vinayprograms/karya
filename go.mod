@@ -10,6 +10,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.10.1
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-git/go-git/v5 v5.16.3
+	github.com/gorilla/websocket v1.5.3
 	github.com/kevinburke/ssh_config v1.2.0
 	github.com/modelcontextprotocol/go-sdk v1.2.0
 	github.com/willyv3/gogh-themes v1.2.0
