@@ -22,13 +22,14 @@ func IsJiraID(id string) bool {
 
 // SyncFromJira pulls open JIRA tickets assigned to the user, creates or updates
 // corresponding tasks in karya, and handles disappeared tickets.
-func SyncFromJira(ctx context.Context, cfg *config.Config, client *jira.Client) error {
+// Returns the count of issues found in JIRA.
+func SyncFromJira(ctx context.Context, cfg *config.Config, client *jira.Client) (int, error) {
 	jql := "assignee = currentUser() AND resolution = Unresolved"
 	if len(cfg.Jira.ExcludeProjects) > 0 {
 		var valid []string
 		for _, p := range cfg.Jira.ExcludeProjects {
 			if !jiraProjectKeyRe.MatchString(p) {
-				return fmt.Errorf("invalid project key in exclude_projects: %q", p)
+				return 0, fmt.Errorf("invalid project key in exclude_projects: %q", p)
 			}
 			valid = append(valid, p)
 		}
@@ -37,12 +38,12 @@ func SyncFromJira(ctx context.Context, cfg *config.Config, client *jira.Client) 
 	jql += " ORDER BY updated DESC"
 	issues, err := client.SearchIssues(ctx, jql)
 	if err != nil {
-		return fmt.Errorf("searching JIRA: %w", err)
+		return 0, fmt.Errorf("searching JIRA: %w", err)
 	}
 
 	tasks, err := ListTasks(cfg, "", true)
 	if err != nil {
-		return fmt.Errorf("loading karya tasks: %w", err)
+		return 0, fmt.Errorf("loading karya tasks: %w", err)
 	}
 
 	// Build map of existing JIRA tasks in karya
@@ -75,11 +76,11 @@ func SyncFromJira(ctx context.Context, cfg *config.Config, client *jira.Client) 
 
 		if existing, ok := existingJira[issue.Key]; ok {
 			if err := updateExistingTask(cfg, existing, issue, issueKeys); err != nil {
-				return fmt.Errorf("updating %s: %w", issue.Key, err)
+				return 0, fmt.Errorf("updating %s: %w", issue.Key, err)
 			}
 		} else {
 			if err := appendNewTask(cfg, issue, issueKeys); err != nil {
-				return fmt.Errorf("appending %s: %w", issue.Key, err)
+				return 0, fmt.Errorf("appending %s: %w", issue.Key, err)
 			}
 		}
 	}
@@ -94,11 +95,11 @@ func SyncFromJira(ctx context.Context, cfg *config.Config, client *jira.Client) 
 			continue
 		}
 		if err := handleDisappearedTicket(ctx, cfg, client, t); err != nil {
-			return fmt.Errorf("handling disappeared %s: %w", id, err)
+			return 0, fmt.Errorf("handling disappeared %s: %w", id, err)
 		}
 	}
 
-	return nil
+	return len(issues), nil
 }
 
 func handleDisappearedTicket(ctx context.Context, cfg *config.Config, client *jira.Client, t *Task) error {

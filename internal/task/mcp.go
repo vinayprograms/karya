@@ -287,7 +287,7 @@ func (s *MCPServer) runJiraSync(ctx context.Context) {
 
 func (s *MCPServer) doJiraSync(ctx context.Context) {
 	for _, client := range s.jiraClients {
-		if err := SyncFromJira(ctx, s.config, client); err != nil {
+		if _, err := SyncFromJira(ctx, s.config, client); err != nil {
 			log.Printf("JIRA sync error: %v", err)
 		}
 	}
@@ -952,7 +952,7 @@ func (s *MCPServer) syncJira(ctx context.Context, req *mcp.CallToolRequest, args
 	}
 
 	for _, client := range s.jiraClients {
-		if err := SyncFromJira(ctx, s.config, client); err != nil {
+		if _, err := SyncFromJira(ctx, s.config, client); err != nil {
 			return nil, SyncJiraResult{}, fmt.Errorf("sync failed: %w", err)
 		}
 	}
