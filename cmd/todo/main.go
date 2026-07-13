@@ -443,6 +443,9 @@ type model struct {
 	// Terminal dimensions
 	termWidth  int
 	termHeight int
+
+	// Background sync errors (printed to stderr on exit)
+	jiraSyncLog []string
 }
 
 func (m model) calcMaxTitleWidth() int {
@@ -460,10 +463,63 @@ func (m model) calcMaxTitleWidth() int {
 }
 
 func (m model) Init() tea.Cmd {
-	return waitForFileChange(m.watcher)
+	cmds := []tea.Cmd{waitForFileChange(m.watcher)}
+	if m.config.HasJira() {
+		cmds = append(cmds, jiraSyncCmd(m.config))
+	}
+	return tea.Batch(cmds...)
 }
 
 type fileChangedMsg struct{}
+
+type jiraSyncDoneMsg struct {
+	results []jiraSyncResult
+}
+
+type jiraSyncResult struct {
+	conn  string
+	count int
+	err   error
+}
+
+func jiraSyncCmd(cfg *configpkg.Config) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		var results []jiraSyncResult
+		for _, conn := range cfg.Jira.Connections {
+			r := jiraSyncResult{conn: conn.Name}
+			client, err := jira.NewClient(conn.Name)
+			if err != nil {
+				r.err = fmt.Errorf("client: %w", err)
+				results = append(results, r)
+				continue
+			}
+			if err := client.Init(ctx); err != nil {
+				r.err = fmt.Errorf("init: %w", err)
+				results = append(results, r)
+				continue
+			}
+			count, err := task.SyncFromJira(ctx, cfg, client)
+			if err != nil {
+				r.err = fmt.Errorf("sync: %w", err)
+				results = append(results, r)
+				continue
+			}
+			r.count = count
+			results = append(results, r)
+		}
+		return jiraSyncDoneMsg{results: results}
+	}
+}
+
+func jiraSyncTick() tea.Cmd {
+	return tea.Tick(5*time.Minute, func(t time.Time) tea.Msg {
+		return jiraSyncTickMsg{}
+	})
+}
+
+type jiraSyncTickMsg struct{}
 
 type loadingStartMsg struct{}
 type loadingDoneMsg struct {
@@ -914,6 +970,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Continue watching for changes
 		return m, waitForFileChange(m.watcher)
+	case jiraSyncDoneMsg:
+		for _, r := range msg.results {
+			if r.err != nil {
+				m.list.Title = fmt.Sprintf("⚠️ JIRA sync failed: [%s] %v", r.conn, r.err)
+				m.jiraSyncLog = append(m.jiraSyncLog, fmt.Sprintf("%s  [%s] %v", time.Now().Format("15:04:05"), r.conn, r.err))
+			} else {
+				m.jiraSyncLog = append(m.jiraSyncLog, fmt.Sprintf("%s  [%s] ok (%d issues)", time.Now().Format("15:04:05"), r.conn, r.count))
+			}
+		}
+		return m, jiraSyncTick()
+	case jiraSyncTickMsg:
+		return m, jiraSyncCmd(m.config)
 	case loadingStartMsg:
 		// Start loading
 		m.loading = true
@@ -1226,14 +1294,16 @@ func (m model) View() string {
 		view = filterInfo + "\n" + view
 	}
 
-	// Show status message if present
+	// Show status message by replacing the help bar line
 	if m.statusMessage != "" {
-		statusInfo := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("10")).
-			Background(lipgloss.Color("0")).
-			Padding(0, 1).
+		lines := strings.Split(view, "\n")
+		statusLine := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("9")).
 			Render(m.statusMessage)
-		view = view + "\n" + statusInfo
+		if len(lines) > 1 {
+			lines[len(lines)-1] = statusLine
+		}
+		view = strings.Join(lines, "\n")
 	}
 
 	return view
@@ -2050,10 +2120,7 @@ func main() {
 		}
 	}
 
-	// Run JIRA sync on startup if configured
-	if config.HasJira() {
-		syncJiraOnce(config)
-	}
+	// JIRA sync runs as background tick inside the TUI (see Init/jiraSyncCmd)
 
 	if len(args) == 0 {
 		// Interactive TUI mode
@@ -2487,8 +2554,17 @@ func showInteractiveTUI(config *configpkg.Config, project string) {
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
+	finalModel, err := p.Run()
+	if err != nil {
 		log.Fatal(err)
+	}
+
+	// Print JIRA sync log from the session
+	if fm, ok := finalModel.(model); ok && len(fm.jiraSyncLog) > 0 {
+		fmt.Fprintf(os.Stderr, "\nJIRA sync log:\n")
+		for _, e := range fm.jiraSyncLog {
+			fmt.Fprintf(os.Stderr, "  %s\n", e)
+		}
 	}
 
 	// Clean up watcher
@@ -2570,27 +2646,3 @@ func printProjectsList(summary map[string]int) {
 	}
 }
 
-func syncJiraOnce(cfg *configpkg.Config) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	for _, conn := range cfg.Jira.Connections {
-		fmt.Fprintf(os.Stderr, "JIRA sync [%s]: connecting...\n", conn.Name)
-		client, err := jira.NewClient(conn.Name)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "JIRA sync [%s]: %v\n", conn.Name, err)
-			continue
-		}
-		fmt.Fprintf(os.Stderr, "JIRA sync [%s]: resolving site...\n", conn.Name)
-		if err := client.Init(ctx); err != nil {
-			fmt.Fprintf(os.Stderr, "JIRA sync [%s]: %v\n", conn.Name, err)
-			continue
-		}
-		fmt.Fprintf(os.Stderr, "JIRA sync [%s]: pulling tickets...\n", conn.Name)
-		if err := task.SyncFromJira(ctx, cfg, client); err != nil {
-			fmt.Fprintf(os.Stderr, "JIRA sync [%s]: %v\n", conn.Name, err)
-			continue
-		}
-		fmt.Fprintf(os.Stderr, "JIRA sync [%s]: done\n", conn.Name)
-	}
-}
