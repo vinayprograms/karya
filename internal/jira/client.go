@@ -81,11 +81,12 @@ func (c *Client) Init(ctx context.Context) error {
 // SearchIssues executes a JQL query and returns matching issues.
 func (c *Client) SearchIssues(ctx context.Context, jql string) ([]Issue, error) {
 	args := map[string]any{
-		"cloudId": c.cloudID,
-		"jql":     jql,
-		"fields":  []string{"summary", "description", "status", "assignee", "duedate", "labels", "issuetype", "parent", "comment"},
+		"cloudId":               c.cloudID,
+		"jql":                   jql,
+		"fields":                []string{"summary", "description", "status", "assignee", "duedate", "labels", "issuetype", "parent", "comment"},
 		"responseContentFormat": "markdown",
 		"maxResults":            100,
+		"searchResultMode":      "issues",
 	}
 
 	result, err := c.callTool(ctx, "searchJiraIssuesUsingJql", args)
