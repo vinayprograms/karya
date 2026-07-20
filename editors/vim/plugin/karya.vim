@@ -85,7 +85,7 @@ function! s:KaryaSyntax() abort
   " Clear syntax state so we re-apply from scratch
   silent! syn clear karyaActive karyaInprogress karyaCompleted karyaSomeday
   silent! syn clear karyaCompletedLine karyaAssignee karyaScheduled karyaDue
-  silent! syn clear karyaClock karyaLog karyaJira
+  silent! syn clear karyaClock karyaLog karyaJira karyaTag
 
   let data = s:LoadColors()
   if empty(data)
@@ -165,6 +165,17 @@ function! s:KaryaSyntax() abort
   " JIRA keys
   syn match karyaJira /\<[A-Z]\{2,}-\d\+\>/ containedin=ALL
   hi def link karyaJira Underlined
+
+  " Tags (exclude completed lines so they inherit strikethrough)
+  let tag_fg = has_key(data.elements, 'tag') ? get(data.elements.tag, 'fg', '') : ''
+  let tag_bg = has_key(data.elements, 'tag') ? get(data.elements.tag, 'bg', '') : ''
+  let tag_hi = s:ColorToHighlight(tag_fg, tag_bg)
+  syn match karyaTag /#[a-zA-Z0-9_-]\+/ containedin=ALLBUT,karyaCompletedLine
+  if tag_hi != ''
+    exe 'hi karyaTag ' . tag_hi
+  else
+    hi def link karyaTag Identifier
+  endif
 endfunction
 
 function! s:HighlightDates(data) abort
