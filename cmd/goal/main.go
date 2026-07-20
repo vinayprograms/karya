@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	colorspkg "github.com/vinayprograms/karya/internal/colors"
 	"github.com/vinayprograms/karya/internal/config"
 	"github.com/vinayprograms/karya/internal/goal"
 
@@ -925,6 +926,18 @@ func (m *Model) editGoal() tea.Cmd {
 
 func main() {
 	args := os.Args[1:]
+
+	if len(args) > 0 && args[0] == "colors" {
+		cfg, err := config.Load()
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := colorspkg.Print(cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if len(args) > 0 && args[0] == "mcp" {
 		cfg, err := config.Load()

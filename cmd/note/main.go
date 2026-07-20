@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	colorspkg "github.com/vinayprograms/karya/internal/colors"
 	"github.com/vinayprograms/karya/internal/config"
 	"github.com/vinayprograms/karya/internal/note"
 	"github.com/vinayprograms/karya/internal/task"
@@ -2150,6 +2151,14 @@ func main() {
 
 	if args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		printHelp()
+		return
+	}
+
+	if args[0] == "colors" {
+		if err := colorspkg.Print(cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 
