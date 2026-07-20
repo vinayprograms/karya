@@ -69,11 +69,23 @@ function! s:LoadColors() abort
   endtry
 endfunction
 
-function! s:KaryaSyntax() abort
-  if exists('b:karya_syntax_loaded')
-    return
+function! s:ClearKaryaMatches() abort
+  if exists('b:karya_match_ids')
+    for id in b:karya_match_ids
+      silent! call matchdelete(id)
+    endfor
   endif
-  let b:karya_syntax_loaded = 1
+  let b:karya_match_ids = []
+endfunction
+
+function! s:KaryaSyntax() abort
+  " Clear position-based matches from previous load
+  call s:ClearKaryaMatches()
+
+  " Clear syntax state so we re-apply from scratch
+  silent! syn clear karyaActive karyaInprogress karyaCompleted karyaSomeday
+  silent! syn clear karyaCompletedLine karyaAssignee karyaScheduled karyaDue
+  silent! syn clear karyaClock karyaLog karyaJira
 
   let data = s:LoadColors()
   if empty(data)
@@ -195,9 +207,11 @@ function! s:HighlightDates(data) abort
       endif
       let date_str = matchstr(m, '\d\{4}-\d\{2}-\d\{2}')
       if date_str < today
-        call matchaddpos('karyaOverdue', [[lnum, mstart + 1, mend - mstart]])
+        let mid = matchaddpos('karyaOverdue', [[lnum, mstart + 1, mend - mstart]])
+        if mid != -1 | call add(b:karya_match_ids, mid) | endif
       elseif date_str == today
-        call matchaddpos('karyaDeadline', [[lnum, mstart + 1, mend - mstart]])
+        let mid = matchaddpos('karyaDeadline', [[lnum, mstart + 1, mend - mstart]])
+        if mid != -1 | call add(b:karya_match_ids, mid) | endif
       endif
       let start = mend
     endwhile
@@ -208,4 +222,6 @@ endfunction
 augroup karya_syntax
   autocmd!
   autocmd FileType markdown call s:KaryaSyntax()
+  autocmd BufRead *.md call s:KaryaSyntax()
+  autocmd FileChangedShellPost *.md call s:KaryaSyntax()
 augroup END
