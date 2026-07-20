@@ -691,13 +691,32 @@ func filterByDate(tasks []*Task, date string) []*Task {
 	if date == "" {
 		return tasks
 	}
-	if result := compareDateField(tasks, date, func(t *Task) string { return t.ScheduledAt }); result != nil {
-		return result
+	// Try comparison operators — check both scheduled and due fields
+	schedResult := compareDateField(tasks, date, func(t *Task) string { return t.ScheduledAt })
+	dueResult := compareDateField(tasks, date, func(t *Task) string { return t.DueAt })
+	if schedResult != nil || dueResult != nil {
+		seen := make(map[*Task]bool)
+		var merged []*Task
+		for _, t := range schedResult {
+			if !seen[t] {
+				seen[t] = true
+				merged = append(merged, t)
+			}
+		}
+		for _, t := range dueResult {
+			if !seen[t] {
+				seen[t] = true
+				merged = append(merged, t)
+			}
+		}
+		return merged
 	}
+	// Substring fallback — check both fields
 	var filtered []*Task
 	dateLower := strings.ToLower(date)
 	for _, task := range tasks {
-		if strings.Contains(strings.ToLower(task.ScheduledAt), dateLower) {
+		if strings.Contains(strings.ToLower(task.ScheduledAt), dateLower) ||
+			strings.Contains(strings.ToLower(task.DueAt), dateLower) {
 			filtered = append(filtered, task)
 		}
 	}

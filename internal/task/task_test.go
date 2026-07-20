@@ -893,6 +893,37 @@ func TestFilterByDueDateOverdue(t *testing.T) {
 	}
 }
 
+func TestFilterByDateBothFields(t *testing.T) {
+	yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+	tomorrow := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+
+	tasks := []*Task{
+		{Title: "Scheduled overdue", ScheduledAt: yesterday, Keyword: "TODO"},
+		{Title: "Due overdue", DueAt: yesterday, Keyword: "TODO"},
+		{Title: "Both overdue", ScheduledAt: yesterday, DueAt: yesterday, Keyword: "TODO"},
+		{Title: "Future", ScheduledAt: tomorrow, DueAt: tomorrow, Keyword: "TODO"},
+		{Title: "No dates", Keyword: "TODO"},
+	}
+
+	// @overdue should find tasks with EITHER field overdue, no duplicates
+	result := FilterTasks(tasks, "@overdue")
+	if len(result) != 3 {
+		t.Fatalf("@overdue got %d tasks, want 3", len(result))
+	}
+
+	// @<tomorrow should find both scheduled and due tasks before tomorrow
+	result = FilterTasks(tasks, "@<"+tomorrow)
+	if len(result) != 3 {
+		t.Fatalf("@<%s got %d tasks, want 3", tomorrow, len(result))
+	}
+
+	// Substring fallback checks both fields (all dated tasks match same month)
+	result = FilterTasks(tasks, "@"+yesterday[:7])
+	if len(result) != 4 {
+		t.Fatalf("@%s substring got %d tasks, want 4", yesterday[:7], len(result))
+	}
+}
+
 func makeProcessFileConfig(t *testing.T) (*config.Config, string) {
 	t.Helper()
 	tmpDir := t.TempDir()
