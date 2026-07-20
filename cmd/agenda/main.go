@@ -275,6 +275,12 @@ type statusUpdateMsg struct {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Clear status message regardless of UI state
+	if _, ok := msg.(clearStatusMsg); ok {
+		m.statusMessage = ""
+		return m, nil
+	}
+
 	// Help overlay
 	if m.showingHelp {
 		switch msg := msg.(type) {
@@ -890,10 +896,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			loadAgendaCmd(m.config, m.focusDate, m.mode),
 			tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }),
 		)
-
-	case clearStatusMsg:
-		m.statusMessage = ""
-		return m, nil
 
 	case minuteTickMsg:
 		return m, tea.Tick(time.Minute, func(t time.Time) tea.Msg { return minuteTickMsg{} })
