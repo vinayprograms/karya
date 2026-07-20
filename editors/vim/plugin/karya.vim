@@ -48,11 +48,15 @@ function! s:ColorToHighlight(fg, ...) abort
   let parts = []
   if a:fg != '' && a:fg =~# '^#'
     call add(parts, 'guifg=' . a:fg)
-    call add(parts, 'ctermfg=' . s:HexTo256(a:fg))
+    if !has('termguicolors') || !&termguicolors
+      call add(parts, 'ctermfg=' . s:HexTo256(a:fg))
+    endif
   endif
   if bg != '' && bg =~# '^#'
     call add(parts, 'guibg=' . bg)
-    call add(parts, 'ctermbg=' . s:HexTo256(bg))
+    if !has('termguicolors') || !&termguicolors
+      call add(parts, 'ctermbg=' . s:HexTo256(bg))
+    endif
   endif
   return join(parts, ' ')
 endfunction
@@ -85,7 +89,7 @@ function! s:KaryaSyntax() abort
   " Clear syntax state so we re-apply from scratch
   silent! syn clear karyaActive karyaInprogress karyaCompleted karyaSomeday
   silent! syn clear karyaCompletedLine karyaAssignee karyaScheduled karyaDue
-  silent! syn clear karyaClock karyaLog karyaJira karyaTag
+  silent! syn clear karyaClock karyaLog karyaJira karyaTag karyaSpecialTag
 
   let data = s:LoadColors()
   if empty(data)
@@ -166,11 +170,26 @@ function! s:KaryaSyntax() abort
   syn match karyaJira /\<[A-Z]\{2,}-\d\+\>/ containedin=ALL
   hi def link karyaJira Underlined
 
-  " Tags (exclude completed lines so they inherit strikethrough)
+  " Tags — regular and special (exclude completed lines)
   let tag_fg = has_key(data.elements, 'tag') ? get(data.elements.tag, 'fg', '') : ''
   let tag_bg = has_key(data.elements, 'tag') ? get(data.elements.tag, 'bg', '') : ''
   let tag_hi = s:ColorToHighlight(tag_fg, tag_bg)
-  syn match karyaTag /#[a-zA-Z0-9_-]\+/ containedin=ALLBUT,karyaCompletedLine
+  let special_tag_fg = has_key(data.elements, 'special-tag') ? get(data.elements['special-tag'], 'fg', '') : ''
+  let special_tag_bg = has_key(data.elements, 'special-tag') ? get(data.elements['special-tag'], 'bg', '') : ''
+  let special_tag_hi = s:ColorToHighlight(special_tag_fg, special_tag_bg)
+
+  let special_tags = has_key(data, 'special_tags') ? data.special_tags : []
+  if !empty(special_tags)
+    let special_pat = '\%(#\%(' . join(special_tags, '\|') . '\)\)\>'
+    exe 'syn match karyaSpecialTag /' . special_pat . '/ containedin=ALLBUT,karyaCompletedLine'
+    if special_tag_hi != ''
+      exe 'hi karyaSpecialTag cterm=bold gui=bold ' . special_tag_hi
+    else
+      hi def link karyaSpecialTag WarningMsg
+    endif
+  endif
+
+  syn match karyaTag /#[a-zA-Z0-9_-]\+/ containedin=ALLBUT,karyaCompletedLine,karyaSpecialTag
   if tag_hi != ''
     exe 'hi karyaTag ' . tag_hi
   else
