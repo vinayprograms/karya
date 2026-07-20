@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/vinayprograms/karya/internal/config"
 	"github.com/vinayprograms/karya/internal/parallel"
@@ -606,30 +607,95 @@ func filterByAssignee(tasks []*Task, assignee string) []*Task {
 	return filtered
 }
 
-// filterByDate filters tasks by the simple date field (now treated as scheduled date)
-func filterByDate(tasks []*Task, date string) []*Task {
-	if date == "" {
-		return tasks
+// compareDateField attempts date comparison filtering using operators (<, <=, >, >=, .., overdue).
+// Returns nil if the expression doesn't contain a recognized operator (caller should fall through to substring).
+func compareDateField(tasks []*Task, expr string, fieldFn func(*Task) string) []*Task {
+	var op string
+	var targetStr string
+	var rangeEnd string
+
+	switch {
+	case expr == "overdue":
+		op = "<"
+		targetStr = time.Now().Format("2006-01-02")
+	case strings.HasPrefix(expr, "<="):
+		op = "<="
+		targetStr = strings.TrimSpace(expr[2:])
+	case strings.HasPrefix(expr, ">="):
+		op = ">="
+		targetStr = strings.TrimSpace(expr[2:])
+	case strings.HasPrefix(expr, "<"):
+		op = "<"
+		targetStr = strings.TrimSpace(expr[1:])
+	case strings.HasPrefix(expr, ">"):
+		op = ">"
+		targetStr = strings.TrimSpace(expr[1:])
+	case strings.Contains(expr, ".."):
+		op = ".."
+		parts := strings.SplitN(expr, "..", 2)
+		targetStr = strings.TrimSpace(parts[0])
+		rangeEnd = strings.TrimSpace(parts[1])
+	default:
+		return nil
+	}
+
+	target, err := ParseSchedule(targetStr)
+	if err != nil {
+		return nil
+	}
+	targetDay := truncateToDay(target.Date)
+
+	var endDay time.Time
+	if op == ".." {
+		end, err := ParseSchedule(rangeEnd)
+		if err != nil {
+			return nil
+		}
+		endDay = truncateToDay(end.Date)
 	}
 
 	var filtered []*Task
-	dateLower := strings.ToLower(date)
-
 	for _, task := range tasks {
-		if strings.Contains(strings.ToLower(task.ScheduledAt), dateLower) {
+		raw := fieldFn(task)
+		if raw == "" {
+			continue
+		}
+		sched, err := ParseSchedule(raw)
+		if err != nil {
+			continue
+		}
+		taskDay := truncateToDay(sched.Date)
+
+		var match bool
+		switch op {
+		case "<":
+			match = taskDay.Before(targetDay)
+		case "<=":
+			match = taskDay.Before(targetDay) || taskDay.Equal(targetDay)
+		case ">":
+			match = taskDay.After(targetDay)
+		case ">=":
+			match = taskDay.After(targetDay) || taskDay.Equal(targetDay)
+		case "..":
+			match = (taskDay.Equal(targetDay) || taskDay.After(targetDay)) &&
+				(taskDay.Equal(endDay) || taskDay.Before(endDay))
+		}
+		if match {
 			filtered = append(filtered, task)
 		}
 	}
 	return filtered
-} // filterByScheduledDate filters tasks by scheduled date (@s:)
-func filterByScheduledDate(tasks []*Task, date string) []*Task {
+}
+
+func filterByDate(tasks []*Task, date string) []*Task {
 	if date == "" {
 		return tasks
 	}
-
+	if result := compareDateField(tasks, date, func(t *Task) string { return t.ScheduledAt }); result != nil {
+		return result
+	}
 	var filtered []*Task
 	dateLower := strings.ToLower(date)
-
 	for _, task := range tasks {
 		if strings.Contains(strings.ToLower(task.ScheduledAt), dateLower) {
 			filtered = append(filtered, task)
@@ -638,15 +704,32 @@ func filterByScheduledDate(tasks []*Task, date string) []*Task {
 	return filtered
 }
 
-// filterByDueDate filters tasks by due date (@d:)
+func filterByScheduledDate(tasks []*Task, date string) []*Task {
+	if date == "" {
+		return tasks
+	}
+	if result := compareDateField(tasks, date, func(t *Task) string { return t.ScheduledAt }); result != nil {
+		return result
+	}
+	var filtered []*Task
+	dateLower := strings.ToLower(date)
+	for _, task := range tasks {
+		if strings.Contains(strings.ToLower(task.ScheduledAt), dateLower) {
+			filtered = append(filtered, task)
+		}
+	}
+	return filtered
+}
+
 func filterByDueDate(tasks []*Task, date string) []*Task {
 	if date == "" {
 		return tasks
 	}
-
+	if result := compareDateField(tasks, date, func(t *Task) string { return t.DueAt }); result != nil {
+		return result
+	}
 	var filtered []*Task
 	dateLower := strings.ToLower(date)
-
 	for _, task := range tasks {
 		if strings.Contains(strings.ToLower(task.DueAt), dateLower) {
 			filtered = append(filtered, task)

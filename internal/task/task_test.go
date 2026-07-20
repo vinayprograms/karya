@@ -3,6 +3,7 @@ package task
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/vinayprograms/karya/internal/config"
 )
@@ -770,6 +771,125 @@ func TestFilterTasksWithIDAndReferences(t *testing.T) {
 				t.Errorf("FilterTasks(%q) count = %d, want %d", tt.filter, len(result), tt.wantCount)
 			}
 		})
+	}
+}
+
+func TestFilterByDueDateComparison(t *testing.T) {
+	tasks := []*Task{
+		{Title: "Past task", DueAt: "2026-07-10", Keyword: "TODO"},
+		{Title: "Today task", DueAt: "2026-07-20", Keyword: "TODO"},
+		{Title: "Future task", DueAt: "2026-07-30", Keyword: "TODO"},
+		{Title: "No date task", DueAt: "", Keyword: "TODO"},
+		{Title: "Recurrence task", DueAt: "2026-07-15+1w", Keyword: "TODO"},
+	}
+
+	tests := []struct {
+		name      string
+		filter    string
+		wantTasks []string
+	}{
+		{
+			name:      "less than",
+			filter:    "@d:<2026-07-20",
+			wantTasks: []string{"Past task", "Recurrence task"},
+		},
+		{
+			name:      "less than or equal",
+			filter:    "@d:<=2026-07-20",
+			wantTasks: []string{"Past task", "Today task", "Recurrence task"},
+		},
+		{
+			name:      "greater than",
+			filter:    "@d:>2026-07-20",
+			wantTasks: []string{"Future task"},
+		},
+		{
+			name:      "greater than or equal",
+			filter:    "@d:>=2026-07-20",
+			wantTasks: []string{"Today task", "Future task"},
+		},
+		{
+			name:      "range inclusive",
+			filter:    "@d:2026-07-10..2026-07-20",
+			wantTasks: []string{"Past task", "Today task", "Recurrence task"},
+		},
+		{
+			name:      "substring fallthrough",
+			filter:    "@d:2026-07",
+			wantTasks: []string{"Past task", "Today task", "Future task", "Recurrence task"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := FilterTasks(tasks, tt.filter)
+			if len(result) != len(tt.wantTasks) {
+				titles := make([]string, len(result))
+				for i, r := range result {
+					titles[i] = r.Title
+				}
+				t.Fatalf("FilterTasks(%q) got %d tasks %v, want %d %v",
+					tt.filter, len(result), titles, len(tt.wantTasks), tt.wantTasks)
+			}
+			got := make(map[string]bool)
+			for _, r := range result {
+				got[r.Title] = true
+			}
+			for _, want := range tt.wantTasks {
+				if !got[want] {
+					t.Errorf("FilterTasks(%q) missing expected task %q", tt.filter, want)
+				}
+			}
+		})
+	}
+}
+
+func TestFilterByScheduledDateComparison(t *testing.T) {
+	tasks := []*Task{
+		{Title: "Past sched", ScheduledAt: "2026-07-10", Keyword: "TODO"},
+		{Title: "Future sched", ScheduledAt: "2026-08-01", Keyword: "TODO"},
+		{Title: "No sched", ScheduledAt: "", Keyword: "TODO"},
+	}
+
+	tests := []struct {
+		name      string
+		filter    string
+		wantCount int
+	}{
+		{"@s: less than", "@s:<2026-07-20", 1},
+		{"@s: greater than or equal", "@s:>=2026-08-01", 1},
+		{"@s: range", "@s:2026-07-01..2026-07-31", 1},
+		{"@ prefix less than", "@<2026-07-20", 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := FilterTasks(tasks, tt.filter)
+			if len(result) != tt.wantCount {
+				t.Errorf("FilterTasks(%q) count = %d, want %d", tt.filter, len(result), tt.wantCount)
+			}
+		})
+	}
+}
+
+func TestFilterByDueDateOverdue(t *testing.T) {
+	today := time.Now().Format("2006-01-02")
+	yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+	tomorrow := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+
+	tasks := []*Task{
+		{Title: "Overdue", DueAt: yesterday, Keyword: "TODO"},
+		{Title: "Due today", DueAt: today, Keyword: "TODO"},
+		{Title: "Due tomorrow", DueAt: tomorrow, Keyword: "TODO"},
+		{Title: "No due", DueAt: "", Keyword: "TODO"},
+	}
+
+	result := FilterTasks(tasks, "@d:overdue")
+	if len(result) != 1 {
+		t.Fatalf("@d:overdue got %d tasks, want 1", len(result))
+	}
+	if result[0].Title != "Overdue" {
+		t.Errorf("@d:overdue got %q, want %q", result[0].Title, "Overdue")
 	}
 }
 
