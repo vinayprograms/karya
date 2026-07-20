@@ -762,9 +762,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "backspace":
 				if len(m.customFilter) > 0 {
 					m.customFilter = m.customFilter[:len(m.customFilter)-1]
-					m.applyCustomFilter()
+					if m.customFilter == "" {
+						m.filtering = false
+						m.list.SetItems(m.allItems)
+					} else {
+						m.applyCustomFilter()
+					}
 				} else {
-					// Exit filtering if filter is empty
 					m.filtering = false
 					m.list.SetItems(m.allItems)
 				}
@@ -1196,6 +1200,11 @@ func (m *model) applyCustomFilter() {
 		if item, exists := itemToTask[t]; exists {
 			filteredItems = append(filteredItems, item)
 		}
+	}
+
+	// Skip SetItems if filter returned everything (avoids flicker on incomplete prefixes like "@d:")
+	if len(filteredItems) == len(m.allItems) {
+		return
 	}
 
 	m.list.SetItems(filteredItems)
