@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	colorspkg "github.com/vinayprograms/karya/internal/colors"
 	"github.com/vinayprograms/karya/internal/config"
 	"github.com/vinayprograms/karya/internal/task"
 	"github.com/vinayprograms/karya/internal/zet"
@@ -887,6 +888,11 @@ func main() {
 
 	subcommand := args[0]
 	switch subcommand {
+	case "colors":
+		if err := colorspkg.Print(cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
 	case "-h", "--help", "help":
 		printHelp()
 	case "count":
