@@ -294,8 +294,8 @@ func (s *Schedule) ExpandOccurrences(rangeStart, rangeEnd time.Time) []time.Time
 // CompleteRecurringTask handles advancing a recurring task's date on completion.
 // Returns advanced=true if the task was recurring and the date was advanced.
 // If not recurring, returns false and the caller should proceed with normal completion.
-// Auto-clocks-out if the task has an active clock, then records a COMPLETED entry.
-func CompleteRecurringTask(t *Task, c *config.Config) (advanced bool, err error) {
+// Auto-clocks-out if the task has an active clock, then records a LOG transition entry.
+func CompleteRecurringTask(t *Task, c *config.Config, targetKeyword string) (advanced bool, err error) {
 	// Try scheduled date first, then due date
 	dateField := t.ScheduledAt
 	isScheduled := true
@@ -319,11 +319,10 @@ func CompleteRecurringTask(t *Task, c *config.Config) (advanced bool, err error)
 		}
 	}
 
-	// Record completion — one entry per scheduled day.
-	// If a COMPLETED entry already exists for today, update its timestamp.
+	// Record state transition — one entry per scheduled day.
 	schedDay := time.Date(sched.Date.Year(), sched.Date.Month(), sched.Date.Day(), 0, 0, 0, 0, time.Local)
-	if err := recordOrUpdateCompletion(t, schedDay); err != nil {
-		return false, fmt.Errorf("failed to record completion: %w", err)
+	if err := recordOrUpdateTransition(t, schedDay, t.Keyword, targetKeyword); err != nil {
+		return false, fmt.Errorf("failed to record transition: %w", err)
 	}
 
 	// Compute next occurrence

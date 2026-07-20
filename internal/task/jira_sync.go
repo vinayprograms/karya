@@ -118,9 +118,11 @@ func handleDisappearedTicket(ctx context.Context, cfg *config.Config, client *ji
 	reassigned := issue.Fields.Assignee == nil || issue.Fields.Assignee.AccountID != currentUser
 
 	if isDone || reassigned {
+		oldKW := t.Keyword
 		if err := UpdateTaskStatus(t, "DONE"); err != nil {
 			return err
 		}
+		RecordStateTransition(t, oldKW, "DONE")
 		if reassigned && issue.Fields.Assignee != nil {
 			note := fmt.Sprintf("  Reassigned to %s in JIRA", issue.Fields.Assignee.DisplayName)
 			return appendLineAfterTask(t, note)
@@ -137,10 +139,12 @@ func updateExistingTask(cfg *config.Config, t *Task, issue *jira.Issue, allIssue
 	isDone := issue.Fields.Status.StatusCategory.Key == "done"
 	currentlyDone := t.IsCompleted(cfg)
 	if isDone != currentlyDone {
+		oldKW := t.Keyword
 		newKW := cfg.JiraStatusToKeyword(issue.Fields.Status.Name, isDone)
 		if err := UpdateTaskStatus(t, newKW); err != nil {
 			return err
 		}
+		RecordStateTransition(t, oldKW, newKW)
 	}
 
 	// Update due date
