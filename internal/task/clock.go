@@ -38,9 +38,16 @@ type CompletionEntry struct {
 	Timestamp time.Time
 }
 
+type StateTransition struct {
+	From      string
+	To        string
+	Timestamp time.Time
+}
+
 var clockLineRe = regexp.MustCompile(`^\s*(?:[-*+]\s*)?CLOCK:\s*(.+)$`)
 var clockTimestampRe = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})--(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})?$`)
 var completedLineRe = regexp.MustCompile(`^\s*(?:[-*+]\s*)?COMPLETED:\s*(.+)$`)
+var logEntryRe = regexp.MustCompile(`^\s*(?:[-*+]\s*)?LOG\(([A-Z_]+)\s*->\s*([A-Z_]+)\):\s*(.+)$`)
 
 // ParseClockEntries reads a task's sub-lines and extracts CLOCK entries.
 func ParseClockEntries(t *Task) ([]ClockEntry, error) {
@@ -395,7 +402,21 @@ func ClockOut(t *Task) error {
 }
 
 // ParseCompletionEntries reads a task's sub-lines and extracts COMPLETED entries.
+// Kept for backward compatibility — prefers ParseStateTransitions for new code.
 func ParseCompletionEntries(t *Task) ([]CompletionEntry, error) {
+	transitions, err := ParseStateTransitions(t)
+	if err != nil {
+		return nil, err
+	}
+	var entries []CompletionEntry
+	for _, tr := range transitions {
+		entries = append(entries, CompletionEntry{Timestamp: tr.Timestamp})
+	}
+	return entries, nil
+}
+
+// ParseStateTransitions reads a task's sub-lines and extracts LOG and legacy COMPLETED entries.
+func ParseStateTransitions(t *Task) ([]StateTransition, error) {
 	raw, err := ReadRawBlock(t)
 	if err != nil {
 		return nil, err
@@ -405,7 +426,7 @@ func ParseCompletionEntries(t *Task) ([]CompletionEntry, error) {
 	}
 
 	lines := strings.Split(raw, "\n")
-	var entries []CompletionEntry
+	var entries []StateTransition
 	expectedRawIndent := detectSubItemRawIndent(lines)
 	if expectedRawIndent < 0 {
 		return nil, nil
@@ -418,25 +439,43 @@ func ParseCompletionEntries(t *Task) ([]CompletionEntry, error) {
 		if countLeadingSpaces(line) != expectedRawIndent {
 			continue
 		}
-		m := completedLineRe.FindStringSubmatch(line)
-		if m == nil {
+		// Try new LOG format first
+		if m := logEntryRe.FindStringSubmatch(line); m != nil {
+			ts := strings.TrimSpace(m[3])
+			parsed, err := time.ParseInLocation("2006-01-02T15:04", ts, time.Local)
+			if err != nil {
+				continue
+			}
+			entries = append(entries, StateTransition{
+				From:      m[1],
+				To:        m[2],
+				Timestamp: parsed,
+			})
 			continue
 		}
-		ts := strings.TrimSpace(m[1])
-		parsed, err := time.ParseInLocation("2006-01-02T15:04", ts, time.Local)
-		if err != nil {
+		// Fall back to legacy COMPLETED format
+		if m := completedLineRe.FindStringSubmatch(line); m != nil {
+			ts := strings.TrimSpace(m[1])
+			parsed, err := time.ParseInLocation("2006-01-02T15:04", ts, time.Local)
+			if err != nil {
+				continue
+			}
+			entries = append(entries, StateTransition{
+				From:      "",
+				To:        "COMPLETED",
+				Timestamp: parsed,
+			})
 			continue
 		}
-		entries = append(entries, CompletionEntry{Timestamp: parsed})
 	}
 
 	return entries, nil
 }
 
-// recordOrUpdateCompletion records a completion for the given scheduled day.
-// If a COMPLETED entry already exists for that day, its timestamp is updated.
+// recordOrUpdateTransition records a state transition for the given scheduled day.
+// If a LOG entry already exists for that day with the same target state, its timestamp is updated.
 // Otherwise a new entry is appended.
-func recordOrUpdateCompletion(t *Task, schedDay time.Time) error {
+func recordOrUpdateTransition(t *Task, schedDay time.Time, fromKeyword, toKeyword string) error {
 	if t.FilePath == "" || t.LineNum == 0 {
 		return fmt.Errorf("task has no file location")
 	}
@@ -456,7 +495,7 @@ func recordOrUpdateCompletion(t *Task, schedDay time.Time) error {
 	now := time.Now().Format("2006-01-02T15:04")
 	dayStr := schedDay.Format("2006-01-02")
 
-	// Search for an existing COMPLETED entry on the same day
+	// Search for an existing LOG or COMPLETED entry on the same day
 	for i := taskIdx + 1; i < len(lines); i++ {
 		line := lines[i]
 		if line == "" {
@@ -466,30 +505,35 @@ func recordOrUpdateCompletion(t *Task, schedDay time.Time) error {
 		if level <= t.IndentLevel {
 			break
 		}
-		m := completedLineRe.FindStringSubmatch(line)
-		if m == nil {
-			continue
+		if m := logEntryRe.FindStringSubmatch(line); m != nil {
+			ts := strings.TrimSpace(m[3])
+			if strings.HasPrefix(ts, dayStr) {
+				lines[i] = fmt.Sprintf("%s* LOG(%s -> %s): %s", indent, fromKeyword, toKeyword, now)
+				return os.WriteFile(t.FilePath, []byte(strings.Join(lines, "\n")), 0644)
+			}
 		}
-		ts := strings.TrimSpace(m[1])
-		if strings.HasPrefix(ts, dayStr) {
-			lines[i] = fmt.Sprintf("%s* COMPLETED: %s", indent, now)
-			return os.WriteFile(t.FilePath, []byte(strings.Join(lines, "\n")), 0644)
+		if m := completedLineRe.FindStringSubmatch(line); m != nil {
+			ts := strings.TrimSpace(m[1])
+			if strings.HasPrefix(ts, dayStr) {
+				lines[i] = fmt.Sprintf("%s* LOG(%s -> %s): %s", indent, fromKeyword, toKeyword, now)
+				return os.WriteFile(t.FilePath, []byte(strings.Join(lines, "\n")), 0644)
+			}
 		}
 	}
 
 	// No existing entry for this day — append new one
-	completedLine := fmt.Sprintf("%s* COMPLETED: %s", indent, now)
+	logLine := fmt.Sprintf("%s* LOG(%s -> %s): %s", indent, fromKeyword, toKeyword, now)
 
 	newLines := make([]string, 0, len(lines)+1)
 	newLines = append(newLines, lines[:t.LineNum]...)
-	newLines = append(newLines, completedLine)
+	newLines = append(newLines, logLine)
 	newLines = append(newLines, lines[t.LineNum:]...)
 
 	return os.WriteFile(t.FilePath, []byte(strings.Join(newLines, "\n")), 0644)
 }
 
-// RecordCompletion appends a COMPLETED entry after the task line.
-func RecordCompletion(t *Task) error {
+// RecordStateTransition appends a LOG entry after the task line.
+func RecordStateTransition(t *Task, fromKeyword, toKeyword string) error {
 	if t.FilePath == "" || t.LineNum == 0 {
 		return fmt.Errorf("task has no file location")
 	}
@@ -505,14 +549,19 @@ func RecordCompletion(t *Task) error {
 	}
 
 	indent, _ := subItemIndentForTask(t)
-	completedLine := fmt.Sprintf("%s* COMPLETED: %s", indent, time.Now().Format("2006-01-02T15:04"))
+	logLine := fmt.Sprintf("%s* LOG(%s -> %s): %s", indent, fromKeyword, toKeyword, time.Now().Format("2006-01-02T15:04"))
 
 	newLines := make([]string, 0, len(lines)+1)
 	newLines = append(newLines, lines[:t.LineNum]...)
-	newLines = append(newLines, completedLine)
+	newLines = append(newLines, logLine)
 	newLines = append(newLines, lines[t.LineNum:]...)
 
 	return os.WriteFile(t.FilePath, []byte(strings.Join(newLines, "\n")), 0644)
+}
+
+// RecordCompletion appends a LOG entry after the task line (backward-compatible wrapper).
+func RecordCompletion(t *Task) error {
+	return RecordStateTransition(t, t.Keyword, "DONE")
 }
 
 // FormatDuration formats a duration as H:MM.

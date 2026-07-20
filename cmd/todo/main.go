@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	colorspkg "github.com/vinayprograms/karya/internal/colors"
 	configpkg "github.com/vinayprograms/karya/internal/config"
 	kgit "github.com/vinayprograms/karya/internal/git"
 	"github.com/vinayprograms/karya/internal/jira"
@@ -1562,9 +1563,11 @@ func updateTaskStatusCmd(cfg *configpkg.Config, t *task.Task, newKeyword string)
 			return statusUpdateMsg{err: fmt.Errorf("no task selected")}
 		}
 
+		oldKeyword := t.Keyword
+
 		// Check if this is a completion of a recurring task
 		if isCompletedKeyword(cfg, newKeyword) {
-			advanced, err := task.CompleteRecurringTask(t, cfg)
+			advanced, err := task.CompleteRecurringTask(t, cfg, newKeyword)
 			if err != nil {
 				return statusUpdateMsg{err: fmt.Errorf("recurring advance failed: %w", err)}
 			}
@@ -1577,11 +1580,14 @@ func updateTaskStatusCmd(cfg *configpkg.Config, t *task.Task, newKeyword string)
 			}
 		}
 
-		oldKeyword := t.Keyword
-
 		// Normal (non-recurring) status update
 		if err := task.UpdateTaskStatus(t, newKeyword); err != nil {
 			return statusUpdateMsg{err: err}
+		}
+
+		// Record state transition for all status changes
+		if err := task.RecordStateTransition(t, oldKeyword, newKeyword); err != nil {
+			return statusUpdateMsg{err: fmt.Errorf("status updated but failed to record transition: %w", err)}
 		}
 
 		// Commit the change if in a git repo
@@ -2130,6 +2136,11 @@ func main() {
 
 	subcommand := args[0]
 	switch subcommand {
+	case "colors":
+		if err := colorspkg.Print(config); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
 	case "-h", "--help", "help":
 		printHelp()
 	case "ls", "list":

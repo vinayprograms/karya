@@ -21,6 +21,7 @@ type AgendaItem struct {
 	Schedule    *Schedule
 	IsCompleted bool
 	CompletedAt time.Time
+	TargetState string
 }
 
 // AgendaDay groups agenda items appearing on a single date.
@@ -80,12 +81,12 @@ func QueryAgenda(c *config.Config, start, end time.Time, includeOverdue bool) ([
 		if err != nil || sched.Recurrence == nil {
 			continue
 		}
-		completions, err := ParseCompletionEntries(t)
-		if err != nil || len(completions) == 0 {
+		transitions, err := ParseStateTransitions(t)
+		if err != nil || len(transitions) == 0 {
 			continue
 		}
-		for _, comp := range completions {
-			compDay := truncateToDay(comp.Timestamp)
+		for _, tr := range transitions {
+			compDay := truncateToDay(tr.Timestamp)
 			if compDay.Before(startDay) || compDay.After(endDay) {
 				continue
 			}
@@ -94,11 +95,12 @@ func QueryAgenda(c *config.Config, start, end time.Time, includeOverdue bool) ([
 			}
 			item := AgendaItem{
 				Task:        t,
-				Date:        comp.Timestamp,
+				Date:        tr.Timestamp,
 				HasTime:     true,
 				IsCompleted: true,
-				CompletedAt: comp.Timestamp,
+				CompletedAt: tr.Timestamp,
 				Schedule:    sched,
+				TargetState: tr.To,
 			}
 			dayMap[compDay] = append(dayMap[compDay], item)
 		}

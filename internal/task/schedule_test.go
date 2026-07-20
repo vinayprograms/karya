@@ -306,7 +306,7 @@ func TestCompleteRecurringTask(t *testing.T) {
 	}
 
 	cfg := createTestConfig()
-	advanced, err := CompleteRecurringTask(task, cfg)
+	advanced, err := CompleteRecurringTask(task, cfg, "DONE")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -324,9 +324,9 @@ func TestCompleteRecurringTask(t *testing.T) {
 	if !contains(fileContent, "TODO:") {
 		t.Errorf("keyword should remain TODO, got: %s", fileContent)
 	}
-	// Should have a COMPLETED entry
-	if !contains(fileContent, "* COMPLETED:") {
-		t.Errorf("expected COMPLETED entry, got: %s", fileContent)
+	// Should have a LOG transition entry
+	if !contains(fileContent, "* LOG(TODO -> DONE):") {
+		t.Errorf("expected LOG(TODO -> DONE) entry, got: %s", fileContent)
 	}
 }
 
@@ -346,7 +346,7 @@ func TestCompleteRecurringTask_AutoClockOut(t *testing.T) {
 	}
 
 	cfg := createTestConfig()
-	advanced, err := CompleteRecurringTask(task, cfg)
+	advanced, err := CompleteRecurringTask(task, cfg, "DONE")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -366,9 +366,9 @@ func TestCompleteRecurringTask_AutoClockOut(t *testing.T) {
 		}
 	}
 
-	// Should have COMPLETED entry
-	if !contains(fileContent, "* COMPLETED:") {
-		t.Errorf("expected COMPLETED entry, got: %s", fileContent)
+	// Should have LOG transition entry
+	if !contains(fileContent, "* LOG(TODO -> DONE):") {
+		t.Errorf("expected LOG(TODO -> DONE) entry, got: %s", fileContent)
 	}
 	// Date should be advanced
 	if !contains(fileContent, "2025-06-21+1d") {
@@ -390,7 +390,7 @@ func TestCompleteRecurringTask_NonRecurring(t *testing.T) {
 	}
 
 	cfg := createTestConfig()
-	advanced, err := CompleteRecurringTask(task, cfg)
+	advanced, err := CompleteRecurringTask(task, cfg, "DONE")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

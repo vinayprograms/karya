@@ -589,10 +589,39 @@ func (s *MCPServer) updateTaskStatus(ctx context.Context, req *mcp.CallToolReque
 	}
 
 	oldKeyword := targetTask.Keyword
+
+	// Handle recurring task completion
+	if IsCompletedKeyword(s.config, args.NewKeyword) {
+		advanced, err := CompleteRecurringTask(targetTask, s.config, args.NewKeyword)
+		if err != nil {
+			return nil, UpdateTaskStatusResult{
+				Success:       false,
+				Message:       fmt.Sprintf("recurring advance failed: %v", err),
+				ValidKeywords: validKeywords,
+			}, nil
+		}
+		if advanced {
+			return nil, UpdateTaskStatusResult{
+				Success:       true,
+				Message:       fmt.Sprintf("Recurring task advanced → %s", targetTask.ScheduledAt),
+				ValidKeywords: validKeywords,
+			}, nil
+		}
+	}
+
 	if err := UpdateTaskStatus(targetTask, args.NewKeyword); err != nil {
 		return nil, UpdateTaskStatusResult{
 			Success:       false,
 			Message:       fmt.Sprintf("failed to update task: %v", err),
+			ValidKeywords: validKeywords,
+		}, nil
+	}
+
+	// Record state transition
+	if err := RecordStateTransition(targetTask, oldKeyword, args.NewKeyword); err != nil {
+		return nil, UpdateTaskStatusResult{
+			Success:       false,
+			Message:       fmt.Sprintf("status updated but failed to record transition: %v", err),
 			ValidKeywords: validKeywords,
 		}, nil
 	}

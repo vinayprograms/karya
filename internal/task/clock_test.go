@@ -416,6 +416,46 @@ func TestParseCompletionEntries(t *testing.T) {
 	}
 }
 
+func TestParseStateTransitions(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "test.md")
+	content := `TODO: Weekly meeting @s:2026-07-13+1w
+  * LOG(TODO -> DONE): 2026-07-06T10:15
+  * COMPLETED: 2026-06-29T10:00
+  * LOG(TODO -> CANCELLED): 2026-06-22T09:00
+`
+	os.WriteFile(f, []byte(content), 0644)
+
+	task := &Task{
+		Keyword:     "TODO",
+		Title:       "Weekly meeting",
+		FilePath:    f,
+		LineNum:     1,
+		IndentLevel: 0,
+	}
+
+	entries, err := ParseStateTransitions(task)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
+	}
+
+	// First: new LOG format
+	if entries[0].From != "TODO" || entries[0].To != "DONE" {
+		t.Errorf("first entry: expected TODO->DONE, got %s->%s", entries[0].From, entries[0].To)
+	}
+	// Second: legacy COMPLETED format
+	if entries[1].From != "" || entries[1].To != "COMPLETED" {
+		t.Errorf("second entry: expected ''->COMPLETED, got %s->%s", entries[1].From, entries[1].To)
+	}
+	// Third: CANCELLED
+	if entries[2].From != "TODO" || entries[2].To != "CANCELLED" {
+		t.Errorf("third entry: expected TODO->CANCELLED, got %s->%s", entries[2].From, entries[2].To)
+	}
+}
+
 func TestParseCompletionEntriesNone(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "test.md")
@@ -464,8 +504,8 @@ func TestRecordCompletion(t *testing.T) {
 	}
 
 	completedLine := strings.TrimSpace(lines[1])
-	if !strings.HasPrefix(completedLine, "* COMPLETED:") {
-		t.Errorf("expected * COMPLETED line, got %q", completedLine)
+	if !strings.HasPrefix(completedLine, "* LOG(TODO -> DONE):") {
+		t.Errorf("expected * LOG(TODO -> DONE) line, got %q", completedLine)
 	}
 
 	now := time.Now().Format("2006-01-02T15:04")
@@ -499,7 +539,7 @@ func TestRecordCompletionIndented(t *testing.T) {
 		t.Fatalf("expected at least 4 lines, got %d", len(lines))
 	}
 	// Should match existing sub-item indent (4 spaces from "    Notes")
-	if !strings.HasPrefix(lines[2], "    * COMPLETED:") {
-		t.Errorf("expected 4-space indent (matching sub-item indent), got %q", lines[2])
+	if !strings.HasPrefix(lines[2], "    * LOG(TODO -> DONE):") {
+		t.Errorf("expected 4-space indent with LOG entry, got %q", lines[2])
 	}
 }

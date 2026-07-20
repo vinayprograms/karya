@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	colorspkg "github.com/vinayprograms/karya/internal/colors"
 	"github.com/vinayprograms/karya/internal/config"
 	kgit "github.com/vinayprograms/karya/internal/git"
 	"github.com/vinayprograms/karya/internal/task"
@@ -925,8 +926,10 @@ func updateTaskStatusCmd(cfg *config.Config, t *task.Task, newKeyword string) te
 			return statusUpdateMsg{err: fmt.Errorf("no task selected")}
 		}
 
+		oldKeyword := t.Keyword
+
 		if task.IsCompletedKeyword(cfg, newKeyword) {
-			advanced, err := task.CompleteRecurringTask(t, cfg)
+			advanced, err := task.CompleteRecurringTask(t, cfg, newKeyword)
 			if err != nil {
 				return statusUpdateMsg{err: fmt.Errorf("recurring advance failed: %w", err)}
 			}
@@ -939,10 +942,13 @@ func updateTaskStatusCmd(cfg *config.Config, t *task.Task, newKeyword string) te
 			}
 		}
 
-		oldKeyword := t.Keyword
-
 		if err := task.UpdateTaskStatus(t, newKeyword); err != nil {
 			return statusUpdateMsg{err: err}
+		}
+
+		// Record state transition for all status changes
+		if err := task.RecordStateTransition(t, oldKeyword, newKeyword); err != nil {
+			return statusUpdateMsg{err: fmt.Errorf("status updated but failed to record transition: %w", err)}
 		}
 
 		commitMsg := fmt.Sprintf("Update task status: %s -> %s", oldKeyword, newKeyword)
@@ -2236,6 +2242,14 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
 		os.Exit(1)
+	}
+
+	if len(os.Args) > 1 && os.Args[1] == "colors" {
+		if err := colorspkg.Print(cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	initColors(cfg)
