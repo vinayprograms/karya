@@ -1222,8 +1222,19 @@ func (m *model) applyCustomFilter() {
 		}
 	}
 
+	// For date filters, exclude completed tasks (overdue/past dates are not actionable on done tasks)
+	filterInput := allTasks
+	if strings.HasPrefix(m.customFilter, "@") {
+		filterInput = make([]*task.Task, 0, len(allTasks))
+		for _, t := range allTasks {
+			if !t.IsCompleted(m.config) {
+				filterInput = append(filterInput, t)
+			}
+		}
+	}
+
 	// Apply field-specific filtering
-	filteredTasks := task.FilterTasks(allTasks, m.customFilter)
+	filteredTasks := task.FilterTasks(filterInput, m.customFilter)
 
 	// Convert back to list items
 	var filteredItems []list.Item
