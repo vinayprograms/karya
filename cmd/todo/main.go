@@ -1804,9 +1804,10 @@ func updateWatcher(watcher *fsnotify.Watcher, config *configpkg.Config, project 
 	}
 }
 
-// maxWatchDirs limits the number of directories to watch to avoid exhausting
-// file descriptors. Each watched directory consumes a file descriptor.
-const maxWatchDirs = 100
+// maxWatchDirs limits the number of directories to watch in unstructured mode
+// to avoid exhausting file descriptors. Structured mode has no cap since it
+// only watches zettel directories (bounded by actual project/note count).
+const maxWatchDirs = 1000
 
 // getWatchDirectories returns a list of directories that should be watched.
 // In structured mode, watches only the zettel directories (PRJDIR/*/notes/*/).
@@ -1865,10 +1866,6 @@ func getStructuredWatchDirs(config *configpkg.Config, project string) []string {
 		}
 	}
 
-	// Limit to maxWatchDirs
-	if len(dirs) > maxWatchDirs {
-		dirs = dirs[:maxWatchDirs]
-	}
 	return dirs
 }
 

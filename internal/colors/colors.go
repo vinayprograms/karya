@@ -27,9 +27,10 @@ type KeywordColor struct {
 }
 
 type Output struct {
-	Keywords map[string]KeywordColor `json:"keywords"`
-	Elements map[string]ColorValue   `json:"elements"`
-	Theme    string                  `json:"theme"`
+	Keywords    map[string]KeywordColor `json:"keywords"`
+	Elements    map[string]ColorValue   `json:"elements"`
+	Theme       string                  `json:"theme"`
+	SpecialTags []string                `json:"special_tags,omitempty"`
 }
 
 func normalizeHex(v string) string {
@@ -104,6 +105,10 @@ func Print(cfg *config.Config) error {
 		if val.Fg != "" || val.Bg != "" {
 			out.Elements[name] = val
 		}
+	}
+
+	if len(cfg.Todo.SpecialTags) > 0 {
+		out.SpecialTags = cfg.Todo.SpecialTags
 	}
 
 	enc := json.NewEncoder(os.Stdout)
