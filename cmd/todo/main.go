@@ -417,6 +417,7 @@ type model struct {
 	fractionColWidth int
 	savedFilter      string
 	customFilter    string
+	filterCursor    int
 	filtering       bool
 	allItems        []list.Item
 	structuredMode  bool
@@ -748,35 +749,67 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Handle custom filtering
 		if m.filtering {
+			runes := []rune(m.customFilter)
 			switch msg.String() {
 			case "esc":
-				// Cancel filtering
 				m.filtering = false
 				m.customFilter = ""
+				m.filterCursor = 0
 				m.list.SetItems(m.allItems)
 				return m, nil
 			case "enter":
-				// Exit filtering mode but keep filter applied
 				m.filtering = false
 				return m, nil
-			case "backspace":
-				if len(m.customFilter) > 0 {
-					m.customFilter = m.customFilter[:len(m.customFilter)-1]
+			case "left":
+				if m.filterCursor > 0 {
+					m.filterCursor--
+				}
+				return m, nil
+			case "right":
+				if m.filterCursor < len(runes) {
+					m.filterCursor++
+				}
+				return m, nil
+			case "home", "ctrl+a":
+				m.filterCursor = 0
+				return m, nil
+			case "end", "ctrl+e":
+				m.filterCursor = len(runes)
+				return m, nil
+			case "delete":
+				if m.filterCursor < len(runes) {
+					runes = append(runes[:m.filterCursor], runes[m.filterCursor+1:]...)
+					m.customFilter = string(runes)
 					if m.customFilter == "" {
 						m.filtering = false
 						m.list.SetItems(m.allItems)
 					} else {
 						m.applyCustomFilter()
 					}
-				} else {
+				}
+				return m, nil
+			case "backspace":
+				if m.filterCursor > 0 {
+					runes = append(runes[:m.filterCursor-1], runes[m.filterCursor:]...)
+					m.filterCursor--
+					m.customFilter = string(runes)
+					if m.customFilter == "" {
+						m.filtering = false
+						m.filterCursor = 0
+						m.list.SetItems(m.allItems)
+					} else {
+						m.applyCustomFilter()
+					}
+				} else if m.customFilter == "" {
 					m.filtering = false
 					m.list.SetItems(m.allItems)
 				}
 				return m, nil
 			default:
-				// Add character to filter
-				if len(msg.Runes) > 0 && msg.Runes[0] >= 32 && msg.Runes[0] <= 126 { // Printable ASCII
-					m.customFilter += string(msg.Runes[0])
+				if len(msg.Runes) > 0 && msg.Runes[0] >= 32 && msg.Runes[0] <= 126 {
+					runes = append(runes[:m.filterCursor], append([]rune{msg.Runes[0]}, runes[m.filterCursor:]...)...)
+					m.filterCursor++
+					m.customFilter = string(runes)
 					m.applyCustomFilter()
 					return m, nil
 				}
@@ -804,19 +837,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Start filtering (keep existing filter for editing)
 			if msg.String() == "/" {
 				m.filtering = true
-				// Don't reset m.customFilter - keep existing filter for editing
+				m.filterCursor = len([]rune(m.customFilter))
 				return m, nil
 			}
 
 			// Start fulltext search or edit existing fulltext search
 			if msg.String() == "*" {
 				m.filtering = true
-				// If we're already in fulltext search mode, keep the existing search term for editing
 				if !strings.HasPrefix(m.customFilter, "*") {
-					// Not in fulltext search mode, start fresh
 					m.customFilter = "*"
 				}
-				// If we're already in fulltext search mode, keep m.customFilter as is for editing
+				m.filterCursor = len([]rune(m.customFilter))
 				return m, nil
 			}
 
@@ -1281,11 +1312,18 @@ func (m model) View() string {
 	if m.filtering || m.customFilter != "" {
 		var filterText string
 		if m.filtering {
+			runes := []rune(m.customFilter)
+			before := string(runes[:m.filterCursor])
+			after := string(runes[m.filterCursor:])
 			if strings.HasPrefix(m.customFilter, "*") {
-				searchTerm := strings.TrimSpace(m.customFilter[1:])
-				filterText = fmt.Sprintf("Fulltext search: %s▓", searchTerm)
+				prefix := "Fulltext search: "
+				if m.filterCursor > 0 {
+					filterText = prefix + string(runes[1:m.filterCursor]) + "▓" + after
+				} else {
+					filterText = prefix + "▓" + string(runes[1:])
+				}
 			} else {
-				filterText = fmt.Sprintf("Filter: %s▓", m.customFilter) // Show cursor when actively typing
+				filterText = "Filter: " + before + "▓" + after
 			}
 		} else if m.customFilter != "" {
 			if strings.HasPrefix(m.customFilter, "*") {
