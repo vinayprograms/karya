@@ -609,7 +609,7 @@ func (s *MCPServer) updateTaskStatus(ctx context.Context, req *mcp.CallToolReque
 		}
 	}
 
-	if err := UpdateTaskStatus(targetTask, args.NewKeyword); err != nil {
+	if err := UpdateTaskStatus(targetTask, args.NewKeyword, s.config); err != nil {
 		return nil, UpdateTaskStatusResult{
 			Success:       false,
 			Message:       fmt.Sprintf("failed to update task: %v", err),

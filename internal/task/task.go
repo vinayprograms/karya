@@ -2,6 +2,7 @@ package task
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,10 @@ import (
 	"github.com/vinayprograms/karya/internal/config"
 	"github.com/vinayprograms/karya/internal/parallel"
 )
+
+// ErrPendingChildren is returned by UpdateTaskStatus when a task can't be
+// marked completed because it still has active or in-progress children.
+var ErrPendingChildren = errors.New("cannot complete: active child tasks pending")
 
 // Task represents a parsed task from a line
 type Task struct {
@@ -939,7 +944,24 @@ func GetZettelTitle(zetDir, zetID string) (string, error) {
 // UpdateTaskStatus updates the keyword of a task in its source file.
 // It finds the line matching the task and replaces the keyword with the new one.
 // Returns the updated line number, or an error if the task was not found.
-func UpdateTaskStatus(t *Task, newKeyword string) error {
+//
+// If cfg is non-nil and newKeyword is a completed-category keyword, the task
+// is blocked from completing while it has active or in-progress children —
+// callers must resolve or reassign those first. Pass a nil cfg to skip this
+// check (e.g. in tests that don't care about it).
+func UpdateTaskStatus(t *Task, newKeyword string, cfg *config.Config) error {
+	if cfg != nil && IsCompletedKeyword(cfg, newKeyword) {
+		pending := 0
+		for _, child := range t.Children {
+			if child.IsActive(cfg) || child.IsInProgress(cfg) {
+				pending++
+			}
+		}
+		if pending > 0 {
+			return fmt.Errorf("%w: %d task(s) still active/in-progress", ErrPendingChildren, pending)
+		}
+	}
+
 	if t.FilePath == "" {
 		return fmt.Errorf("task has no file path")
 	}
