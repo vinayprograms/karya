@@ -168,8 +168,10 @@ function! s:KaryaSyntax() abort
 
   " JIRA keys — bold, no underline, so they don't read as clickable links.
   " Muted gruvbox blue (#458588): distinct from link/URL styling and from
-  " the red-on-dark-gray used for search highlighting.
-  syn match karyaJira /\<[A-Z]\{2,}-\d\+\>/ containedin=ALL
+  " the red-on-dark-gray used for search highlighting. Only the bracketed
+  " form [XXX-999] counts, with space (or line boundary) on both sides —
+  " otherwise a ticket ID embedded in a URL (.../browse/XXX-999) matches too.
+  syn match karyaJira /\%(^\|\s\)\zs\[[A-Z]\{2,}-\d\+\]\ze\%(\s\|$\)/ containedin=ALL
   exe 'hi karyaJira cterm=bold gui=bold ' . s:ColorToHighlight('#458588')
 
   " Tags — regular and special (exclude completed lines)
@@ -182,7 +184,7 @@ function! s:KaryaSyntax() abort
 
   let special_tags = has_key(data, 'special_tags') ? data.special_tags : []
   if !empty(special_tags)
-    let special_pat = '\%(#\%(' . join(special_tags, '\|') . '\)\)\>'
+    let special_pat = '\%(^\|\s\)\zs#\%(' . join(special_tags, '\|') . '\)\>'
     exe 'syn match karyaSpecialTag /' . special_pat . '/ containedin=ALLBUT,karyaCompletedLine'
     if special_tag_hi != ''
       exe 'hi karyaSpecialTag cterm=bold gui=bold ' . special_tag_hi
@@ -191,7 +193,7 @@ function! s:KaryaSyntax() abort
     endif
   endif
 
-  syn match karyaTag /#[a-zA-Z0-9_-]\+/ containedin=ALLBUT,karyaCompletedLine,karyaSpecialTag
+  syn match karyaTag /\%(^\|\s\)\zs#[a-zA-Z0-9_-]\+/ containedin=ALLBUT,karyaCompletedLine,karyaSpecialTag
   if tag_hi != ''
     exe 'hi karyaTag ' . tag_hi
   else
