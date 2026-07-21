@@ -83,9 +83,6 @@ function! s:ClearKaryaMatches() abort
 endfunction
 
 function! s:KaryaSyntax() abort
-  " Clear position-based matches from previous load
-  call s:ClearKaryaMatches()
-
   " Clear syntax state so we re-apply from scratch
   silent! syn clear karyaActive karyaInprogress karyaCompleted karyaSomeday
   silent! syn clear karyaCompletedLine karyaAssignee karyaScheduled karyaDue
@@ -95,6 +92,9 @@ function! s:KaryaSyntax() abort
   if empty(data)
     return
   endif
+  " Cache so RefreshDateHighlights (on every text change) doesn't have to
+  " re-invoke `todo colors` — colors don't change while editing.
+  let s:karya_data = data
 
   let keywords_by_cat = {'active': [], 'inprogress': [], 'completed': [], 'someday': []}
   let color_by_cat = {}
@@ -202,6 +202,11 @@ function! s:KaryaSyntax() abort
 endfunction
 
 function! s:HighlightDates(data) abort
+  " Clear previous overdue/deadline matches — matchaddpos positions don't
+  " track edits, so a date hand-edited from past to today/future would
+  " otherwise keep its stale highlight until the buffer is reloaded.
+  call s:ClearKaryaMatches()
+
   let today = strftime('%Y-%m-%d')
   let past_fg = has_key(a:data.elements, 'past-date') ? get(a:data.elements['past-date'], 'fg', '') : ''
   let past_bg = has_key(a:data.elements, 'past-date') ? get(a:data.elements['past-date'], 'bg', '') : ''
@@ -253,9 +258,20 @@ function! s:HighlightDates(data) abort
   endwhile
 endfunction
 
+" Re-derive overdue/today date highlighting on every edit, without redoing
+" the full syntax rebuild (which shells out to `todo colors`). Handles a
+" date hand-edited from a past date to today/future (or vice versa).
+function! s:RefreshDateHighlights() abort
+  if !exists('s:karya_data') || empty(s:karya_data)
+    return
+  endif
+  call s:HighlightDates(s:karya_data)
+endfunction
+
 augroup karya_syntax
   autocmd!
   autocmd FileType markdown call s:KaryaSyntax()
   autocmd BufRead *.md call s:KaryaSyntax()
   autocmd FileChangedShellPost *.md call s:KaryaSyntax()
+  autocmd TextChanged,TextChangedI *.md call s:RefreshDateHighlights()
 augroup END
