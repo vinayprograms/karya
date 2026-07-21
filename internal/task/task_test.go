@@ -172,6 +172,71 @@ func TestParseLineSomedayKeywords(t *testing.T) {
 	}
 }
 
+func TestParseLineIgnoresEmbeddedMarkers(t *testing.T) {
+	cfg := createTestConfig()
+
+	tests := []struct {
+		name            string
+		line            string
+		wantTitle       string
+		wantTags        []string
+		wantScheduledAt string
+	}{
+		{
+			name:      "URL fragment is not a tag",
+			line:      "TODO: doc: https://docs.google.com/document/d/abc/edit?tab=t.0#heading=h.xyz",
+			wantTitle: "doc: https://docs.google.com/document/d/abc/edit?tab=t.0#heading=h.xyz",
+		},
+		{
+			name:      "real tag alongside a URL fragment is still extracted",
+			line:      "TODO: doc: https://example.com/page#section #work",
+			wantTitle: "doc: https://example.com/page#section",
+			wantTags:  []string{"work"},
+		},
+		{
+			name:      "email address is not a date marker",
+			line:      "TODO: email user@example.com about the proposal",
+			wantTitle: "email user@example.com about the proposal",
+		},
+		{
+			name:            "real scheduled date alongside an email is still extracted",
+			line:            "TODO: email user@example.com @s:2026-08-01",
+			wantTitle:       "email user@example.com",
+			wantScheduledAt: "2026-08-01",
+		},
+		{
+			name:      "tag at start of title with no preceding space is still extracted",
+			line:      "TODO: #urgent fix the build",
+			wantTitle: "fix the build",
+			wantTags:  []string{"urgent"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseLine(cfg, tt.line, "proj", "zettel", "test.md")
+			if got == nil {
+				t.Fatalf("ParseLine() = nil")
+			}
+			if got.Title != tt.wantTitle {
+				t.Errorf("ParseLine().Title = %q, want %q", got.Title, tt.wantTitle)
+			}
+			if len(got.Tags) != len(tt.wantTags) {
+				t.Errorf("ParseLine().Tags = %v, want %v", got.Tags, tt.wantTags)
+			} else {
+				for i := range got.Tags {
+					if got.Tags[i] != tt.wantTags[i] {
+						t.Errorf("ParseLine().Tags[%d] = %v, want %v", i, got.Tags[i], tt.wantTags[i])
+					}
+				}
+			}
+			if got.ScheduledAt != tt.wantScheduledAt {
+				t.Errorf("ParseLine().ScheduledAt = %v, want %v", got.ScheduledAt, tt.wantScheduledAt)
+			}
+		})
+	}
+}
+
 func TestTaskPriority(t *testing.T) {
 	cfg := createTestConfig()
 	
