@@ -572,43 +572,22 @@ func waitForFileChange(watcher *fsnotify.Watcher) tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Handle pending-child warning confirmation
+	// Handle pending-child warning — informational only, completion is
+	// blocked outright (see task.ErrPendingChildren), so there's no override.
 	if m.showingPendingChildWarning {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
-			switch msg.String() {
-			case "ctrl+c":
+			if msg.String() == "ctrl+c" {
 				m.quitting = true
 				if m.watcher != nil {
 					m.watcher.Close()
 				}
 				return m, tea.Quit
-			case "y", "Y":
-				t, kw := m.selectedTask, m.pendingWarningKeyword
-				m.showingPendingChildWarning = false
-				m.pendingWarningKeyword = ""
-				return m, updateTaskStatusCmd(m.config, t, kw)
-			case "n", "N", "esc", "q":
-				m.showingPendingChildWarning = false
-				m.selectedTask = nil
-				m.pendingWarningKeyword = ""
-				return m, nil
 			}
-		case statusUpdateMsg:
 			m.showingPendingChildWarning = false
 			m.selectedTask = nil
 			m.pendingWarningKeyword = ""
-			if msg.err != nil {
-				m.statusMessage = fmt.Sprintf("Error: %v", msg.err)
-			} else {
-				m.statusMessage = msg.message
-			}
-			return m, tea.Batch(
-				tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }),
-				waitForFileChange(m.watcher),
-			)
-		case fileChangedMsg:
-			return m, waitForFileChange(m.watcher)
+			return m, nil
 		}
 		return m, nil
 	}
@@ -1414,18 +1393,18 @@ func (m model) renderPendingChildWarning() string {
 	var content strings.Builder
 
 	warningStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
-	content.WriteString(warningStyle.Render("⚠  Incomplete children"))
+	content.WriteString(warningStyle.Render("⚠  Cannot complete: incomplete children"))
 	content.WriteString("\n\n")
 
 	infoStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	content.WriteString(infoStyle.Render(fmt.Sprintf(
-		"%d active/in-progress child task(s) still pending.\nMark parent as %s anyway?",
+		"%d active/in-progress child task(s) still pending.\nCannot mark parent as %s until they're resolved or reassigned.",
 		activeCount, m.pendingWarningKeyword,
 	)))
 	content.WriteString("\n\n")
 
 	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	content.WriteString(helpStyle.Render("y: confirm • n/esc: cancel"))
+	content.WriteString(helpStyle.Render("any key: dismiss"))
 
 	return boxStyle.Render(content.String())
 }
@@ -1663,7 +1642,7 @@ func updateTaskStatusCmd(cfg *configpkg.Config, t *task.Task, newKeyword string)
 		}
 
 		// Normal (non-recurring) status update
-		if err := task.UpdateTaskStatus(t, newKeyword); err != nil {
+		if err := task.UpdateTaskStatus(t, newKeyword, cfg); err != nil {
 			return statusUpdateMsg{err: err}
 		}
 

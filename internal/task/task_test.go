@@ -1,6 +1,7 @@
 package task
 
 import (
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -318,7 +319,7 @@ DONE: Review the documentation
 	}
 
 	// Update the task status
-	err = UpdateTaskStatus(task, "DOING")
+	err = UpdateTaskStatus(task, "DOING", nil)
 	if err != nil {
 		t.Fatalf("UpdateTaskStatus() error = %v", err)
 	}
@@ -350,6 +351,61 @@ DONE: Review the documentation
 	}
 }
 
+func TestUpdateTaskStatus_BlocksOnPendingChildren(t *testing.T) {
+	cfg := createTestConfig()
+
+	tmpFile, err := os.CreateTemp("", "task_test_*.md")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	content := `# Test File
+
+DOING: Parent task
+  - TODO: Active child task
+`
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("Failed to write to temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	parent := &Task{Keyword: "DOING", Title: "Parent task", FilePath: tmpFile.Name()}
+	child := &Task{Keyword: "TODO", Title: "Active child task", FilePath: tmpFile.Name(), Parent: parent}
+	parent.Children = []*Task{child}
+
+	// Blocked: active child still pending.
+	err = UpdateTaskStatus(parent, "DONE", cfg)
+	if !errors.Is(err, ErrPendingChildren) {
+		t.Fatalf("UpdateTaskStatus() error = %v, want ErrPendingChildren", err)
+	}
+	if parent.Keyword != "DOING" {
+		t.Errorf("Task.Keyword = %v, want unchanged DOING", parent.Keyword)
+	}
+	unchanged, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("Failed to read file: %v", err)
+	}
+	if string(unchanged) != content {
+		t.Errorf("file was modified despite blocked update: %q", string(unchanged))
+	}
+
+	// Not blocked: nil cfg skips the check entirely.
+	if err := UpdateTaskStatus(parent, "DONE", nil); err != nil {
+		t.Fatalf("UpdateTaskStatus() with nil cfg error = %v, want nil", err)
+	}
+
+	// Reset and verify: once the child is completed, the parent can complete too.
+	parent.Keyword = "DOING"
+	if err := os.WriteFile(tmpFile.Name(), []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to reset file: %v", err)
+	}
+	child.Keyword = "DONE"
+	if err := UpdateTaskStatus(parent, "DONE", cfg); err != nil {
+		t.Fatalf("UpdateTaskStatus() error = %v, want nil once child is completed", err)
+	}
+}
+
 func TestUpdateTaskStatus_TaskNotFound(t *testing.T) {
 	// Create a temporary file without the task
 	tmpFile, err := os.CreateTemp("", "task_test_*.md")
@@ -376,7 +432,7 @@ TODO: Different task
 	}
 
 	// Update the task status - should fail
-	err = UpdateTaskStatus(task, "DOING")
+	err = UpdateTaskStatus(task, "DOING", nil)
 	if err == nil {
 		t.Error("UpdateTaskStatus() should return error for non-existent task")
 	}
@@ -388,7 +444,7 @@ func TestUpdateTaskStatus_NoFilePath(t *testing.T) {
 		Title:   "Test task",
 	}
 
-	err := UpdateTaskStatus(task, "DOING")
+	err := UpdateTaskStatus(task, "DOING", nil)
 	if err == nil {
 		t.Error("UpdateTaskStatus() should return error when FilePath is empty")
 	}
@@ -785,7 +841,7 @@ DONE: Complete setup
 	}
 
 	// Update the task status
-	err = UpdateTaskStatus(task, "DOING")
+	err = UpdateTaskStatus(task, "DOING", nil)
 	if err != nil {
 		t.Fatalf("UpdateTaskStatus() error = %v", err)
 	}

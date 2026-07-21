@@ -3,6 +3,7 @@ package task
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -119,7 +120,11 @@ func handleDisappearedTicket(ctx context.Context, cfg *config.Config, client *ji
 
 	if isDone || reassigned {
 		oldKW := t.Keyword
-		if err := UpdateTaskStatus(t, "DONE"); err != nil {
+		if err := UpdateTaskStatus(t, "DONE", cfg); err != nil {
+			if errors.Is(err, ErrPendingChildren) {
+				// Local sub-tasks still pending; leave as-is and retry next sync.
+				return nil
+			}
 			return err
 		}
 		RecordStateTransition(t, oldKW, "DONE")
@@ -141,7 +146,11 @@ func updateExistingTask(cfg *config.Config, t *Task, issue *jira.Issue, allIssue
 	if isDone != currentlyDone {
 		oldKW := t.Keyword
 		newKW := cfg.JiraStatusToKeyword(issue.Fields.Status.Name, isDone)
-		if err := UpdateTaskStatus(t, newKW); err != nil {
+		if err := UpdateTaskStatus(t, newKW, cfg); err != nil {
+			if errors.Is(err, ErrPendingChildren) {
+				// Local sub-tasks still pending; leave as-is and retry next sync.
+				return nil
+			}
 			return err
 		}
 		RecordStateTransition(t, oldKW, newKW)
