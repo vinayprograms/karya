@@ -290,9 +290,11 @@ func ParseLine(c *config.Config, line, project, zettel, filePath string) *Task {
 	}
 	title = refRe.ReplaceAllString(title, "") // Remove all references from title
 
-	// Extract tags (#tag) - supports multiple tags
+	// Extract tags (#tag) - supports multiple tags. Require a space or
+	// start-of-string before '#' so a URL fragment like "...page#section"
+	// isn't mistaken for a tag.
 	var tags []string
-	tagRe := regexp.MustCompile(`\s*#([^ ]+)`)
+	tagRe := regexp.MustCompile(`(?:^|\s)#([^ ]+)`)
 	tagMatches := tagRe.FindAllStringSubmatch(title, -1)
 	for _, match := range tagMatches {
 		if len(match) > 1 {
@@ -309,25 +311,27 @@ func ParseLine(c *config.Config, line, project, zettel, filePath string) *Task {
 		title = assigneeRe.ReplaceAllString(title, "") // Remove from title
 	}
 
-	// Extract dates (@date, @s:date, @d:date)
+	// Extract dates (@date, @s:date, @d:date). Same boundary requirement as
+	// tags: '@' must follow a space or start-of-string, so an embedded
+	// "user@example.com" or similar isn't mistaken for a date marker.
 	var scheduledAt, dueAt string
 
 	// Match @s:date pattern
-	scheduledRe := regexp.MustCompile(`\s*@s:([^ ]+)`)
+	scheduledRe := regexp.MustCompile(`(?:^|\s)@s:([^ ]+)`)
 	if scheduledMatch := scheduledRe.FindStringSubmatch(title); len(scheduledMatch) > 1 {
 		scheduledAt = scheduledMatch[1]
 		title = scheduledRe.ReplaceAllString(title, "") // Remove from title
 	}
 
 	// Match @d:date pattern
-	dueRe := regexp.MustCompile(`\s*@d:([^ ]+)`)
+	dueRe := regexp.MustCompile(`(?:^|\s)@d:([^ ]+)`)
 	if dueMatch := dueRe.FindStringSubmatch(title); len(dueMatch) > 1 {
 		dueAt = dueMatch[1]
 		title = dueRe.ReplaceAllString(title, "") // Remove from title
 	}
 
 	// Match simple @date pattern (treat as scheduled date if no explicit @s:date)
-	dateRe := regexp.MustCompile(`\s*@([^ :]+)`)
+	dateRe := regexp.MustCompile(`(?:^|\s)@([^ :]+)`)
 	if dateMatch := dateRe.FindStringSubmatch(title); len(dateMatch) > 1 {
 		if scheduledAt == "" { // Only use it if no explicit @s:date was found
 			scheduledAt = dateMatch[1]

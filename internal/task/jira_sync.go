@@ -369,8 +369,8 @@ func UpdateTaskLabels(t *Task, labels []string) error {
 		lineNum++
 		line := scanner.Text()
 		if lineNum == t.LineNum {
-			// Remove existing tags
-			tagRe := regexp.MustCompile(`\s*#[^ ]+`)
+			// Remove existing tags (boundary-guarded so a URL fragment isn't mistaken for one)
+			tagRe := regexp.MustCompile(`(?:^|\s)#[^ ]+`)
 			line = tagRe.ReplaceAllString(line, "")
 			// Append new tags
 			for _, label := range labels {
