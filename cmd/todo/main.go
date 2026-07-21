@@ -25,6 +25,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -1222,9 +1223,9 @@ func (m *model) applyCustomFilter() {
 		}
 	}
 
-	// For date filters, exclude completed tasks (overdue/past dates are not actionable on done tasks)
+	// For date filters, exclude completed tasks unless SHOW_COMPLETED is set
 	filterInput := allTasks
-	if strings.HasPrefix(m.customFilter, "@") {
+	if strings.HasPrefix(m.customFilter, "@") && !m.config.Todo.ShowCompleted {
 		filterInput = make([]*task.Task, 0, len(allTasks))
 		for _, t := range allTasks {
 			if !t.IsCompleted(m.config) {
@@ -1244,16 +1245,10 @@ func (m *model) applyCustomFilter() {
 		}
 	}
 
-	// Skip SetItems if filter returned everything (avoids flicker on incomplete prefixes like "@d:")
-	if len(filteredItems) == len(m.allItems) {
-		return
-	}
-
-	m.list.SetItems(filteredItems)
-
-	// If no items match the filter, show a message
 	if len(filteredItems) == 0 {
 		m.list.SetItems([]list.Item{list.Item(&noResultsItem{})})
+	} else {
+		m.list.SetItems(filteredItems)
 	}
 }
 
@@ -1319,7 +1314,7 @@ func (m model) View() string {
 		}
 	}
 
-	// Show filter status if active
+	// Show filter status inline with title bar (title gets 22 chars, filter gets the rest)
 	if m.filtering || m.customFilter != "" {
 		var filterText string
 		if m.filtering {
@@ -1345,12 +1340,41 @@ func (m model) View() string {
 			}
 		}
 
+		// Reserve titleWidth columns for the title; the filter gets the rest of
+		// the line. Clip filterText (plain string, not yet ANSI-styled) to fit
+		// so it never overflows past the terminal edge.
+		const titleWidth = 24
+		const filterPadding = 2 // Padding(0, 1) adds 1 col on each side
+		availWidth := m.termWidth - titleWidth - filterPadding
+		if availWidth < 0 {
+			availWidth = 0
+		}
+		filterRunes := []rune(filterText)
+		if len(filterRunes) > availWidth {
+			filterRunes = filterRunes[len(filterRunes)-availWidth:]
+			filterText = string(filterRunes)
+		}
+
 		filterInfo := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("11")).
 			Background(lipgloss.Color("0")).
 			Padding(0, 1).
 			Render(filterText)
-		view = filterInfo + "\n" + view
+
+		lines := strings.Split(view, "\n")
+		if len(lines) >= 1 {
+			// lipgloss.JoinVertical already padded the title line with plain
+			// spaces out to the width of the widest section (the task list),
+			// so it's often already full terminal width. Clip it down to
+			// titleWidth columns first (ANSI-safe, won't corrupt escape
+			// sequences), then pad if it came in short, then append filter.
+			titleLine := ansi.Truncate(lines[0], titleWidth, "")
+			if pad := titleWidth - lipgloss.Width(titleLine); pad > 0 {
+				titleLine += strings.Repeat(" ", pad)
+			}
+			lines[0] = titleLine + filterInfo
+			view = strings.Join(lines, "\n")
+		}
 	}
 
 	// Show status message by replacing the help bar line
