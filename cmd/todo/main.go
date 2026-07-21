@@ -760,29 +760,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.filterCursor < len(runes) {
 					runes = append(runes[:m.filterCursor], runes[m.filterCursor+1:]...)
 					m.customFilter = string(runes)
-					if m.customFilter == "" {
-						m.filtering = false
-						m.list.SetItems(m.allItems)
-					} else {
-						m.applyCustomFilter()
-					}
+					m.applyCustomFilter()
 				}
 				return m, nil
 			case "backspace":
+				// Clearing the box to empty stays in filtering mode — it's ready
+				// for a new query, not a cancel. Only esc cancels.
 				if m.filterCursor > 0 {
 					runes = append(runes[:m.filterCursor-1], runes[m.filterCursor:]...)
 					m.filterCursor--
 					m.customFilter = string(runes)
-					if m.customFilter == "" {
-						m.filtering = false
-						m.filterCursor = 0
-						m.list.SetItems(m.allItems)
-					} else {
-						m.applyCustomFilter()
-					}
-				} else if m.customFilter == "" {
-					m.filtering = false
-					m.list.SetItems(m.allItems)
+					m.applyCustomFilter()
 				}
 				return m, nil
 			default:
