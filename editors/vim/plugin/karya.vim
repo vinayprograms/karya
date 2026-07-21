@@ -224,7 +224,7 @@ function! s:HighlightDates(data) abort
       call add(completed_kws, kw)
     endif
   endfor
-  let completed_pat = empty(completed_kws) ? '' : '^\s*\%(' . join(completed_kws, '\|') . '\):'
+  let completed_pat = empty(completed_kws) ? '' : '\%(^\|\s\)\%(' . join(completed_kws, '\|') . '\):'
 
   let lnum = 1
   while lnum <= line('$')
