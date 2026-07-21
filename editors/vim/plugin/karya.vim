@@ -166,9 +166,11 @@ function! s:KaryaSyntax() abort
   syn match karyaLog /LOG([A-Z_]\+ -> [A-Z_]\+): .\+/ containedin=ALL
   exe 'hi karyaLog cterm=italic gui=italic' . (completed_hi != '' ? ' ' . completed_hi : '')
 
-  " JIRA keys
+  " JIRA keys — bold, no underline, so they don't read as clickable links.
+  " Muted gruvbox blue (#458588): distinct from link/URL styling and from
+  " the red-on-dark-gray used for search highlighting.
   syn match karyaJira /\<[A-Z]\{2,}-\d\+\>/ containedin=ALL
-  hi def link karyaJira Underlined
+  exe 'hi karyaJira cterm=bold gui=bold ' . s:ColorToHighlight('#458588')
 
   " Tags — regular and special (exclude completed lines)
   let tag_fg = has_key(data.elements, 'tag') ? get(data.elements.tag, 'fg', '') : ''
