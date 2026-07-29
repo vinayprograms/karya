@@ -16,7 +16,6 @@ type CreateZettelArgs struct {
 
 type CreateZettelResult struct {
 	ZettelID string `json:"zettel_id" jsonschema:"the ID of the created zettel"`
-	Path     string `json:"path" jsonschema:"the file path of the created zettel"`
 	Message  string `json:"message" jsonschema:"status message"`
 }
 
@@ -32,7 +31,6 @@ type ListZettelsResult struct {
 type ZettelInfo struct {
 	ID    string `json:"id" jsonschema:"zettel ID (timestamp format)"`
 	Title string `json:"title" jsonschema:"zettel title"`
-	Path  string `json:"path" jsonschema:"file path to the zettel"`
 }
 
 type GetZettelArgs struct {
@@ -43,7 +41,6 @@ type GetZettelResult struct {
 	ID      string `json:"id" jsonschema:"zettel ID"`
 	Title   string `json:"title" jsonschema:"zettel title"`
 	Content string `json:"content" jsonschema:"full content of the zettel"`
-	Path    string `json:"path" jsonschema:"file path to the zettel"`
 }
 
 type SearchZettelsArgs struct {
@@ -100,7 +97,6 @@ type GetLastZettelResult struct {
 	ID      string `json:"id" jsonschema:"zettel ID"`
 	Title   string `json:"title" jsonschema:"zettel title"`
 	Content string `json:"content" jsonschema:"full content of the zettel"`
-	Path    string `json:"path" jsonschema:"file path to the zettel"`
 }
 
 type FindTodosArgs struct{}
@@ -223,7 +219,6 @@ func (s *MCPServer) createZettel(ctx context.Context, req *mcp.CallToolRequest, 
 
 	result := CreateZettelResult{
 		ZettelID: zetID,
-		Path:     fmt.Sprintf("%s/%s/README.md", s.zetDir, zetID),
 		Message:  fmt.Sprintf("Created zettel %s", zetID),
 	}
 
@@ -246,7 +241,6 @@ func (s *MCPServer) listZettels(ctx context.Context, req *mcp.CallToolRequest, a
 		infos[i] = ZettelInfo{
 			ID:    zettels[i].ID,
 			Title: zettels[i].Title,
-			Path:  zettels[i].Path,
 		}
 	}
 
@@ -292,7 +286,6 @@ func (s *MCPServer) getZettel(ctx context.Context, req *mcp.CallToolRequest, arg
 		ID:      zetID,
 		Title:   title,
 		Content: content,
-		Path:    fmt.Sprintf("%s/%s/README.md", s.zetDir, zetID),
 	}, nil
 }
 
@@ -329,7 +322,6 @@ func (s *MCPServer) searchTitles(ctx context.Context, req *mcp.CallToolRequest, 
 		infos[i] = ZettelInfo{
 			ID:    z.ID,
 			Title: z.Title,
-			Path:  z.Path,
 		}
 	}
 
@@ -423,7 +415,6 @@ func (s *MCPServer) getLastZettel(ctx context.Context, req *mcp.CallToolRequest,
 		ID:      zetID,
 		Title:   title,
 		Content: content,
-		Path:    fmt.Sprintf("%s/%s/README.md", s.zetDir, zetID),
 	}, nil
 }
 

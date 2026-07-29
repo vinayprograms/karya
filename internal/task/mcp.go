@@ -36,7 +36,6 @@ type TaskInfo struct {
 	Assignee    string   `json:"assignee,omitempty" jsonschema:"task assignee"`
 	Project     string   `json:"project" jsonschema:"project name"`
 	Zettel      string   `json:"zettel,omitempty" jsonschema:"zettel ID (if structured mode)"`
-	FilePath    string   `json:"file_path" jsonschema:"file path where task is defined"`
 	Priority    int      `json:"priority" jsonschema:"priority level (1=in_progress, 2=active, 3=someday, 4=completed)"`
 	Status      string   `json:"status" jsonschema:"status category (active, in_progress, completed, someday)"`
 	InCycle    bool   `json:"in_cycle,omitempty" jsonschema:"true if task participates in a circular dependency"`
@@ -72,7 +71,6 @@ type SearchResultInfo struct {
 	Title    string `json:"title" jsonschema:"file/zettel title"`
 	LineNum  int    `json:"line_num" jsonschema:"line number of the match"`
 	Line     string `json:"line" jsonschema:"the matching line"`
-	Path     string `json:"path" jsonschema:"file path"`
 }
 
 type FilterTasksArgs struct {
@@ -425,7 +423,6 @@ func (s *MCPServer) taskToInfo(t *Task) TaskInfo {
 		Assignee:    t.Assignee,
 		Project:     t.Project,
 		Zettel:      t.Zettel,
-		FilePath:    t.FilePath,
 		Priority:    t.Priority(s.config),
 		Status:      status,
 		InCycle:     t.InCycle,
@@ -502,7 +499,6 @@ func (s *MCPServer) searchTasks(ctx context.Context, req *mcp.CallToolRequest, a
 			Title:    r.Title,
 			LineNum:  r.LineNum,
 			Line:     r.Line,
-			Path:     r.Path,
 		}
 	}
 

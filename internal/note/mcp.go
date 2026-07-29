@@ -25,7 +25,6 @@ type ListProjectsResult struct {
 
 type ProjectInfo struct {
 	Name      string `json:"name" jsonschema:"project name"`
-	Path      string `json:"path" jsonschema:"project directory path"`
 	HasNotes  bool   `json:"has_notes" jsonschema:"whether project has notes directory"`
 	NoteCount int    `json:"note_count" jsonschema:"number of notes in project"`
 	TaskCount int    `json:"task_count" jsonschema:"number of active tasks in project"`
@@ -37,7 +36,6 @@ type CreateProjectArgs struct {
 
 type CreateProjectResult struct {
 	Name    string `json:"name" jsonschema:"created project name"`
-	Path    string `json:"path" jsonschema:"project directory path"`
 	Message string `json:"message" jsonschema:"status message"`
 }
 
@@ -56,7 +54,6 @@ type ListNotesResult struct {
 type NoteInfo struct {
 	ID    string `json:"id" jsonschema:"note ID (timestamp format)"`
 	Title string `json:"title" jsonschema:"note title"`
-	Path  string `json:"path" jsonschema:"file path to the note"`
 }
 
 type CreateNoteArgs struct {
@@ -67,7 +64,6 @@ type CreateNoteArgs struct {
 
 type CreateNoteResult struct {
 	ID      string `json:"id" jsonschema:"created note ID"`
-	Path    string `json:"path" jsonschema:"file path to the note"`
 	Project string `json:"project" jsonschema:"project name"`
 	Message string `json:"message" jsonschema:"status message"`
 }
@@ -81,7 +77,6 @@ type GetNoteResult struct {
 	ID      string `json:"id" jsonschema:"note ID"`
 	Title   string `json:"title" jsonschema:"note title"`
 	Content string `json:"content" jsonschema:"full content of the note"`
-	Path    string `json:"path" jsonschema:"file path to the note"`
 	Project string `json:"project" jsonschema:"project name"`
 }
 
@@ -114,7 +109,6 @@ type GetLastNoteResult struct {
 	ID      string `json:"id" jsonschema:"note ID"`
 	Title   string `json:"title" jsonschema:"note title"`
 	Content string `json:"content" jsonschema:"full content of the note"`
-	Path    string `json:"path" jsonschema:"file path to the note"`
 	Project string `json:"project" jsonschema:"project name"`
 }
 
@@ -223,7 +217,6 @@ type GetTOCArgs struct {
 
 type GetTOCResult struct {
 	Content string `json:"content" jsonschema:"full content of the table of contents (README.md)"`
-	Path    string `json:"path" jsonschema:"file path to the TOC"`
 	Project string `json:"project" jsonschema:"project name"`
 }
 
@@ -390,7 +383,6 @@ func (s *MCPServer) listProjects(ctx context.Context, req *mcp.CallToolRequest, 
 
 		projects = append(projects, ProjectInfo{
 			Name:      entry.Name(),
-			Path:      prjPath,
 			HasNotes:  hasNotes,
 			NoteCount: noteCount,
 			TaskCount: taskCount,
@@ -423,7 +415,6 @@ func (s *MCPServer) createProject(ctx context.Context, req *mcp.CallToolRequest,
 
 	return nil, CreateProjectResult{
 		Name:    args.Name,
-		Path:    prjPath,
 		Message: fmt.Sprintf("Created project '%s' with notes directory", args.Name),
 	}, nil
 }
@@ -455,7 +446,6 @@ func (s *MCPServer) listNotes(ctx context.Context, req *mcp.CallToolRequest, arg
 		notes[i] = NoteInfo{
 			ID:    zettels[i].ID,
 			Title: zettels[i].Title,
-			Path:  zettels[i].Path,
 		}
 	}
 
@@ -523,7 +513,6 @@ func (s *MCPServer) createNote(ctx context.Context, req *mcp.CallToolRequest, ar
 
 	return nil, CreateNoteResult{
 		ID:      noteID,
-		Path:    filepath.Join(notesDir, noteID, "README.md"),
 		Project: args.Project,
 		Message: fmt.Sprintf("Created note %s in project '%s'", noteID, args.Project),
 	}, nil
@@ -574,7 +563,6 @@ func (s *MCPServer) getNote(ctx context.Context, req *mcp.CallToolRequest, args 
 		ID:      noteID,
 		Title:   title,
 		Content: content,
-		Path:    filepath.Join(notesDir, noteID, "README.md"),
 		Project: args.Project,
 	}, nil
 }
@@ -695,7 +683,6 @@ func (s *MCPServer) getLastNote(ctx context.Context, req *mcp.CallToolRequest, a
 		ID:      noteID,
 		Title:   title,
 		Content: content,
-		Path:    filepath.Join(notesDir, noteID, "README.md"),
 		Project: args.Project,
 	}, nil
 }
@@ -740,7 +727,6 @@ func (s *MCPServer) getTOC(ctx context.Context, req *mcp.CallToolRequest, args G
 		if os.IsNotExist(err) {
 			return nil, GetTOCResult{
 				Content: "",
-				Path:    tocPath,
 				Project: args.Project,
 			}, nil
 		}
@@ -749,7 +735,6 @@ func (s *MCPServer) getTOC(ctx context.Context, req *mcp.CallToolRequest, args G
 
 	return nil, GetTOCResult{
 		Content: string(content),
-		Path:    tocPath,
 		Project: args.Project,
 	}, nil
 }
@@ -810,7 +795,6 @@ func (s *MCPServer) searchTitles(ctx context.Context, req *mcp.CallToolRequest, 
 		notes[i] = NoteInfo{
 			ID:    z.ID,
 			Title: z.Title,
-			Path:  z.Path,
 		}
 	}
 

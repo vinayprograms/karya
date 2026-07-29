@@ -23,7 +23,6 @@ type GoalInfo struct {
 	Title   string `json:"title" jsonschema:"goal title"`
 	Horizon string `json:"horizon" jsonschema:"time horizon (monthly, quarterly, yearly, short-term, long-term)"`
 	Period  string `json:"period" jsonschema:"time period (e.g., 2026-05, 2026-Q2, 2026, 2025-2028)"`
-	Path    string `json:"path" jsonschema:"file path to the goal"`
 }
 
 type CreateGoalArgs struct {
@@ -48,6 +47,18 @@ type GetGoalContentResult struct {
 	Goal    *GoalInfo `json:"goal,omitempty" jsonschema:"goal metadata"`
 	Content string    `json:"content" jsonschema:"goal file content"`
 	Found   bool      `json:"found" jsonschema:"whether the goal was found"`
+}
+
+type UpdateGoalContentArgs struct {
+	Horizon string `json:"horizon" jsonschema:"time horizon: monthly, quarterly, yearly, short-term, long-term"`
+	Period  string `json:"period" jsonschema:"time period (e.g., 2026-05, 2026-Q2, 2026, 2025-2028)"`
+	Title   string `json:"title" jsonschema:"goal title"`
+	Content string `json:"content" jsonschema:"new content for the goal (full replacement)"`
+}
+
+type UpdateGoalContentResult struct {
+	Message string `json:"message" jsonschema:"status message"`
+	Success bool   `json:"success" jsonschema:"whether the update succeeded"`
 }
 
 // MCPServer wraps the MCP server with goal operations
@@ -89,6 +100,11 @@ func (s *MCPServer) registerTools() {
 		Name:        "get_goal_content",
 		Description: "PREFERRED: Read the full content of a specific goal file. Use list_goals first to discover available goals and their titles.",
 	}, s.getGoalContent)
+
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "update_goal_content",
+		Description: "PREFERRED: Update the content of an existing goal. Replaces the entire file content - use get_goal_content first to read current content. Identify the goal by its horizon, period, and title.",
+	}, s.updateGoalContent)
 }
 
 func (s *MCPServer) listGoals(ctx context.Context, req *mcp.CallToolRequest, args ListGoalsArgs) (*mcp.CallToolResult, ListGoalsResult, error) {
@@ -116,7 +132,6 @@ func (s *MCPServer) listGoals(ctx context.Context, req *mcp.CallToolRequest, arg
 					Title:   title,
 					Horizon: string(h),
 					Period:  period,
-					Path:    s.manager.GetGoalPathForHorizon(h, period, title),
 				})
 			}
 		}
@@ -145,7 +160,6 @@ func (s *MCPServer) createGoal(ctx context.Context, req *mcp.CallToolRequest, ar
 		Title:   args.Title,
 		Horizon: args.Horizon,
 		Period:  args.Period,
-		Path:    s.manager.GetGoalPathForHorizon(h, args.Period, args.Title),
 	}
 	return nil, CreateGoalResult{
 		Goal:    &info,
@@ -171,11 +185,47 @@ func (s *MCPServer) getGoalContent(ctx context.Context, req *mcp.CallToolRequest
 		Title:   args.Title,
 		Horizon: args.Horizon,
 		Period:  args.Period,
-		Path:    path,
 	}
 	return nil, GetGoalContentResult{
 		Goal:    &info,
 		Content: string(data),
 		Found:   true,
+	}, nil
+}
+
+func (s *MCPServer) updateGoalContent(ctx context.Context, req *mcp.CallToolRequest, args UpdateGoalContentArgs) (*mcp.CallToolResult, UpdateGoalContentResult, error) {
+	if args.Horizon == "" || args.Period == "" || args.Title == "" {
+		return nil, UpdateGoalContentResult{
+			Success: false,
+			Message: "horizon, period, and title are all required",
+		}, nil
+	}
+	if args.Content == "" {
+		return nil, UpdateGoalContentResult{
+			Success: false,
+			Message: "content is required",
+		}, nil
+	}
+
+	h := Horizon(args.Horizon)
+	path := s.manager.GetGoalPathForHorizon(h, args.Period, args.Title)
+
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil, UpdateGoalContentResult{
+			Success: false,
+			Message: fmt.Sprintf("goal not found: %s (%s/%s)", args.Title, args.Horizon, args.Period),
+		}, nil
+	}
+
+	if err := os.WriteFile(path, []byte(args.Content), 0644); err != nil {
+		return nil, UpdateGoalContentResult{
+			Success: false,
+			Message: fmt.Sprintf("failed to update goal: %v", err),
+		}, nil
+	}
+
+	return nil, UpdateGoalContentResult{
+		Success: true,
+		Message: fmt.Sprintf("Updated goal: %s (%s/%s)", args.Title, args.Horizon, args.Period),
 	}, nil
 }
