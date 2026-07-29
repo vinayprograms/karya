@@ -16,6 +16,7 @@ import (
 type Client struct {
 	session  *mcp.ClientSession
 	cloudID  string
+	siteURL  string
 	endpoint string
 	token    *TokenStore
 }
@@ -69,8 +70,8 @@ func (c *Client) Init(ctx context.Context) error {
 		return fmt.Errorf("getting accessible resources: %w", err)
 	}
 
-	// Parse cloud ID from response
-	c.cloudID = extractCloudID(resources)
+	// Parse cloud ID and site URL from response
+	c.cloudID, c.siteURL = extractCloudIDAndURL(resources)
 	if c.cloudID == "" {
 		return fmt.Errorf("could not determine cloud ID from accessible resources")
 	}
@@ -164,30 +165,34 @@ func contentText(content []mcp.Content) string {
 	return strings.Join(parts, "\n")
 }
 
-func extractCloudID(result string) string {
-	// The response is typically JSON with cloud IDs
+func extractCloudIDAndURL(result string) (string, string) {
 	var resources []struct {
 		ID   string `json:"id"`
 		URL  string `json:"url"`
 		Name string `json:"name"`
 	}
 	if err := json.Unmarshal([]byte(result), &resources); err == nil && len(resources) > 0 {
-		return resources[0].ID
+		return resources[0].ID, strings.TrimRight(resources[0].URL, "/")
 	}
 
-	// Try as single object
 	var resource struct {
 		ID      string `json:"id"`
+		URL     string `json:"url"`
 		CloudID string `json:"cloudId"`
 	}
 	if err := json.Unmarshal([]byte(result), &resource); err == nil {
-		if resource.CloudID != "" {
-			return resource.CloudID
+		id := resource.CloudID
+		if id == "" {
+			id = resource.ID
 		}
-		return resource.ID
+		return id, strings.TrimRight(resource.URL, "/")
 	}
 
-	return ""
+	return "", ""
+}
+
+func (c *Client) SiteURL() string {
+	return c.siteURL
 }
 
 func parseIssuesFromMCP(result string) ([]Issue, error) {

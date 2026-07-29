@@ -64,6 +64,8 @@ func SyncFromJira(ctx context.Context, cfg *config.Config, client *jira.Client) 
 		issueKeys[issues[i].Key] = &issues[i]
 	}
 
+	siteURL := client.SiteURL()
+
 	for i := range issues {
 		issue := &issues[i]
 		seen[issue.Key] = true
@@ -76,11 +78,11 @@ func SyncFromJira(ctx context.Context, cfg *config.Config, client *jira.Client) 
 		}
 
 		if existing, ok := existingJira[issue.Key]; ok {
-			if err := updateExistingTask(cfg, existing, issue, issueKeys); err != nil {
+			if err := updateExistingTask(cfg, existing, issue, issueKeys, siteURL); err != nil {
 				return 0, fmt.Errorf("updating %s: %w", issue.Key, err)
 			}
 		} else {
-			if err := appendNewTask(cfg, issue, issueKeys); err != nil {
+			if err := appendNewTask(cfg, issue, issueKeys, siteURL); err != nil {
 				return 0, fmt.Errorf("appending %s: %w", issue.Key, err)
 			}
 		}
@@ -139,7 +141,7 @@ func handleDisappearedTicket(ctx context.Context, cfg *config.Config, client *ji
 	return nil
 }
 
-func updateExistingTask(cfg *config.Config, t *Task, issue *jira.Issue, allIssues map[string]*jira.Issue) error {
+func updateExistingTask(cfg *config.Config, t *Task, issue *jira.Issue, allIssues map[string]*jira.Issue, siteURL string) error {
 	// Keyword: only overwrite on status category change
 	isDone := issue.Fields.Status.StatusCategory.Key == "done"
 	currentlyDone := t.IsCompleted(cfg)
@@ -166,17 +168,17 @@ func updateExistingTask(cfg *config.Config, t *Task, issue *jira.Issue, allIssue
 	}
 
 	// Update description (replace) and append new comments
-	return updateTaskContent(t, issue, allIssues)
+	return updateTaskContent(t, issue, allIssues, siteURL)
 }
 
-func appendNewTask(cfg *config.Config, issue *jira.Issue, allIssues map[string]*jira.Issue) error {
+func appendNewTask(cfg *config.Config, issue *jira.Issue, allIssues map[string]*jira.Issue, siteURL string) error {
 	inboxPath := cfg.GetInboxFilePath()
 
 	isDone := issue.Fields.Status.StatusCategory.Key == "done"
 	keyword := cfg.JiraStatusToKeyword(issue.Fields.Status.Name, isDone)
 
 	line := renderTaskLine(keyword, issue)
-	content := renderTaskBlock(line, issue, allIssues)
+	content := renderTaskBlock(line, issue, allIssues, siteURL)
 
 	f, err := os.OpenFile(inboxPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
@@ -208,33 +210,29 @@ func renderTaskLine(keyword string, issue *jira.Issue) string {
 	return sb.String()
 }
 
-func renderTaskBlock(taskLine string, issue *jira.Issue, allIssues map[string]*jira.Issue) string {
+func renderTaskBlock(taskLine string, issue *jira.Issue, allIssues map[string]*jira.Issue, siteURL string) string {
 	var sb strings.Builder
 	sb.WriteString(taskLine)
 	sb.WriteString("\n")
 
-	// Single indented link to the JIRA ticket
-	sb.WriteString(fmt.Sprintf("  - %s\n", jiraTicketURL(issue.Key)))
+	sb.WriteString(fmt.Sprintf("  - %s\n", jiraTicketURL(siteURL, issue.Key)))
 
-	// Sub-tasks (only those assigned to user that are in our issue set)
 	for _, sub := range issue.Fields.Subtasks {
 		if subIssue, ok := allIssues[sub.Key]; ok {
 			subLine := "  " + renderTaskLine("TODO", subIssue)
 			sb.WriteString(subLine + "\n")
-			sb.WriteString(fmt.Sprintf("    - %s\n", jiraTicketURL(sub.Key)))
+			sb.WriteString(fmt.Sprintf("    - %s\n", jiraTicketURL(siteURL, sub.Key)))
 		}
 	}
 
 	return sb.String()
 }
 
-func jiraTicketURL(key string) string {
-	// Extract project prefix to construct URL
-	// Standard Atlassian Cloud URL pattern
-	return fmt.Sprintf("https://***REMOVED***/browse/%s", key)
+func jiraTicketURL(siteURL, key string) string {
+	return fmt.Sprintf("%s/browse/%s", siteURL, key)
 }
 
-func updateTaskContent(t *Task, issue *jira.Issue, allIssues map[string]*jira.Issue) error {
+func updateTaskContent(t *Task, issue *jira.Issue, allIssues map[string]*jira.Issue, siteURL string) error {
 	if t.FilePath == "" || t.LineNum == 0 {
 		return nil
 	}
@@ -249,7 +247,7 @@ func updateTaskContent(t *Task, issue *jira.Issue, allIssues map[string]*jira.Is
 	}
 
 	// Check if the URL link already exists in the indented block — if so, nothing to do
-	ticketURL := jiraTicketURL(issue.Key)
+	ticketURL := jiraTicketURL(siteURL, issue.Key)
 	for i := t.LineNum; i < len(lines); i++ {
 		line := lines[i]
 		if line == "" {
@@ -279,7 +277,7 @@ func updateTaskContent(t *Task, issue *jira.Issue, allIssues map[string]*jira.Is
 	}
 
 	// Replace with just the ticket URL
-	finalBlock := buildFinalBlock(issue)
+	finalBlock := buildFinalBlock(issue, siteURL)
 
 	// Replace the old block
 	result := make([]string, 0, len(lines))
@@ -290,8 +288,8 @@ func updateTaskContent(t *Task, issue *jira.Issue, allIssues map[string]*jira.Is
 	return os.WriteFile(t.FilePath, []byte(strings.Join(result, "\n")), 0644)
 }
 
-func buildFinalBlock(issue *jira.Issue) []string {
-	return []string{fmt.Sprintf("  - %s", jiraTicketURL(issue.Key))}
+func buildFinalBlock(issue *jira.Issue, siteURL string) []string {
+	return []string{fmt.Sprintf("  - %s", jiraTicketURL(siteURL, issue.Key))}
 }
 
 
