@@ -414,9 +414,9 @@ func ListTasks(c *config.Config, project string, showCompleted bool) ([]*Task, e
 		}
 	}
 
-	// Load tasks from inbox file (only when listing all projects, not a specific one)
+	// Load tasks from inbox file (when listing all projects or specifically requesting inbox)
 	var inboxTasks []*Task
-	if project == "" || project == "*" {
+	if project == "" || project == "*" || project == "inbox" {
 		inboxFilePath := c.GetInboxFilePath()
 		inboxTasks, err = readInboxFile(inboxFilePath, c)
 		if err != nil && !os.IsNotExist(err) {
