@@ -29,6 +29,7 @@ type TaskInfo struct {
 	Keyword     string   `json:"keyword" jsonschema:"task status keyword (e.g., TODO, DOING, DONE)"`
 	ID          string   `json:"id,omitempty" jsonschema:"task unique identifier"`
 	Title       string   `json:"title" jsonschema:"task title/description"`
+	RawTitle    string   `json:"raw_title,omitempty" jsonschema:"exact text after KEYWORD: on the task line; pass to mutation tools for unambiguous matching"`
 	Tags        []string `json:"tags,omitempty" jsonschema:"task tags (without #)"`
 	References  []string `json:"references,omitempty" jsonschema:"IDs of tasks this task depends on (^id syntax)"`
 	ScheduledAt string   `json:"scheduled_at,omitempty" jsonschema:"scheduled date"`
@@ -88,6 +89,7 @@ type UpdateTaskStatusArgs struct {
 	Project    string `json:"project" jsonschema:"project name"`
 	Keyword    string `json:"keyword" jsonschema:"current task keyword"`
 	Title      string `json:"title" jsonschema:"task title to identify the task"`
+	RawTitle   string `json:"raw_title,omitempty" jsonschema:"exact text after KEYWORD: from list/get response; use for unambiguous matching when title contains #tags"`
 	NewKeyword string `json:"new_keyword" jsonschema:"new status keyword to set"`
 }
 
@@ -171,6 +173,7 @@ type ScheduleTaskArgs struct {
 	Project         string `json:"project" jsonschema:"project name"`
 	Keyword         string `json:"keyword" jsonschema:"current task keyword"`
 	Title           string `json:"title" jsonschema:"task title to identify the task"`
+	RawTitle        string `json:"raw_title,omitempty" jsonschema:"exact text after KEYWORD: from list/get response; use for unambiguous matching when title contains #tags"`
 	ScheduledAt     string `json:"scheduled_at,omitempty" jsonschema:"scheduled date to set (e.g. 2026-06-20, 2026-06-20T09:00, 2026-06-20+1w). Omit to leave unchanged."`
 	DueAt           string `json:"due_at,omitempty" jsonschema:"due date to set (same format). Omit to leave unchanged."`
 	RemoveScheduled bool   `json:"remove_scheduled,omitempty" jsonschema:"if true, removes the existing scheduled date"`
@@ -183,15 +186,17 @@ type ScheduleTaskResult struct {
 }
 
 type ClockInArgs struct {
-	Project string `json:"project" jsonschema:"project name"`
-	Keyword string `json:"keyword" jsonschema:"task keyword"`
-	Title   string `json:"title" jsonschema:"task title"`
+	Project  string `json:"project" jsonschema:"project name"`
+	Keyword  string `json:"keyword" jsonschema:"task keyword"`
+	Title    string `json:"title" jsonschema:"task title"`
+	RawTitle string `json:"raw_title,omitempty" jsonschema:"exact text after KEYWORD: from list/get response; use for unambiguous matching when title contains #tags"`
 }
 
 type ClockOutArgs struct {
-	Project string `json:"project" jsonschema:"project name"`
-	Keyword string `json:"keyword" jsonschema:"task keyword"`
-	Title   string `json:"title" jsonschema:"task title"`
+	Project  string `json:"project" jsonschema:"project name"`
+	Keyword  string `json:"keyword" jsonschema:"task keyword"`
+	Title    string `json:"title" jsonschema:"task title"`
+	RawTitle string `json:"raw_title,omitempty" jsonschema:"exact text after KEYWORD: from list/get response; use for unambiguous matching when title contains #tags"`
 }
 
 type ClockResult struct {
@@ -416,6 +421,7 @@ func (s *MCPServer) taskToInfo(t *Task) TaskInfo {
 		Keyword:     t.Keyword,
 		ID:          t.ID,
 		Title:       t.Title,
+		RawTitle:    t.RawTitle,
 		Tags:        t.Tags,
 		References:  t.References,
 		ScheduledAt: t.ScheduledAt,
@@ -561,7 +567,15 @@ func (s *MCPServer) updateTaskStatus(ctx context.Context, req *mcp.CallToolReque
 
 	var targetTask *Task
 	for _, t := range tasks {
-		if t.Keyword == args.Keyword && (t.Title == args.Title || containsIgnoreCase(t.Title, args.Title)) {
+		if t.Keyword != args.Keyword {
+			continue
+		}
+		if args.RawTitle != "" {
+			if t.RawTitle == args.RawTitle {
+				targetTask = t
+				break
+			}
+		} else if t.Title == args.Title || containsIgnoreCase(t.Title, args.Title) {
 			targetTask = t
 			break
 		}
@@ -812,7 +826,15 @@ func (s *MCPServer) scheduleTask(ctx context.Context, req *mcp.CallToolRequest, 
 
 	var targetTask *Task
 	for _, t := range tasks {
-		if t.Keyword == args.Keyword && (t.Title == args.Title || containsIgnoreCase(t.Title, args.Title)) {
+		if t.Keyword != args.Keyword {
+			continue
+		}
+		if args.RawTitle != "" {
+			if t.RawTitle == args.RawTitle {
+				targetTask = t
+				break
+			}
+		} else if t.Title == args.Title || containsIgnoreCase(t.Title, args.Title) {
 			targetTask = t
 			break
 		}
@@ -859,7 +881,16 @@ func (s *MCPServer) clockIn(ctx context.Context, req *mcp.CallToolRequest, args 
 	}
 
 	for _, t := range tasks {
-		if t.Keyword == args.Keyword && (t.Title == args.Title || containsIgnoreCase(t.Title, args.Title)) {
+		if t.Keyword != args.Keyword {
+			continue
+		}
+		matched := false
+		if args.RawTitle != "" {
+			matched = t.RawTitle == args.RawTitle
+		} else {
+			matched = t.Title == args.Title || containsIgnoreCase(t.Title, args.Title)
+		}
+		if matched {
 			if err := ClockIn(t); err != nil {
 				return nil, ClockResult{Message: err.Error(), Success: false}, nil
 			}
@@ -877,7 +908,16 @@ func (s *MCPServer) clockOut(ctx context.Context, req *mcp.CallToolRequest, args
 	}
 
 	for _, t := range tasks {
-		if t.Keyword == args.Keyword && (t.Title == args.Title || containsIgnoreCase(t.Title, args.Title)) {
+		if t.Keyword != args.Keyword {
+			continue
+		}
+		matched := false
+		if args.RawTitle != "" {
+			matched = t.RawTitle == args.RawTitle
+		} else {
+			matched = t.Title == args.Title || containsIgnoreCase(t.Title, args.Title)
+		}
+		if matched {
 			if err := ClockOut(t); err != nil {
 				return nil, ClockResult{Message: err.Error(), Success: false}, nil
 			}

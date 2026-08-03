@@ -3,6 +3,7 @@ package task
 import (
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -1167,5 +1168,89 @@ func TestProcessFile_SiblingsDontNestIntoEachOther(t *testing.T) {
 	}
 	if len(p2.Children) != 1 || p2.Children[0].Title != "child of two" {
 		t.Errorf("parent two children wrong: %v", p2.Children)
+	}
+}
+
+func TestRawTitlePreservedWithHashNumber(t *testing.T) {
+	cfg := createTestConfig()
+
+	line := "TODO: Review and approve PR #197 (permissions-request-review-cso plugin) — promised Sierra Fox by Friday"
+	task := ParseLine(cfg, line, "proj", "zettel", "test.md")
+	if task == nil {
+		t.Fatal("ParseLine() = nil")
+	}
+
+	wantRaw := "Review and approve PR #197 (permissions-request-review-cso plugin) — promised Sierra Fox by Friday"
+	if task.RawTitle != wantRaw {
+		t.Errorf("RawTitle = %q, want %q", task.RawTitle, wantRaw)
+	}
+	if task.Title == wantRaw {
+		t.Errorf("Title should differ from RawTitle when tags are extracted")
+	}
+}
+
+func TestUpdateTaskStatusWithHashInTitle(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "task_hash_test_*.md")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	content := "- TODO: Review and approve PR #197 (permissions plugin) — promised by Friday\n"
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("Failed to write to temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	task := &Task{
+		Keyword:  "TODO",
+		Title:    "Review and approve PR (permissions plugin) — promised by Friday",
+		RawTitle: "Review and approve PR #197 (permissions plugin) — promised by Friday",
+		FilePath: tmpFile.Name(),
+	}
+
+	err = UpdateTaskStatus(task, "DOING", nil)
+	if err != nil {
+		t.Fatalf("UpdateTaskStatus() error = %v", err)
+	}
+
+	got, _ := os.ReadFile(tmpFile.Name())
+	want := "- DOING: Review and approve PR #197 (permissions plugin) — promised by Friday\n"
+	if string(got) != want {
+		t.Errorf("File content = %q, want %q", string(got), want)
+	}
+}
+
+func TestSetTaskDateWithHashInTitle(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "task_hash_date_test_*.md")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	content := "- TODO: Review PR #197 (plugin)\n"
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("Failed to write to temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	task := &Task{
+		Keyword:  "TODO",
+		Title:    "Review PR (plugin)",
+		RawTitle: "Review PR #197 (plugin)",
+		FilePath: tmpFile.Name(),
+	}
+
+	err = SetTaskDate(task, "", "2026-07-29", false, false)
+	if err != nil {
+		t.Fatalf("SetTaskDate() error = %v", err)
+	}
+
+	got, _ := os.ReadFile(tmpFile.Name())
+	if !strings.Contains(string(got), "@d:2026-07-29") {
+		t.Errorf("File content missing @d:2026-07-29: %q", string(got))
+	}
+	if !strings.Contains(string(got), "#197") {
+		t.Errorf("File content lost #197: %q", string(got))
 	}
 }

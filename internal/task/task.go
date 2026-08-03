@@ -24,6 +24,7 @@ type Task struct {
 	Keyword     string
 	ID          string   // Optional unique identifier [id]
 	Title       string
+	RawTitle    string   // Unparsed text after "KEYWORD: " (for exact line matching)
 	Tags        []string
 	References  []string // IDs of tasks this task depends on (^id syntax)
 	ScheduledAt string   // @date or @s:date (scheduled date)
@@ -274,7 +275,8 @@ func ParseLine(c *config.Config, line, project, zettel, filePath string) *Task {
 	}
 
 	// Parse the rest of the line for metadata
-	title := basicMatches[2]
+	rawTitle := basicMatches[2]
+	title := rawTitle
 
 	// Extract task ID [id] - must be at the start of title
 	var id string
@@ -348,6 +350,7 @@ func ParseLine(c *config.Config, line, project, zettel, filePath string) *Task {
 		Keyword:     keyword,
 		ID:          id,
 		Title:       strings.TrimSpace(title),
+		RawTitle:    rawTitle,
 		Tags:        tags,
 		References:  references,
 		ScheduledAt: scheduledAt,
@@ -975,9 +978,11 @@ func UpdateTaskStatus(t *Task, newKeyword string, cfg *config.Config) error {
 	lines := strings.Split(string(content), "\n")
 	found := false
 
-	// Build the search pattern: "KEYWORD: [id] title" or "KEYWORD: title" (with optional metadata after title)
+	// Build the search pattern from RawTitle (exact match) or reconstructed prefix
 	var searchPrefix string
-	if t.ID != "" {
+	if t.RawTitle != "" {
+		searchPrefix = fmt.Sprintf("%s: %s", t.Keyword, t.RawTitle)
+	} else if t.ID != "" {
 		searchPrefix = fmt.Sprintf("%s: [%s] %s", t.Keyword, t.ID, t.Title)
 	} else {
 		searchPrefix = fmt.Sprintf("%s: %s", t.Keyword, t.Title)
@@ -1318,7 +1323,9 @@ func SetTaskDate(t *Task, scheduledAt, dueAt string, removeScheduled, removeDue 
 	lines := strings.Split(string(content), "\n")
 
 	var searchPrefix string
-	if t.ID != "" {
+	if t.RawTitle != "" {
+		searchPrefix = fmt.Sprintf("%s: %s", t.Keyword, t.RawTitle)
+	} else if t.ID != "" {
 		searchPrefix = fmt.Sprintf("%s: [%s] %s", t.Keyword, t.ID, t.Title)
 	} else {
 		searchPrefix = fmt.Sprintf("%s: %s", t.Keyword, t.Title)
