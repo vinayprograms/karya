@@ -275,3 +275,172 @@ augroup karya_syntax
   autocmd FileChangedShellPost *.md call s:KaryaSyntax()
   autocmd TextChanged,TextChangedI *.md call s:RefreshDateHighlights()
 augroup END
+
+" ─── Task Actions ───────────────────────────────────────────────────────────
+
+function! s:ParseTaskLine(line) abort
+  if !exists('s:karya_data') || empty(s:karya_data)
+    return {}
+  endif
+  let stripped = substitute(a:line, '^\s*[-*+]\?\s*', '', '')
+  for [kw, info] in items(s:karya_data.keywords)
+    if stripped =~# '^\V' . kw . '\m:\s'
+      let title = substitute(stripped, '^\V' . kw . '\m:\s*', '', '')
+      return {'keyword': kw, 'title': title}
+    endif
+  endfor
+  return {}
+endfunction
+
+function! s:ProjectFromPath() abort
+  let path = expand('%:p')
+  " Pattern: <projects-dir>/<project>/notes/<zettel>/README.md
+  let m = matchlist(path, '.*/\([^/]\+\)/notes/[^/]\+/[^/]\+$')
+  if !empty(m)
+    return m[1]
+  endif
+  " Fallback: inbox file
+  if path =~# 'inbox\.md$'
+    return 'inbox'
+  endif
+  " Unstructured: try <projects-dir>/<project>/...
+  let m = matchlist(path, '.*/\([^/]\+\)/[^/]\+\.md$')
+  if !empty(m)
+    return m[1]
+  endif
+  return '*'
+endfunction
+
+function! s:RunTodoCmd(cmd) abort
+  let save_pos = getpos('.')
+  silent write
+  let result = system(a:cmd)
+  let result = substitute(result, '\n$', '', '')
+  silent edit
+  call setpos('.', save_pos)
+  if v:shell_error == 0
+    echohl MoreMsg | echon result | echohl None
+  else
+    echohl ErrorMsg | echon result | echohl None
+  endif
+endfunction
+
+function! s:KaryaClockIn() abort
+  let parsed = s:ParseTaskLine(getline('.'))
+  if empty(parsed)
+    echohl ErrorMsg | echon 'Not a task line' | echohl None
+    return
+  endif
+  let project = s:ProjectFromPath()
+  let cmd = 'todo clock-in ' . shellescape(project) . ' '
+        \ . shellescape(parsed.keyword) . ' ' . shellescape(parsed.title)
+  call s:RunTodoCmd(cmd)
+endfunction
+
+function! s:KaryaClockOut() abort
+  let parsed = s:ParseTaskLine(getline('.'))
+  if empty(parsed)
+    echohl ErrorMsg | echon 'Not a task line' | echohl None
+    return
+  endif
+  let project = s:ProjectFromPath()
+  let cmd = 'todo clock-out ' . shellescape(project) . ' '
+        \ . shellescape(parsed.keyword) . ' ' . shellescape(parsed.title)
+  call s:RunTodoCmd(cmd)
+endfunction
+
+function! s:KaryaTransition() abort
+  let parsed = s:ParseTaskLine(getline('.'))
+  if empty(parsed)
+    echohl ErrorMsg | echon 'Not a task line' | echohl None
+    return
+  endif
+  if !exists('s:karya_data') || empty(s:karya_data)
+    echohl ErrorMsg | echon 'No keyword data loaded' | echohl None
+    return
+  endif
+
+  " Build grouped keyword list for popup
+  let items = []
+  let categories = ['active', 'inprogress', 'completed', 'someday']
+  let cat_labels = {'active': '── Active ──', 'inprogress': '── InProgress ──',
+        \ 'completed': '── Completed ──', 'someday': '── Someday ──'}
+  for cat in categories
+    let kws = []
+    for [kw, info] in items(s:karya_data.keywords)
+      if info.category == cat
+        call add(kws, kw)
+      endif
+    endfor
+    if !empty(kws)
+      call sort(kws)
+      call add(items, {'text': cat_labels[cat], 'props': {'highlight': 'Comment'}})
+      for kw in kws
+        let marker = kw == parsed.keyword ? '● ' : '  '
+        call add(items, {'text': marker . kw, 'keyword': kw})
+      endfor
+    endif
+  endfor
+
+  " Store context for the callback
+  let s:transition_ctx = parsed
+  let s:transition_ctx.project = s:ProjectFromPath()
+
+  call popup_menu(map(copy(items), 'v:val.text'), #{
+        \ callback: function('s:TransitionCallback', [items]),
+        \ filter: function('s:TransitionFilter'),
+        \ title: ' Transition: ' . parsed.keyword . ' ',
+        \ border: [],
+        \ borderchars: ['─', '│', '─', '│', '╭', '╮', '╯', '╰'],
+        \ padding: [0, 1, 0, 1],
+        \ minwidth: 20,
+        \ })
+endfunction
+
+function! s:TransitionFilter(winid, key) abort
+  " Allow j/k/Enter/Esc, skip separator lines
+  if a:key == 'j' || a:key == "\<Down>"
+    call popup_filter_menu(a:winid, a:key)
+    " Skip separator lines
+    let idx = line('.', a:winid)
+    let text = getbufline(winbufnr(a:winid), idx)[0]
+    if text =~# '^──'
+      call popup_filter_menu(a:winid, a:key)
+    endif
+    return 1
+  elseif a:key == 'k' || a:key == "\<Up>"
+    call popup_filter_menu(a:winid, a:key)
+    let idx = line('.', a:winid)
+    let text = getbufline(winbufnr(a:winid), idx)[0]
+    if text =~# '^──'
+      call popup_filter_menu(a:winid, a:key)
+    endif
+    return 1
+  endif
+  return popup_filter_menu(a:winid, a:key)
+endfunction
+
+function! s:TransitionCallback(items, winid, result) abort
+  if a:result <= 0
+    return
+  endif
+  let item = a:items[a:result - 1]
+  if !has_key(item, 'keyword')
+    return
+  endif
+  let new_kw = item.keyword
+  if new_kw == s:transition_ctx.keyword
+    return
+  endif
+  let cmd = 'todo transition ' . shellescape(s:transition_ctx.project) . ' '
+        \ . shellescape(s:transition_ctx.keyword) . ' '
+        \ . shellescape(s:transition_ctx.title) . ' ' . shellescape(new_kw)
+  call s:RunTodoCmd(cmd)
+endfunction
+
+augroup karya_actions
+  autocmd!
+  autocmd FileType markdown nnoremap <buffer> <leader>i :call <SID>KaryaClockIn()<CR>
+  autocmd FileType markdown nnoremap <buffer> <leader>o :call <SID>KaryaClockOut()<CR>
+  autocmd FileType markdown nnoremap <buffer> <leader>t :call <SID>KaryaTransition()<CR>
+augroup END

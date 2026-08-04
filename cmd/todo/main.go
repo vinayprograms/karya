@@ -2241,6 +2241,52 @@ func main() {
 		}
 		fmt.Fprintln(os.Stderr, "task not found")
 		os.Exit(1)
+	case "transition":
+		if len(args) < 5 {
+			fmt.Fprintln(os.Stderr, "Usage: todo transition <project> <keyword> <title> <new-keyword>")
+			os.Exit(1)
+		}
+		project, keyword := args[1], args[2]
+		newKeyword := args[len(args)-1]
+		title := strings.Join(args[3:len(args)-1], " ")
+		tasks, err := task.ListTasks(config, project, true)
+		if err != nil {
+			log.Fatal(err)
+		}
+		for _, t := range tasks {
+			if t.Keyword == keyword && strings.Contains(strings.ToLower(t.Title), strings.ToLower(title)) {
+				oldKeyword := t.Keyword
+
+				if isCompletedKeyword(config, newKeyword) {
+					advanced, err := task.CompleteRecurringTask(t, config, newKeyword)
+					if err != nil {
+						fmt.Fprintln(os.Stderr, err)
+						os.Exit(1)
+					}
+					if advanced {
+						commitMsg := fmt.Sprintf("Advance recurring task: %s", t.Title)
+						kgit.CommitFile(t.FilePath, commitMsg, true)
+						fmt.Printf("Recurring task advanced → %s\n", t.ScheduledAt)
+						return
+					}
+				}
+
+				if err := task.UpdateTaskStatus(t, newKeyword, config); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(1)
+				}
+				if err := task.RecordStateTransition(t, oldKeyword, newKeyword); err != nil {
+					fmt.Fprintf(os.Stderr, "status updated but failed to record transition: %v\n", err)
+					os.Exit(1)
+				}
+				commitMsg := fmt.Sprintf("Update task status: %s -> %s", oldKeyword, newKeyword)
+				kgit.CommitFile(t.FilePath, commitMsg, true)
+				fmt.Printf("%s → %s\n", oldKeyword, newKeyword)
+				return
+			}
+		}
+		fmt.Fprintln(os.Stderr, "task not found")
+		os.Exit(1)
 	case "mcp":
 		// Start MCP server on stdio
 		mcpServer := task.NewMCPServer(config)
@@ -2305,6 +2351,7 @@ COMMANDS:
     pl                  Show project list in plain text format
     clock-in <p> <k> <t> Clock in on a task (project, keyword, title)
     clock-out <p> <k> <t> Clock out of a task (project, keyword, title)
+    transition <p> <k> <t> <new> Transition task status (project, keyword, title, new-keyword)
     mcp                 Start MCP server (stdio) for AI agent integration
     jira-auth           Authenticate with JIRA (OAuth browser flow, one-time setup)
     <project-name>      Show interactive TUI filtered to specific project
