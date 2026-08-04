@@ -316,7 +316,7 @@ function! s:RunTodoCmd(cmd) abort
   silent write
   let result = system(a:cmd)
   let result = substitute(result, '\n$', '', '')
-  silent edit
+  silent! edit!
   call setpos('.', save_pos)
   if v:shell_error == 0
     echohl MoreMsg | echon result | echohl None
@@ -380,6 +380,8 @@ function! s:KaryaTransition() abort
   let s:tp_filter = ''
   let s:tp_cursor = 0
 
+  silent! call prop_type_delete('KaryaPickerGreen')
+  call prop_type_add('KaryaPickerGreen', {'highlight': 'String'})
   call s:TransitionOpen()
 endfunction
 
@@ -394,17 +396,18 @@ endfunction
 function! s:TransitionRender() abort
   let filtered = s:TransitionFiltered()
   if empty(filtered)
-    return ['  (no matches)']
+    return [{'text': '  (no matches)', 'props': []}]
   endif
   let lines = []
   for i in range(len(filtered))
     let kw = filtered[i]
     if i == s:tp_cursor
-      call add(lines, '▸ ' . kw)
+      call add(lines, {'text': '● ' . kw, 'props': []})
     elseif kw == s:transition_ctx.keyword
-      call add(lines, '● ' . kw)
+      let text = '◉ ' . kw
+      call add(lines, {'text': text, 'props': [{'col': 1, 'length': len(text), 'type': 'KaryaPickerGreen'}]})
     else
-      call add(lines, '  ' . kw)
+      call add(lines, {'text': '  ' . kw, 'props': []})
     endif
   endfor
   return lines
@@ -424,6 +427,9 @@ function! s:TransitionOpen() abort
         \ padding: [0, 1, 0, 1],
         \ minwidth: 20,
         \ maxheight: 15,
+        \ line: 'cursor+1',
+        \ col: 'cursor',
+        \ pos: 'topleft',
         \ cursorline: 0,
         \ mapping: 0,
         \ })
@@ -437,7 +443,8 @@ function! s:TransitionRefresh() abort
   let lines = s:TransitionRender()
   call popup_settext(s:tp_winid, lines)
   let title = s:tp_filter == '' ? ' ⌕ type to filter ' : ' ⌕ ' . s:tp_filter . '_ '
-  call popup_setoptions(s:tp_winid, #{title: title})
+  let firstline = s:tp_cursor >= 14 ? s:tp_cursor - 13 : 1
+  call popup_setoptions(s:tp_winid, #{title: title, firstline: firstline})
 endfunction
 
 function! s:TransitionFilter(winid, key) abort
