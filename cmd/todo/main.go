@@ -338,57 +338,23 @@ func getDateStyle(dateStr string, isDeadline bool) lipgloss.Style {
 		return colors.dateColor
 	}
 
-	// Strip recurrence suffix (+2w, .+1m, ++1d) and warning (!3d) before parsing
-	datePart := dateStr
-	if idx := strings.IndexAny(datePart, "+!"); idx > 0 {
-		// Handle .+ (dot-plus) by checking one char before
-		if idx > 0 && datePart[idx-1] == '.' {
-			datePart = datePart[:idx-1]
-		} else {
-			datePart = datePart[:idx]
-		}
-	}
-
-	// Try multiple date formats (with and without time component)
-	dateFormats := []string{
-		"2006-01-02T15:04", // YYYY-MM-DDTHH:MM
-		"2006-01-02",       // YYYY-MM-DD (ISO 8601)
-		"02-01-2006",       // DD-MM-YYYY (British/Asian)
-		"01-02-2006",       // MM-DD-YYYY (American)
-		"2006/01/02",       // YYYY/MM/DD
-		"02/01/2006",       // DD/MM/YYYY
-		"01/02/2006",       // MM/DD/YYYY
-	}
-
-	var parsedDate time.Time
-	var err error
-	for _, format := range dateFormats {
-		parsedDate, err = time.Parse(format, datePart)
-		if err == nil {
-			break
-		}
-	}
-
-	// If all formats fail, return default color
+	sched, err := task.ParseSchedule(dateStr)
 	if err != nil {
 		return colors.dateColor
 	}
 
 	now := time.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	taskDate := time.Date(parsedDate.Year(), parsedDate.Month(), parsedDate.Day(), 0, 0, 0, 0, time.UTC)
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+	taskDate := time.Date(sched.Date.Year(), sched.Date.Month(), sched.Date.Day(), 0, 0, 0, 0, time.Local)
 
 	if taskDate.Before(today) {
 		return colors.pastDateColor
 	} else if taskDate.Equal(today) {
 		return colors.todayDateColor
-	} else if taskDate.After(today) {
-		// For deadlines, apply today's color if within 7 days
-		if isDeadline {
-			sevenDaysFromNow := today.AddDate(0, 0, 7)
-			if taskDate.Before(sevenDaysFromNow) || taskDate.Equal(sevenDaysFromNow) {
-				return colors.todayDateColor
-			}
+	} else if isDeadline {
+		sevenDaysFromNow := today.AddDate(0, 0, 7)
+		if taskDate.Before(sevenDaysFromNow) || taskDate.Equal(sevenDaysFromNow) {
+			return colors.todayDateColor
 		}
 	}
 	return colors.dateColor
