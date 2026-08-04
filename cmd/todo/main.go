@@ -2210,7 +2210,7 @@ func main() {
 			log.Fatal(err)
 		}
 		for _, t := range tasks {
-			if t.Keyword == keyword && strings.Contains(strings.ToLower(t.Title), strings.ToLower(title)) {
+			if t.Keyword == keyword && matchTaskTitle(t, title) {
 				if err := task.ClockIn(t); err != nil {
 					log.Fatal(err)
 				}
@@ -2231,7 +2231,7 @@ func main() {
 			log.Fatal(err)
 		}
 		for _, t := range tasks {
-			if t.Keyword == keyword && strings.Contains(strings.ToLower(t.Title), strings.ToLower(title)) {
+			if t.Keyword == keyword && matchTaskTitle(t, title) {
 				if err := task.ClockOut(t); err != nil {
 					log.Fatal(err)
 				}
@@ -2254,7 +2254,7 @@ func main() {
 			log.Fatal(err)
 		}
 		for _, t := range tasks {
-			if t.Keyword == keyword && strings.Contains(strings.ToLower(t.Title), strings.ToLower(title)) {
+			if t.Keyword == keyword && matchTaskTitle(t, title) {
 				oldKeyword := t.Keyword
 
 				if isCompletedKeyword(config, newKeyword) {
@@ -2333,6 +2333,14 @@ func main() {
 		// Project name - show interactive TUI for that project
 		showInteractiveTUI(config, subcommand)
 	}
+}
+
+func matchTaskTitle(t *task.Task, query string) bool {
+	q := strings.ToLower(query)
+	if strings.EqualFold(t.RawTitle, query) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(t.Title), q)
 }
 
 func printHelp() {

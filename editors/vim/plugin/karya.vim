@@ -360,11 +360,9 @@ function! s:KaryaTransition() abort
     return
   endif
 
-  " Build grouped keyword list for popup
-  let items = []
+  " Build flat keyword list (all keywords, sorted by category)
+  let s:tp_all_keywords = []
   let categories = ['active', 'inprogress', 'completed', 'someday']
-  let cat_labels = {'active': '── Active ──', 'inprogress': '── InProgress ──',
-        \ 'completed': '── Completed ──', 'someday': '── Someday ──'}
   for cat in categories
     let kws = []
     for [kw, info] in items(s:karya_data.keywords)
@@ -372,63 +370,118 @@ function! s:KaryaTransition() abort
         call add(kws, kw)
       endif
     endfor
-    if !empty(kws)
-      call sort(kws)
-      call add(items, {'text': cat_labels[cat], 'props': {'highlight': 'Comment'}})
-      for kw in kws
-        let marker = kw == parsed.keyword ? '● ' : '  '
-        call add(items, {'text': marker . kw, 'keyword': kw})
-      endfor
-    endif
+    call sort(kws)
+    call extend(s:tp_all_keywords, kws)
   endfor
 
-  " Store context for the callback
+  " Store context
   let s:transition_ctx = parsed
   let s:transition_ctx.project = s:ProjectFromPath()
+  let s:tp_filter = ''
+  let s:tp_cursor = 0
 
-  call popup_menu(map(copy(items), 'v:val.text'), #{
-        \ callback: function('s:TransitionCallback', [items]),
+  call s:TransitionOpen()
+endfunction
+
+function! s:TransitionFiltered() abort
+  if s:tp_filter == ''
+    return copy(s:tp_all_keywords)
+  endif
+  let pat = toupper(s:tp_filter)
+  return filter(copy(s:tp_all_keywords), 'stridx(v:val, pat) >= 0')
+endfunction
+
+function! s:TransitionRender() abort
+  let filtered = s:TransitionFiltered()
+  if empty(filtered)
+    return ['  (no matches)']
+  endif
+  let lines = []
+  for i in range(len(filtered))
+    let kw = filtered[i]
+    if i == s:tp_cursor
+      call add(lines, '▸ ' . kw)
+    elseif kw == s:transition_ctx.keyword
+      call add(lines, '● ' . kw)
+    else
+      call add(lines, '  ' . kw)
+    endif
+  endfor
+  return lines
+endfunction
+
+function! s:TransitionOpen() abort
+  let lines = s:TransitionRender()
+  let title = s:tp_filter == '' ? ' ⌕ type to filter ' : ' ⌕ ' . s:tp_filter . '_ '
+  let s:tp_winid = popup_create(lines, #{
         \ filter: function('s:TransitionFilter'),
-        \ title: ' Transition: ' . parsed.keyword . ' ',
+        \ callback: function('s:TransitionCallback'),
+        \ title: title,
+        \ highlight: 'Normal',
         \ border: [],
-        \ borderchars: ['─', '│', '─', '│', '╭', '╮', '╯', '╰'],
+        \ borderchars: ['─', '│', '─', '│', '┌', '┐', '┘', '└'],
+        \ borderhighlight: ['Title', 'Comment', 'Comment', 'Comment'],
         \ padding: [0, 1, 0, 1],
         \ minwidth: 20,
+        \ maxheight: 15,
+        \ cursorline: 0,
+        \ mapping: 0,
         \ })
 endfunction
 
-function! s:TransitionFilter(winid, key) abort
-  " Allow j/k/Enter/Esc, skip separator lines
-  if a:key == 'j' || a:key == "\<Down>"
-    call popup_filter_menu(a:winid, a:key)
-    " Skip separator lines
-    let idx = line('.', a:winid)
-    let text = getbufline(winbufnr(a:winid), idx)[0]
-    if text =~# '^──'
-      call popup_filter_menu(a:winid, a:key)
-    endif
-    return 1
-  elseif a:key == 'k' || a:key == "\<Up>"
-    call popup_filter_menu(a:winid, a:key)
-    let idx = line('.', a:winid)
-    let text = getbufline(winbufnr(a:winid), idx)[0]
-    if text =~# '^──'
-      call popup_filter_menu(a:winid, a:key)
-    endif
-    return 1
+function! s:TransitionRefresh() abort
+  let filtered = s:TransitionFiltered()
+  if s:tp_cursor >= len(filtered)
+    let s:tp_cursor = max([0, len(filtered) - 1])
   endif
-  return popup_filter_menu(a:winid, a:key)
+  let lines = s:TransitionRender()
+  call popup_settext(s:tp_winid, lines)
+  let title = s:tp_filter == '' ? ' ⌕ type to filter ' : ' ⌕ ' . s:tp_filter . '_ '
+  call popup_setoptions(s:tp_winid, #{title: title})
 endfunction
 
-function! s:TransitionCallback(items, winid, result) abort
+function! s:TransitionFilter(winid, key) abort
+  if a:key == "\<Esc>"
+    call popup_close(a:winid, -1)
+    return 1
+  elseif a:key == "\<CR>"
+    call popup_close(a:winid, 1)
+    return 1
+  elseif a:key == 'j' || a:key == "\<Down>" || a:key == "\<C-n>"
+    let max = len(s:TransitionFiltered()) - 1
+    let s:tp_cursor = s:tp_cursor < max ? s:tp_cursor + 1 : 0
+    call s:TransitionRefresh()
+    return 1
+  elseif a:key == 'k' || a:key == "\<Up>" || a:key == "\<C-p>"
+    let max = len(s:TransitionFiltered()) - 1
+    let s:tp_cursor = s:tp_cursor > 0 ? s:tp_cursor - 1 : max
+    call s:TransitionRefresh()
+    return 1
+  elseif a:key == "\<BS>"
+    if s:tp_filter != ''
+      let s:tp_filter = s:tp_filter[:-2]
+      let s:tp_cursor = 0
+      call s:TransitionRefresh()
+    endif
+    return 1
+  elseif a:key =~# '[a-zA-Z_]'
+    let s:tp_filter .= a:key
+    let s:tp_cursor = 0
+    call s:TransitionRefresh()
+    return 1
+  endif
+  return 1
+endfunction
+
+function! s:TransitionCallback(winid, result) abort
   if a:result <= 0
     return
   endif
-  let item = a:items[a:result - 1]
-  if !has_key(item, 'keyword')
+  let filtered = s:TransitionFiltered()
+  if empty(filtered) || s:tp_cursor >= len(filtered)
     return
   endif
-  let new_kw = item.keyword
+  let new_kw = filtered[s:tp_cursor]
   if new_kw == s:transition_ctx.keyword
     return
   endif
@@ -443,4 +496,7 @@ augroup karya_actions
   autocmd FileType markdown nnoremap <buffer> <leader>i :call <SID>KaryaClockIn()<CR>
   autocmd FileType markdown nnoremap <buffer> <leader>o :call <SID>KaryaClockOut()<CR>
   autocmd FileType markdown nnoremap <buffer> <leader>t :call <SID>KaryaTransition()<CR>
+  autocmd BufRead *.md nnoremap <buffer> <leader>i :call <SID>KaryaClockIn()<CR>
+  autocmd BufRead *.md nnoremap <buffer> <leader>o :call <SID>KaryaClockOut()<CR>
+  autocmd BufRead *.md nnoremap <buffer> <leader>t :call <SID>KaryaTransition()<CR>
 augroup END
