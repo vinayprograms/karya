@@ -362,16 +362,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
-		// Start title filter
+		// Start title filter (keep existing filter for editing, clear on mode switch)
 		if msg.String() == "/" {
 			m.filtering = true
+			if m.filterMode != "title" {
+				m.customFilter = ""
+				m.list.SetItems(m.allItems)
+			}
 			m.filterMode = "title"
 			return m, nil
 		}
 
-		// Start fulltext filter
+		// Start fulltext filter (keep existing filter for editing, clear on mode switch)
 		if msg.String() == "*" {
 			m.filtering = true
+			if m.filterMode != "fulltext" {
+				m.customFilter = ""
+				m.list.SetItems(m.allItems)
+			}
 			m.filterMode = "fulltext"
 			return m, nil
 		}

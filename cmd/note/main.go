@@ -309,17 +309,29 @@ func (m projectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		if msg.String() == "esc" && m.customFilter != "" {
+			m.customFilter = ""
+			m.list.SetItems(m.allItems)
+			return m, nil
+		}
+
 		if msg.String() == "/" {
 			m.filtering = true
+			if m.filterMode != "project" {
+				m.customFilter = ""
+				m.list.SetItems(m.allItems)
+			}
 			m.filterMode = "project"
-			m.customFilter = ""
 			return m, nil
 		}
 
 		if msg.String() == "*" {
 			m.filtering = true
+			if m.filterMode != "fulltext" {
+				m.customFilter = ""
+				m.list.SetItems(m.allItems)
+			}
 			m.filterMode = "fulltext"
-			m.customFilter = ""
 			return m, nil
 		}
 
