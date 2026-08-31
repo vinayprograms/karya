@@ -25,6 +25,9 @@ func createTestConfig() *config.Config {
 			Someday: []string{
 				"SOMEDAY", "MAYBE", "LATER", "WISHLIST",
 			},
+			Routines: []string{
+				"REMINDER", "MEETING",
+			},
 		},
 		Colors: config.ColorScheme{
 			SomedayColor: "7", // White - neutral for tasks not yet under consideration
@@ -64,6 +67,150 @@ func TestTask_IsSomeday_NilConfig(t *testing.T) {
 	task := &Task{Keyword: "SOMEDAY"}
 	if got := task.IsSomeday(nil); got != false {
 		t.Errorf("Task.IsSomeday() with nil config = %v, want false", got)
+	}
+}
+
+func TestTask_IsRoutine(t *testing.T) {
+	cfg := createTestConfig()
+
+	tests := []struct {
+		name string
+		task *Task
+		want bool
+	}{
+		{
+			name: "REMINDER with weekly recurrence on scheduled date",
+			task: &Task{Keyword: "REMINDER", ScheduledAt: "2026-08-10+1w"},
+			want: true,
+		},
+		{
+			name: "MEETING with weekly recurrence and time",
+			task: &Task{Keyword: "MEETING", ScheduledAt: "2026-08-10T09:00+1w"},
+			want: true,
+		},
+		{
+			name: "REMINDER with no recurrence — one-off",
+			task: &Task{Keyword: "REMINDER", ScheduledAt: "2026-08-10"},
+			want: false,
+		},
+		{
+			name: "MEETING with no date at all",
+			task: &Task{Keyword: "MEETING"},
+			want: false,
+		},
+		{
+			name: "TODO with recurrence — keyword not in routines",
+			task: &Task{Keyword: "TODO", ScheduledAt: "2026-08-10+1w"},
+			want: false,
+		},
+		{
+			name: "REMINDER with monthly recurrence on due date",
+			task: &Task{Keyword: "REMINDER", DueAt: "2026-08-10+1m"},
+			want: true,
+		},
+		{
+			name: "MEETING with from-done recurrence",
+			task: &Task{Keyword: "MEETING", ScheduledAt: "2026-08-10.+3d"},
+			want: true,
+		},
+		{
+			name: "REMINDER with next-future recurrence",
+			task: &Task{Keyword: "REMINDER", ScheduledAt: "2026-08-10++1w"},
+			want: true,
+		},
+		{
+			name: "REMINDER with daily business-day recurrence",
+			task: &Task{Keyword: "REMINDER", ScheduledAt: "2026-08-10+1b"},
+			want: true,
+		},
+		{
+			name: "DOING keyword — not in routines list",
+			task: &Task{Keyword: "DOING", ScheduledAt: "2026-08-10+1d"},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.task.IsRoutine(cfg); got != tt.want {
+				t.Errorf("IsRoutine() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTask_IsRoutine_NilConfig(t *testing.T) {
+	task := &Task{Keyword: "REMINDER", ScheduledAt: "2026-08-10+1w"}
+	if got := task.IsRoutine(nil); got != false {
+		t.Errorf("IsRoutine() with nil config = %v, want false", got)
+	}
+}
+
+func TestTask_IsRoutine_EmptyRoutinesConfig(t *testing.T) {
+	cfg := &config.Config{
+		Todo: config.Todo{
+			Active: []string{"TODO", "REMINDER"},
+		},
+	}
+	task := &Task{Keyword: "REMINDER", ScheduledAt: "2026-08-10+1w"}
+	if got := task.IsRoutine(cfg); got != false {
+		t.Errorf("IsRoutine() with empty routines config = %v, want false", got)
+	}
+}
+
+func TestPartitionRoutines(t *testing.T) {
+	cfg := createTestConfig()
+
+	tasks := []*Task{
+		{Keyword: "TODO", Title: "work task 1"},
+		{Keyword: "REMINDER", Title: "daily standup", ScheduledAt: "2026-08-10+1d"},
+		{Keyword: "DOING", Title: "work task 2"},
+		{Keyword: "MEETING", Title: "weekly sync", ScheduledAt: "2026-08-10T09:00+1w"},
+		{Keyword: "MEETING", Title: "one-off meeting", ScheduledAt: "2026-08-15"},
+		{Keyword: "REMINDER", Title: "reminder no date"},
+	}
+
+	work, routines := PartitionRoutines(tasks, cfg)
+
+	if len(work) != 4 {
+		t.Errorf("expected 4 work tasks, got %d", len(work))
+	}
+	if len(routines) != 2 {
+		t.Errorf("expected 2 routines, got %d", len(routines))
+	}
+
+	// Verify the right tasks ended up in each partition
+	for _, r := range routines {
+		if r.Title != "daily standup" && r.Title != "weekly sync" {
+			t.Errorf("unexpected routine: %s", r.Title)
+		}
+	}
+	for _, w := range work {
+		if w.Title == "daily standup" || w.Title == "weekly sync" {
+			t.Errorf("routine in work partition: %s", w.Title)
+		}
+	}
+}
+
+func TestPartitionRoutines_EmptyConfig(t *testing.T) {
+	cfg := &config.Config{
+		Todo: config.Todo{
+			Active: []string{"TODO", "REMINDER"},
+		},
+	}
+
+	tasks := []*Task{
+		{Keyword: "TODO", Title: "work"},
+		{Keyword: "REMINDER", Title: "recurring", ScheduledAt: "2026-08-10+1d"},
+	}
+
+	work, routines := PartitionRoutines(tasks, cfg)
+
+	if len(work) != 2 {
+		t.Errorf("expected all tasks as work when routines config empty, got %d", len(work))
+	}
+	if len(routines) != 0 {
+		t.Errorf("expected no routines when config empty, got %d", len(routines))
 	}
 }
 

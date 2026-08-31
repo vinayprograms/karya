@@ -54,6 +54,13 @@
 # someday = [
 #     "SOMEDAY", "MAYBE", "LATER", "WISHLIST"
 # ]
+#
+# Keywords whose recurring items are treated as routines (hidden from the
+# default work view, shown in a separate routines view toggled with 'r').
+# An item is a routine only if its keyword is listed here AND it has a
+# recurrence modifier (+Nd, +Nw, +Nm, +Nb). One-off items keep their
+# normal placement.
+# routines = ["REMINDER", "MEETING"]
 
 # -----------------------------------------------
 # Settings specific to 'goal' tool

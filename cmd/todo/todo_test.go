@@ -13,10 +13,11 @@ import (
 func createTestConfig() *config.Config {
 	return &config.Config{
 		Todo: config.Todo{
-			Active: []string{"TODO", "TASK"},
+			Active:     []string{"TODO", "TASK"},
 			InProgress: []string{"DOING", "WIP"},
-			Completed: []string{"DONE", "COMPLETED"},
-			Someday: []string{"SOMEDAY", "MAYBE"},
+			Completed:  []string{"DONE", "COMPLETED"},
+			Someday:    []string{"SOMEDAY", "MAYBE"},
+			Routines:   []string{"REMINDER", "MEETING"},
 		},
 	}
 }

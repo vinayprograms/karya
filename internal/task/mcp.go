@@ -18,6 +18,7 @@ import (
 type ListTasksArgs struct {
 	Project       string `json:"project,omitempty" jsonschema:"project name to filter tasks (optional, empty for all projects)"`
 	ShowCompleted bool   `json:"show_completed,omitempty" jsonschema:"whether to include completed tasks (default: false)"`
+	ShowRoutines  bool   `json:"show_routines,omitempty" jsonschema:"when true, return only routines (recurring items with routine keywords) instead of work tasks"`
 }
 
 type ListTasksResult struct {
@@ -78,6 +79,7 @@ type FilterTasksArgs struct {
 	Filter        string `json:"filter" jsonschema:"filter expression (e.g., '>> alice' for assignee, '#urgent' for tag, '@2025-01-15' for date)"`
 	Project       string `json:"project,omitempty" jsonschema:"optional project name to limit filter"`
 	ShowCompleted bool   `json:"show_completed,omitempty" jsonschema:"whether to include completed tasks (default: false)"`
+	ShowRoutines  bool   `json:"show_routines,omitempty" jsonschema:"when true, filter only routines instead of work tasks"`
 }
 
 type FilterTasksResult struct {
@@ -124,8 +126,9 @@ type CountTasksArgs struct {
 }
 
 type CountTasksResult struct {
-	Count    int            `json:"count" jsonschema:"total number of tasks"`
-	ByStatus map[string]int `json:"by_status" jsonschema:"count of tasks by status category"`
+	Count        int            `json:"count" jsonschema:"total number of work tasks (excludes routines)"`
+	RoutineCount int            `json:"routine_count" jsonschema:"number of detected routines (recurring items with routine keywords)"`
+	ByStatus     map[string]int `json:"by_status" jsonschema:"count of tasks by status category"`
 }
 
 type GetTaskByIDArgs struct {
@@ -446,6 +449,14 @@ func (s *MCPServer) listTasks(ctx context.Context, req *mcp.CallToolRequest, arg
 	// Detect circular dependencies
 	DetectCycles(tasks)
 
+	// Partition routines from work tasks
+	work, routines := PartitionRoutines(tasks, s.config)
+	if args.ShowRoutines {
+		tasks = routines
+	} else {
+		tasks = work
+	}
+
 	// Sort by priority
 	SortByPriority(tasks, s.config)
 	// Secondary sort by project, then title, then file path for deterministic order
@@ -522,6 +533,14 @@ func (s *MCPServer) filterTasks(ctx context.Context, req *mcp.CallToolRequest, a
 
 	// Detect circular dependencies before filtering
 	DetectCycles(tasks)
+
+	// Partition routines from work tasks before applying filter
+	work, routines := PartitionRoutines(tasks, s.config)
+	if args.ShowRoutines {
+		tasks = routines
+	} else {
+		tasks = work
+	}
 
 	filtered := FilterTasks(tasks, args.Filter)
 
@@ -685,6 +704,9 @@ func (s *MCPServer) countTasks(ctx context.Context, req *mcp.CallToolRequest, ar
 		return nil, CountTasksResult{}, fmt.Errorf("failed to list tasks: %w", err)
 	}
 
+	// Partition routines from work tasks
+	work, routines := PartitionRoutines(tasks, s.config)
+
 	byStatus := map[string]int{
 		"active":      0,
 		"in_progress": 0,
@@ -692,7 +714,7 @@ func (s *MCPServer) countTasks(ctx context.Context, req *mcp.CallToolRequest, ar
 		"completed":   0,
 	}
 
-	for _, t := range tasks {
+	for _, t := range work {
 		if t.IsInProgress(s.config) {
 			byStatus["in_progress"]++
 		} else if t.IsActive(s.config) {
@@ -705,8 +727,9 @@ func (s *MCPServer) countTasks(ctx context.Context, req *mcp.CallToolRequest, ar
 	}
 
 	return nil, CountTasksResult{
-		Count:    len(tasks),
-		ByStatus: byStatus,
+		Count:        len(work),
+		RoutineCount: len(routines),
+		ByStatus:     byStatus,
 	}, nil
 }
 

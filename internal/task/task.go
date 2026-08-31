@@ -92,6 +92,55 @@ func (t *Task) IsSomeday(c *config.Config) bool {
 	return false
 }
 
+// hasRecurrence checks whether a date string contains a recurrence modifier.
+func hasRecurrence(dateStr string) bool {
+	if dateStr == "" {
+		return false
+	}
+	sched, err := ParseSchedule(dateStr)
+	if err != nil {
+		return false
+	}
+	return sched.Recurrence != nil
+}
+
+// IsRoutine returns true if the task is a routine — its keyword is in the
+// config's Routines list AND it has a recurrence modifier on its scheduled
+// or due date. Items using routine keywords without recurrence (one-off
+// meetings, etc.) are not routines.
+func (t *Task) IsRoutine(c *config.Config) bool {
+	if c == nil || len(c.Todo.Routines) == 0 {
+		return false
+	}
+	keywordMatch := false
+	for _, kw := range c.Todo.Routines {
+		if t.Keyword == kw {
+			keywordMatch = true
+			break
+		}
+	}
+	if !keywordMatch {
+		return false
+	}
+	return hasRecurrence(t.ScheduledAt) || hasRecurrence(t.DueAt)
+}
+
+// PartitionRoutines splits tasks into work tasks and routines in a single pass.
+// When the routines config is empty, all tasks are returned as work.
+func PartitionRoutines(tasks []*Task, c *config.Config) (work []*Task, routines []*Task) {
+	if len(c.Todo.Routines) == 0 {
+		return tasks, nil
+	}
+	for _, t := range tasks {
+		if t.IsRoutine(c) {
+			routines = append(routines, t)
+		} else {
+			work = append(work, t)
+		}
+	}
+	return work, routines
+}
+
 // Priority returns the sorting priority of the task
 // Lower numbers indicate higher priority
 // 1 = In Progress, 2 = Active, 3 = Someday, 4 = Completed

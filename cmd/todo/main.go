@@ -400,6 +400,7 @@ type model struct {
 	filtering       bool
 	allItems        []list.Item
 	structuredMode  bool
+	routinesView    bool // true = showing routines, false = showing work tasks
 	loading         bool
 	searchTerm      string // Track search term for editor highlighting
 
@@ -802,7 +803,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if !m.structuredMode {
 					m.structuredMode = true
 					m.config.Todo.Structured = true
-					m.list.Title = "Tasks (Zettelkasten)"
+					m.routinesView = false
 					return m, reloadTasksCmd()
 				}
 				return m, nil
@@ -813,10 +814,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.structuredMode {
 					m.structuredMode = false
 					m.config.Todo.Structured = false
-					m.list.Title = "Tasks (All)"
+					m.routinesView = false
 					return m, reloadTasksCmd()
 				}
 				return m, nil
+			}
+
+			// Toggle routines view
+			if msg.String() == "r" {
+				m.routinesView = !m.routinesView
+				m.customFilter = ""
+				return m, reloadTasksCmd()
 			}
 
 			switch msg.String() {
@@ -912,6 +920,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return false
 				})
 				m.tasks = task.GroupWithChildren(m.tasks)
+
+				// Partition routines from work tasks
+				work, routines := task.PartitionRoutines(m.tasks, m.config)
+				if m.routinesView {
+					m.tasks = routines
+				} else {
+					m.tasks = work
+				}
+
 				m.projectColWidth = calculateProjectColWidth(m.tasks)
 				m.keywordColWidth = calculateKeywordColWidth(m.tasks)
 				m.fractionColWidth = calculateFractionColWidth(m.tasks, m.config)
@@ -929,6 +946,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Non-verbose mode: preserve order, update tasks in place, append new tasks at end
 				newTasks := appendNewTasksOnly(m.tasks, tasks, m.config)
 				m.tasks = task.GroupWithChildren(newTasks)
+
+				// Partition routines from work tasks
+				work, routines := task.PartitionRoutines(m.tasks, m.config)
+				if m.routinesView {
+					m.tasks = routines
+				} else {
+					m.tasks = work
+				}
+
 				m.projectColWidth = calculateProjectColWidth(m.tasks)
 				m.keywordColWidth = calculateKeywordColWidth(m.tasks)
 				m.fractionColWidth = calculateFractionColWidth(m.tasks, m.config)
@@ -990,6 +1016,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 			m.tasks = task.GroupWithChildren(m.tasks)
 
+			// Partition routines from work tasks
+			work, routines := task.PartitionRoutines(m.tasks, m.config)
+			if m.routinesView {
+				m.tasks = routines
+			} else {
+				m.tasks = work
+			}
+
 			m.projectColWidth = calculateProjectColWidth(m.tasks)
 			m.keywordColWidth = calculateKeywordColWidth(m.tasks)
 			m.fractionColWidth = calculateFractionColWidth(m.tasks, m.config)
@@ -1001,6 +1035,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.list.SetItems(items)
 			m.applyCustomFilter() // Reapply any active filter
 			m.list.ResetSelected()
+
+			// Update title bar text and color for current view
+			m.updateViewTitle()
 		}
 		return m, nil
 	case editorFinishedMsg:
@@ -1634,6 +1671,21 @@ func updateTaskStatusCmd(cfg *configpkg.Config, t *task.Task, newKeyword string)
 func reloadTasksCmd() tea.Cmd {
 	return func() tea.Msg {
 		return loadingStartMsg{}
+	}
+}
+
+// updateViewTitle sets the list title text and style based on the current view mode.
+func (m *model) updateViewTitle() {
+	if m.routinesView {
+		m.list.Title = "▸ Routines"
+		m.list.Styles.Title = m.list.Styles.Title.Foreground(lipgloss.Color("13"))
+	} else {
+		if m.structuredMode {
+			m.list.Title = "Tasks (Zettelkasten)"
+		} else {
+			m.list.Title = "Tasks (All)"
+		}
+		m.list.Styles.Title = m.list.Styles.Title.UnsetForeground()
 	}
 }
 
@@ -2473,6 +2525,10 @@ func showInteractiveTUI(config *configpkg.Config, project string) {
 	})
 	tasks = task.GroupWithChildren(tasks)
 
+	// Partition routines — initial load always shows work view
+	work, _ := task.PartitionRoutines(tasks, config)
+	tasks = work
+
 	projectColWidth := calculateProjectColWidth(tasks)
 	keywordColWidth := calculateKeywordColWidth(tasks)
 	fractionColWidth := calculateFractionColWidth(tasks, config)
@@ -2545,6 +2601,10 @@ func showInteractiveTUI(config *configpkg.Config, project string) {
 			key.NewBinding(
 				key.WithKeys("o"),
 				key.WithHelp("o", "clock out"),
+			),
+			key.NewBinding(
+				key.WithKeys("r"),
+				key.WithHelp("r", "routines"),
 			),
 		}
 	}
@@ -2626,6 +2686,10 @@ func showInteractiveTUI(config *configpkg.Config, project string) {
 			key.NewBinding(
 				key.WithKeys("q"),
 				key.WithHelp("q", "quit"),
+			),
+			key.NewBinding(
+				key.WithKeys("r"),
+				key.WithHelp("r", "toggle routines view"),
 			),
 		}
 	}

@@ -95,6 +95,7 @@ type Todo struct {
 	InProgress    []string `toml:"inprogress"`
 	Completed     []string `toml:"completed"`
 	Someday       []string `toml:"someday"`
+	Routines      []string `toml:"routines"`      // Keywords whose items may be routines (if recurring)
 	SpecialTags   []string `toml:"special-tags"`
 }
 
