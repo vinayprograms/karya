@@ -1039,10 +1039,18 @@ func TestFilterByDateBothFields(t *testing.T) {
 		t.Fatalf("@<%s got %d tasks, want 3", tomorrow, len(result))
 	}
 
-	// Substring fallback checks both fields (all dated tasks match same month)
-	result = FilterTasks(tasks, "@"+yesterday[:7])
+	// Substring fallback checks both fields — use fixed dates within the
+	// same month so the assertion doesn't break at month boundaries.
+	sameMonthTasks := []*Task{
+		{Title: "A", ScheduledAt: "2026-06-10", Keyword: "TODO"},
+		{Title: "B", DueAt: "2026-06-15", Keyword: "TODO"},
+		{Title: "C", ScheduledAt: "2026-06-20", DueAt: "2026-06-20", Keyword: "TODO"},
+		{Title: "D", ScheduledAt: "2026-06-25", DueAt: "2026-06-25", Keyword: "TODO"},
+		{Title: "No dates", Keyword: "TODO"},
+	}
+	result = FilterTasks(sameMonthTasks, "@2026-06")
 	if len(result) != 4 {
-		t.Fatalf("@%s substring got %d tasks, want 4", yesterday[:7], len(result))
+		t.Fatalf("@2026-06 substring got %d tasks, want 4", len(result))
 	}
 }
 
@@ -1168,6 +1176,90 @@ func TestProcessFile_SiblingsDontNestIntoEachOther(t *testing.T) {
 	}
 	if len(p2.Children) != 1 || p2.Children[0].Title != "child of two" {
 		t.Errorf("parent two children wrong: %v", p2.Children)
+	}
+}
+
+func TestProcessFile_HeadingResetsStack(t *testing.T) {
+	cfg, tmpDir := makeProcessFileConfig(t)
+	// A DONE in section 1 must not parent a TODO in section 2.
+	content := `## Section One
+DONE: old task
+  - DONE: old child
+
+## Section Two
+* plain note
+  * TODO: new task
+`
+	path := writeTaskFile(t, tmpDir, "tasks.md", content)
+	tasks, err := ProcessFile(cfg, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Find the TODO
+	var todo *Task
+	for _, tk := range tasks {
+		if tk.Keyword == "TODO" {
+			todo = tk
+		}
+	}
+	if todo == nil {
+		t.Fatal("TODO task not found")
+	}
+	if todo.Parent != nil {
+		t.Errorf("TODO should have no parent after heading reset, got parent %q (line %d)",
+			todo.Parent.Keyword, todo.Parent.LineNum)
+	}
+}
+
+func TestProcessFile_NonTaskLinesPopsStack(t *testing.T) {
+	cfg, tmpDir := makeProcessFileConfig(t)
+	// A non-task line at the same indent as a task should close that
+	// task's scope — a deeper task after the non-task line should not
+	// be parented to the now-closed task.
+	content := `  TODO: task at indent 2
+* non-task also at indent 2
+    TODO: deep task at indent 4
+`
+	path := writeTaskFile(t, tmpDir, "tasks.md", content)
+	tasks, err := ProcessFile(cfg, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(tasks))
+	}
+	shallow, deep := tasks[0], tasks[1]
+	if shallow.Keyword != "TODO" || deep.Keyword != "TODO" {
+		t.Fatalf("unexpected keywords: %s, %s", shallow.Keyword, deep.Keyword)
+	}
+	if deep.Parent != nil {
+		t.Errorf("deep TODO should have no parent after non-task line closed scope, got %q (line %d)",
+			deep.Parent.Keyword, deep.Parent.LineNum)
+	}
+	if len(shallow.Children) != 0 {
+		t.Errorf("shallow TODO should have no children, got %d", len(shallow.Children))
+	}
+}
+
+func TestProcessFile_BlankLinesPreserveStack(t *testing.T) {
+	cfg, tmpDir := makeProcessFileConfig(t)
+	// Blank lines between a parent and child at deeper indent should not
+	// break the parent-child relationship.
+	content := `TODO: parent
+
+  - TODO: child after blank line
+`
+	path := writeTaskFile(t, tmpDir, "tasks.md", content)
+	tasks, err := ProcessFile(cfg, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(tasks))
+	}
+	if tasks[1].Parent != tasks[0] {
+		t.Error("child should be parented to the TODO across the blank line")
 	}
 }
 

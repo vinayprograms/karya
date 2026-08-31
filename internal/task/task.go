@@ -212,9 +212,28 @@ func ProcessFile(c *config.Config, filePath string) ([]*Task, error) {
 	for scanner.Scan() {
 		lineNum++
 		line := scanner.Text()
+
+		// Skip blank lines — no stack changes.
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+
+		// Headings reset the stack — no item in a new section
+		// can be a child of an item from a previous section.
+		if isMarkdownHeading(line) {
+			stack = stack[:0]
+			continue
+		}
+
 		_, level := StripLinePrefix(line)
 		t := ParseLine(c, line, project, zettel, filePath)
 		if t == nil {
+			// Non-task line: pop stack frames at same or deeper indent
+			// so subsequent tasks don't inherit stale parents across
+			// unrelated content.
+			for len(stack) > 0 && stack[len(stack)-1].level >= level {
+				stack = stack[:len(stack)-1]
+			}
 			continue
 		}
 		t.IndentLevel = level
@@ -232,6 +251,17 @@ func ProcessFile(c *config.Config, filePath string) ([]*Task, error) {
 		tasks = append(tasks, t)
 	}
 	return tasks, scanner.Err()
+}
+
+// isMarkdownHeading returns true if the line is a Markdown ATX heading
+// (one to six '#' characters followed by a space or end of line).
+func isMarkdownHeading(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	i := 0
+	for i < len(trimmed) && trimmed[i] == '#' {
+		i++
+	}
+	return i > 0 && i <= 6 && (i == len(trimmed) || trimmed[i] == ' ')
 }
 
 // StripLinePrefix strips leading whitespace and an optional bullet marker (-, *, +)
