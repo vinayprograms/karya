@@ -1940,13 +1940,14 @@ func getUnstructuredWatchDirs(config *configpkg.Config, project string) []string
 
 // taskKey creates a unique identifier for a task (includes keyword for cursor restoration)
 func taskKey(t *task.Task) string {
-	return t.FilePath + ":" + t.Keyword + ":" + t.Title
+	return fmt.Sprintf("%s:%d:%s:%s", t.FilePath, t.LineNum, t.Keyword, t.Title)
 }
 
 // taskIdentityKey creates a stable identifier for a task that doesn't change when status changes.
 // Used for merge operations to recognize the same task after status updates.
+// Includes LineNum to disambiguate duplicate titles in the same file.
 func taskIdentityKey(t *task.Task) string {
-	return t.FilePath + ":" + t.Title
+	return fmt.Sprintf("%s:%d:%s", t.FilePath, t.LineNum, t.Title)
 }
 
 // restoreCursorPosition finds the task by key and restores cursor, or clamps to bounds if deleted.
