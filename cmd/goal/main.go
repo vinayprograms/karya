@@ -894,10 +894,7 @@ func main() {
 	args := os.Args[1:]
 
 	if len(args) > 0 && args[0] == "colors" {
-		cfg, err := config.Load()
-		if err != nil {
-			log.Fatal(err)
-		}
+		cfg := config.MustLoad()
 		if err := colorspkg.Print(cfg); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
@@ -906,10 +903,7 @@ func main() {
 	}
 
 	if len(args) > 0 && args[0] == "mcp" {
-		cfg, err := config.Load()
-		if err != nil {
-			log.Fatal(err)
-		}
+		cfg := config.MustLoad()
 		karyaDir := cfg.Directories.Karya
 		if karyaDir == "" {
 			if cfg.Directories.Projects != "" {

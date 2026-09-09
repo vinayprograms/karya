@@ -1825,10 +1825,7 @@ func mergeTasksPreservingOrder(existing, incoming []*task.Task, cfg *configpkg.C
 }
 
 func main() {
-	config, err := configpkg.Load()
-	if err != nil {
-		log.Fatal(err)
-	}
+	config := configpkg.MustLoad()
 
 	// Initialize colors from config
 	InitializeColors(config)

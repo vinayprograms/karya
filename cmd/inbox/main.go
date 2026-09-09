@@ -17,10 +17,7 @@ import (
 )
 
 func main() {
-	cfg, err := config.Load()
-	if err != nil {
-		log.Fatal(err)
-	}
+	cfg := config.MustLoad()
 
 	if len(os.Args) > 1 && os.Args[1] == "colors" {
 		if err := colors.Print(cfg); err != nil {
@@ -256,10 +253,7 @@ func (m model) View() string {
 }
 
 func addToInbox(taskText string) {
-	cfg, err := config.Load()
-	if err != nil {
-		log.Fatal(err)
-	}
+	cfg := config.MustLoad()
 
 	// Determine the inbox file path from config
 	var inboxFile string

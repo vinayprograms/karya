@@ -717,10 +717,7 @@ func openEditorCmd(editor, filePath, searchTerm string) tea.Cmd {
 }
 
 func main() {
-	cfg, err := config.Load()
-	if err != nil {
-		log.Fatal(err)
-	}
+	cfg := config.MustLoad()
 
 	InitializeColors(cfg)
 

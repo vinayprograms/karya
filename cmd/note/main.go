@@ -1881,10 +1881,7 @@ func zettelWatchDirs(zetDir string) []string {
 }
 
 func main() {
-	cfg, err := config.Load()
-	if err != nil {
-		log.Fatal(err)
-	}
+	cfg := config.MustLoad()
 
 	InitializeColors(cfg)
 

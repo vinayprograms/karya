@@ -2152,11 +2152,7 @@ func setupWatcher(cfg *config.Config) *fsnotify.Watcher {
 }
 
 func main() {
-	cfg, err := config.Load()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-		os.Exit(1)
-	}
+	cfg := config.MustLoad()
 
 	if len(os.Args) > 1 && os.Args[1] == "colors" {
 		if err := colorspkg.Print(cfg); err != nil {

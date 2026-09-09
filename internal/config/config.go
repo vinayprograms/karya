@@ -136,6 +136,17 @@ type Config struct {
 	Jira          Jira          `toml:"jira"`
 }
 
+// MustLoad loads the configuration and exits the program with an error
+// message when loading fails. For use from command main functions.
+func MustLoad() *Config {
+	cfg, err := Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+		os.Exit(1)
+	}
+	return cfg
+}
+
 func Load() (*Config, error) {
 	// Initialize empty config with defaults
 	cfg := &Config{}
