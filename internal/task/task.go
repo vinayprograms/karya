@@ -14,6 +14,7 @@ import (
 
 	"github.com/vinayprograms/karya/internal/config"
 	"github.com/vinayprograms/karya/internal/parallel"
+	"github.com/vinayprograms/karya/internal/zet"
 )
 
 // ErrPendingChildren is returned by UpdateTaskStatus when a task can't be
@@ -911,33 +912,16 @@ type SearchResult struct {
 	Project  string
 }
 
-// SearchInFile searches for a term within a file and returns matching lines
-func SearchInFile(filePath, searchTerm string) []SearchResult {
+// searchInFile searches for a term within a file via zet's file search.
+func searchInFile(filePath, searchTerm string) []SearchResult {
 	var results []SearchResult
-
-	file, err := os.Open(filePath)
-	if err != nil {
-		return results
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	lineNum := 0
-	for scanner.Scan() {
-		lineNum++
-		line := scanner.Text()
-		if strings.Contains(strings.ToLower(line), strings.ToLower(searchTerm)) {
-			// Extract zettel ID from path if possible
-			dir := filepath.Dir(filePath)
-			zetID := filepath.Base(dir)
-
-			results = append(results, SearchResult{
-				ZettelID: zetID,
-				LineNum:  lineNum,
-				Line:     line,
-				Path:     filePath,
-			})
-		}
+	for _, r := range zet.SearchInFile(filePath, searchTerm) {
+		results = append(results, SearchResult{
+			ZettelID: r.ZettelID,
+			LineNum:  r.LineNum,
+			Line:     r.Line,
+			Path:     r.Path,
+		})
 	}
 	return results
 }
@@ -951,7 +935,7 @@ func SearchTasks(c *config.Config, project string, searchTerm string) ([]SearchR
 
 	var allResults []SearchResult
 	for _, file := range files {
-		results := SearchInFile(file, searchTerm)
+		results := searchInFile(file, searchTerm)
 		if len(results) > 0 {
 			// Add project and title information to results
 			for i := range results {
@@ -967,9 +951,9 @@ func SearchTasks(c *config.Config, project string, searchTerm string) ([]SearchR
 				// Get title if possible
 				if c.Todo.Structured {
 					// For structured mode, try to get the zettel title
-					if results[i].ZettelID != "" && IsValidZettelID(results[i].ZettelID) {
+					if results[i].ZettelID != "" && zet.IsValidZettelID(results[i].ZettelID) {
 						notesDir := filepath.Join(c.Directories.Projects, results[i].Project, "notes")
-						title, err := GetZettelTitle(notesDir, results[i].ZettelID)
+						title, err := zet.GetZettelTitle(notesDir, results[i].ZettelID)
 						if err == nil {
 							results[i].Title = title
 						}
@@ -988,7 +972,7 @@ func SearchTasks(c *config.Config, project string, searchTerm string) ([]SearchR
 	if project == "" || project == "inbox" {
 		inboxPath := c.GetInboxFilePath()
 		if _, err := os.Stat(inboxPath); err == nil {
-			results := SearchInFile(inboxPath, searchTerm)
+			results := searchInFile(inboxPath, searchTerm)
 			for i := range results {
 				results[i].Project = "inbox"
 				results[i].Title = "inbox"
@@ -999,39 +983,6 @@ func SearchTasks(c *config.Config, project string, searchTerm string) ([]SearchR
 	}
 
 	return allResults, nil
-}
-
-// IsValidZettelID checks if a string is a valid zettel ID
-func IsValidZettelID(id string) bool {
-	if len(id) != 14 {
-		return false
-	}
-	for _, c := range id {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-// GetZettelTitle gets the title of a zettel from its README.md file
-func GetZettelTitle(zetDir, zetID string) (string, error) {
-	readmePath := filepath.Join(zetDir, zetID, "README.md")
-	file, err := os.Open(readmePath)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	if scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "# ") {
-			return strings.TrimSpace(line[2:]), nil
-		}
-	}
-
-	return "", fmt.Errorf("no title found")
 }
 
 // UpdateTaskStatus updates the keyword of a task in its source file.
