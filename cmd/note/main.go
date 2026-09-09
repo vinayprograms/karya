@@ -17,6 +17,7 @@ import (
 	editorpkg "github.com/vinayprograms/karya/internal/editor"
 	"github.com/vinayprograms/karya/internal/note"
 	"github.com/vinayprograms/karya/internal/task"
+	"github.com/vinayprograms/karya/internal/watch"
 	"github.com/vinayprograms/karya/internal/zet"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -703,33 +704,10 @@ func (m zettelModel) Init() tea.Cmd {
 	return waitForFileChange(m.watcher)
 }
 
-type fileChangedMsg struct{}
+type fileChangedMsg = watch.Changed
 
 func waitForFileChange(watcher *fsnotify.Watcher) tea.Cmd {
-	return func() tea.Msg {
-		if watcher == nil {
-			return nil
-		}
-
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return nil
-				}
-				if event.Op&fsnotify.Write == fsnotify.Write ||
-					event.Op&fsnotify.Create == fsnotify.Create ||
-					event.Op&fsnotify.Remove == fsnotify.Remove {
-					return fileChangedMsg{}
-				}
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					return nil
-				}
-				log.Printf("Watcher error: %v", err)
-			}
-		}
-	}
+	return watch.Wait(watcher)
 }
 
 func (m zettelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1972,65 +1950,42 @@ func setupProjectWatcher(prjDir string) (*fsnotify.Watcher, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	updateProjectWatcher(watcher, prjDir)
 	return watcher, nil
 }
 
 func updateProjectWatcher(watcher *fsnotify.Watcher, prjDir string) {
-	if watcher == nil {
-		return
-	}
-
 	// Watch the projects dir itself and each project's notes dir (1 level of subdirs + notes)
-	watcher.Add(prjDir)
+	dirs := []string{prjDir}
 	entries, err := os.ReadDir(prjDir)
-	if err != nil {
-		return
-	}
-	for _, entry := range entries {
-		if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
-			prjPath := filepath.Join(prjDir, entry.Name())
-			watcher.Add(prjPath)
-			notesPath := filepath.Join(prjPath, "notes")
-			if _, err := os.Stat(notesPath); err == nil {
-				watcher.Add(notesPath)
+	if err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
+				prjPath := filepath.Join(prjDir, entry.Name())
+				dirs = append(dirs, prjPath, filepath.Join(prjPath, "notes"))
 			}
 		}
 	}
+	watch.Add(watcher, dirs...)
 }
 
 func setupWatcher(zetDir string) (*fsnotify.Watcher, error) {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return nil, err
-	}
-
-	updateWatcher(watcher, zetDir)
-	return watcher, nil
+	return watch.Dirs(zettelWatchDirs(zetDir)...)
 }
 
 func updateWatcher(watcher *fsnotify.Watcher, zetDir string) {
-	if watcher == nil {
-		return
-	}
-
-	dirsToWatch := getWatchDirectories(zetDir)
-	for _, dir := range dirsToWatch {
-		watcher.Add(dir)
-	}
+	watch.Add(watcher, zettelWatchDirs(zetDir)...)
 }
 
-func getWatchDirectories(zetDir string) []string {
+// zettelWatchDirs returns every directory under the zettelkasten root.
+func zettelWatchDirs(zetDir string) []string {
 	var dirs []string
-
 	filepath.Walk(zetDir, func(path string, info os.FileInfo, err error) error {
 		if err == nil && info.IsDir() {
 			dirs = append(dirs, path)
 		}
 		return nil
 	})
-
 	return dirs
 }
 

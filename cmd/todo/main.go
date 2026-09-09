@@ -19,6 +19,7 @@ import (
 	kgit "github.com/vinayprograms/karya/internal/git"
 	"github.com/vinayprograms/karya/internal/jira"
 	"github.com/vinayprograms/karya/internal/task"
+	"github.com/vinayprograms/karya/internal/watch"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
@@ -442,7 +443,7 @@ func (m model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-type fileChangedMsg struct{}
+type fileChangedMsg = watch.Changed
 
 type jiraSyncDoneMsg struct {
 	results []jiraSyncResult
@@ -507,37 +508,7 @@ type statusUpdateMsg struct {
 type clearStatusMsg struct{}
 
 func waitForFileChange(watcher *fsnotify.Watcher) tea.Cmd {
-	return func() tea.Msg {
-		if watcher == nil {
-			return nil
-		}
-
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					// Channel closed
-					return nil
-				}
-				// Watch for Write (file modification), Create (new file), and Remove (file deletion) events
-				if event.Op&fsnotify.Write == fsnotify.Write ||
-					event.Op&fsnotify.Create == fsnotify.Create ||
-					event.Op&fsnotify.Remove == fsnotify.Remove {
-					// Debounce: wait a bit for multiple writes to settle
-					time.Sleep(100 * time.Millisecond)
-					return fileChangedMsg{}
-				}
-				// If it's not a matching event, continue the loop to wait for the next one
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					// Channel closed
-					return nil
-				}
-				log.Printf("Watcher error: %v", err)
-				// Continue the loop to keep watching even after an error
-			}
-		}
-	}
+	return watch.Wait(watcher)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1774,144 +1745,13 @@ func calculateFractionColWidth(tasks []*task.Task, cfg *configpkg.Config) int {
 
 // setupWatcher creates a new watcher and watches all relevant directories
 func setupWatcher(config *configpkg.Config, project string) (*fsnotify.Watcher, error) {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return nil, err
-	}
-
-	updateWatcher(watcher, config, project)
-	return watcher, nil
+	return watch.Dirs(task.WatchDirs(config, project)...)
 }
 
-// updateWatcher updates the watcher to monitor all relevant directories and files
+// updateWatcher refreshes the watched directory set (fsnotify tolerates
+// duplicate adds, so newly created directories are simply added).
 func updateWatcher(watcher *fsnotify.Watcher, config *configpkg.Config, project string) {
-	if watcher == nil {
-		return
-	}
-
-	// Get list of directories to watch
-	dirsToWatch := getWatchDirectories(config, project)
-
-	// Remove all current watches (fsnotify doesn't have a list method, so we track what we add)
-	// Since we can't efficiently remove specific watches, we'll just add new ones
-	// fsnotify handles duplicate adds gracefully
-
-	for _, dir := range dirsToWatch {
-		// Ignore errors - directory might not exist yet or might already be watched
-		watcher.Add(dir)
-	}
-
-	// Watch the inbox file's parent directory so external edits trigger a refresh
-	if inboxPath := config.GetInboxFilePath(); inboxPath != "" {
-		watcher.Add(filepath.Dir(inboxPath))
-	}
-}
-
-// maxWatchDirs limits the number of directories to watch in unstructured mode
-// to avoid exhausting file descriptors. Structured mode has no cap since it
-// only watches zettel directories (bounded by actual project/note count).
-const maxWatchDirs = 1000
-
-// getWatchDirectories returns a list of directories that should be watched.
-// In structured mode, watches only the zettel directories (PRJDIR/*/notes/*/).
-// In unstructured mode, watches up to maxWatchDirs directories, prioritizing shallower ones.
-func getWatchDirectories(config *configpkg.Config, project string) []string {
-	if config.Todo.Structured {
-		return getStructuredWatchDirs(config, project)
-	}
-	return getUnstructuredWatchDirs(config, project)
-}
-
-// getStructuredWatchDirs returns directories for structured (zettelkasten) mode.
-// Only watches: PRJDIR, PRJDIR/*, PRJDIR/*/notes, and PRJDIR/*/notes/*
-func getStructuredWatchDirs(config *configpkg.Config, project string) []string {
-	var dirs []string
-	prjDir := config.Directories.Projects
-
-	if project != "" && project != "*" {
-		// Specific project: watch project dir and its notes subdirs
-		projectDir := filepath.Join(prjDir, project)
-		notesDir := filepath.Join(projectDir, "notes")
-		dirs = append(dirs, projectDir, notesDir)
-
-		// Add zettel directories under notes/
-		entries, err := os.ReadDir(notesDir)
-		if err == nil {
-			for _, e := range entries {
-				if e.IsDir() {
-					dirs = append(dirs, filepath.Join(notesDir, e.Name()))
-				}
-			}
-		}
-	} else {
-		// All projects: watch PRJDIR and each project's notes structure
-		dirs = append(dirs, prjDir)
-
-		entries, err := os.ReadDir(prjDir)
-		if err == nil {
-			for _, e := range entries {
-				if e.IsDir() {
-					projectDir := filepath.Join(prjDir, e.Name())
-					notesDir := filepath.Join(projectDir, "notes")
-					dirs = append(dirs, projectDir, notesDir)
-
-					// Add zettel directories under notes/
-					zettelEntries, err := os.ReadDir(notesDir)
-					if err == nil {
-						for _, z := range zettelEntries {
-							if z.IsDir() {
-								dirs = append(dirs, filepath.Join(notesDir, z.Name()))
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	return dirs
-}
-
-// getUnstructuredWatchDirs returns directories for unstructured mode.
-// Watches up to maxWatchDirs directories, prioritizing shallower ones.
-func getUnstructuredWatchDirs(config *configpkg.Config, project string) []string {
-	var dirs []string
-
-	rootDir := config.Directories.Projects
-	if project != "" && project != "*" {
-		rootDir = filepath.Join(config.Directories.Projects, project)
-	}
-
-	// Collect directories with depth info for prioritization
-	rootDepth := strings.Count(rootDir, string(filepath.Separator))
-	type dirInfo struct {
-		path  string
-		depth int
-	}
-	var allDirs []dirInfo
-
-	filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
-		if err == nil && info.IsDir() {
-			depth := strings.Count(path, string(filepath.Separator)) - rootDepth
-			allDirs = append(allDirs, dirInfo{path: path, depth: depth})
-		}
-		return nil
-	})
-
-	// Sort by depth (shallower first) to prioritize important directories
-	sort.Slice(allDirs, func(i, j int) bool {
-		return allDirs[i].depth < allDirs[j].depth
-	})
-
-	// Take only up to maxWatchDirs directories
-	for i, d := range allDirs {
-		if i >= maxWatchDirs {
-			break
-		}
-		dirs = append(dirs, d.path)
-	}
-
-	return dirs
+	watch.Add(watcher, task.WatchDirs(config, project)...)
 }
 
 // taskKey creates a unique identifier for a task (includes keyword for cursor restoration)

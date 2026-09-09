@@ -10,12 +10,12 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	colorspkg "github.com/vinayprograms/karya/internal/colors"
 	"github.com/vinayprograms/karya/internal/config"
 	editorpkg "github.com/vinayprograms/karya/internal/editor"
 	"github.com/vinayprograms/karya/internal/task"
+	"github.com/vinayprograms/karya/internal/watch"
 	"github.com/vinayprograms/karya/internal/zet"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -218,34 +218,10 @@ func (m model) Init() tea.Cmd {
 	return waitForFileChange(m.watcher)
 }
 
-type fileChangedMsg struct{}
+type fileChangedMsg = watch.Changed
 
 func waitForFileChange(watcher *fsnotify.Watcher) tea.Cmd {
-	return func() tea.Msg {
-		if watcher == nil {
-			return nil
-		}
-
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return nil
-				}
-				if event.Op&fsnotify.Write == fsnotify.Write ||
-					event.Op&fsnotify.Create == fsnotify.Create ||
-					event.Op&fsnotify.Remove == fsnotify.Remove {
-					time.Sleep(100 * time.Millisecond)
-					return fileChangedMsg{}
-				}
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					return nil
-				}
-				log.Printf("Watcher error: %v", err)
-			}
-		}
-	}
+	return watch.Wait(watcher)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1359,35 +1335,21 @@ func printTitleSearchResults(results []Zettel) {
 }
 
 func setupWatcher(zetDir string) (*fsnotify.Watcher, error) {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return nil, err
-	}
-
-	updateWatcher(watcher, zetDir)
-	return watcher, nil
+	return watch.Dirs(zettelWatchDirs(zetDir)...)
 }
 
 func updateWatcher(watcher *fsnotify.Watcher, zetDir string) {
-	if watcher == nil {
-		return
-	}
-
-	dirsToWatch := getWatchDirectories(zetDir)
-	for _, dir := range dirsToWatch {
-		watcher.Add(dir)
-	}
+	watch.Add(watcher, zettelWatchDirs(zetDir)...)
 }
 
-func getWatchDirectories(zetDir string) []string {
+// zettelWatchDirs returns every directory under the zettelkasten root.
+func zettelWatchDirs(zetDir string) []string {
 	var dirs []string
-
 	filepath.Walk(zetDir, func(path string, info os.FileInfo, err error) error {
 		if err == nil && info.IsDir() {
 			dirs = append(dirs, path)
 		}
 		return nil
 	})
-
 	return dirs
 }

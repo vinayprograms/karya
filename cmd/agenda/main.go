@@ -5,7 +5,6 @@ import (
 	"log"
 	"math"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -15,6 +14,7 @@ import (
 	editorpkg "github.com/vinayprograms/karya/internal/editor"
 	kgit "github.com/vinayprograms/karya/internal/git"
 	"github.com/vinayprograms/karya/internal/task"
+	"github.com/vinayprograms/karya/internal/watch"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -137,7 +137,7 @@ type model struct {
 	showingHelp bool
 }
 
-type fileChangedMsg struct{}
+type fileChangedMsg = watch.Changed
 
 type agendaLoadedMsg struct {
 	days []task.AgendaDay
@@ -185,29 +185,7 @@ func (m model) Init() tea.Cmd {
 }
 
 func waitForFileChange(watcher *fsnotify.Watcher) tea.Cmd {
-	return func() tea.Msg {
-		if watcher == nil {
-			return nil
-		}
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return nil
-				}
-				if event.Op&fsnotify.Write == fsnotify.Write ||
-					event.Op&fsnotify.Create == fsnotify.Create ||
-					event.Op&fsnotify.Remove == fsnotify.Remove {
-					time.Sleep(100 * time.Millisecond)
-					return fileChangedMsg{}
-				}
-			case _, ok := <-watcher.Errors:
-				if !ok {
-					return nil
-				}
-			}
-		}
-	}
+	return watch.Wait(watcher)
 }
 
 func loadAgendaCmd(cfg *config.Config, focus time.Time, mode viewMode) tea.Cmd {
@@ -2162,39 +2140,15 @@ func (m model) renderClockView() string {
 }
 
 func setupWatcher(cfg *config.Config) *fsnotify.Watcher {
-	watcher, err := fsnotify.NewWatcher()
+	// Agenda always reads the structured project tree.
+	structured := *cfg
+	structured.Todo.Structured = true
+	w, err := watch.Dirs(task.WatchDirs(&structured, "")...)
 	if err != nil {
 		log.Printf("Warning: Could not create file watcher: %v", err)
 		return nil
 	}
-
-	prjDir := cfg.Directories.Projects
-	watcher.Add(prjDir)
-
-	entries, err := os.ReadDir(prjDir)
-	if err == nil {
-		for _, e := range entries {
-			if e.IsDir() {
-				projectDir := filepath.Join(prjDir, e.Name())
-				notesDir := filepath.Join(projectDir, "notes")
-				watcher.Add(projectDir)
-				watcher.Add(notesDir)
-
-				zettelEntries, _ := os.ReadDir(notesDir)
-				for _, z := range zettelEntries {
-					if z.IsDir() {
-						watcher.Add(filepath.Join(notesDir, z.Name()))
-					}
-				}
-			}
-		}
-	}
-
-	if inboxPath := cfg.GetInboxFilePath(); inboxPath != "" {
-		watcher.Add(filepath.Dir(inboxPath))
-	}
-
-	return watcher
+	return w
 }
 
 func main() {
