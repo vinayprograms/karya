@@ -264,12 +264,12 @@ func TestTaskItemMarkdownRendering(t *testing.T) {
 		t.Errorf("Title() should remove markdown syntax, got %v", title)
 	}
 	
-	// Test renderWithSelection
-	rendered := item.renderWithSelection(false)
+	// Test render with indicator padding
+	rendered := item.render(false, true)
 	
 	// Check that markdown syntax is not present in the output
 	if strings.Contains(rendered, "**") || strings.Contains(rendered, "*") || 
 	   strings.Contains(rendered, "~~") || strings.Contains(rendered, "`") {
-		t.Errorf("renderWithSelection() should remove markdown syntax, got %v", rendered)
+		t.Errorf("render() should remove markdown syntax, got %v", rendered)
 	}
 }

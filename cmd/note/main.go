@@ -117,96 +117,59 @@ func (i matchedNoteItem) FilterValue() string {
 	return i.projectName + " " + i.noteTitle
 }
 
-func (i matchedNoteItem) renderWithSelection(isSelected bool, maxNameLen int, termWidth int) string {
-	name := i.projectName
-	var nameRendered string
-
+// renderName renders a project name with its namespace prefix dimmed,
+// highlighted when selected, padded to maxNameLen.
+func renderName(name string, isSelected bool, maxNameLen int) string {
+	main := colors.projectStyle
+	if isSelected {
+		main = colors.highlightStyle
+	}
+	var rendered string
 	if lastDot := strings.LastIndex(name, "."); lastDot != -1 {
-		prefix := name[:lastDot+1]
-		suffix := name[lastDot+1:]
-		if isSelected {
-			nameRendered = colors.grayStyle.Render(prefix) + colors.highlightStyle.Render(suffix)
-		} else {
-			nameRendered = colors.grayStyle.Render(prefix) + colors.projectStyle.Render(suffix)
-		}
+		rendered = colors.grayStyle.Render(name[:lastDot+1]) + main.Render(name[lastDot+1:])
 	} else {
-		if isSelected {
-			nameRendered = colors.highlightStyle.Render(name)
-		} else {
-			nameRendered = colors.projectStyle.Render(name)
-		}
+		rendered = main.Render(name)
 	}
+	padding := max(maxNameLen-len(name), 0)
+	return rendered + strings.Repeat(" ", padding)
+}
 
-	padding := maxNameLen - len(name)
-	if padding < 0 {
-		padding = 0
+// fitTitle truncates a title to the width remaining after fixed columns.
+func fitTitle(title string, termWidth, fixedWidth int) string {
+	titleWidth := max(termWidth-fixedWidth, 0)
+	runes := []rune(title)
+	if len(runes) <= titleWidth {
+		return title
 	}
-	nameCol := nameRendered + strings.Repeat(" ", padding)
+	if titleWidth > 1 {
+		return string(runes[:titleWidth-1]) + "…"
+	}
+	return ""
+}
 
-	// Title fills remaining width after name + gap
-	fixedWidth := 2 + maxNameLen + 2
-	titleWidth := termWidth - fixedWidth
-	if titleWidth < 0 {
-		titleWidth = 0
-	}
-	title := i.noteTitle
-	titleRunes := []rune(title)
-	if len(titleRunes) > titleWidth {
-		if titleWidth > 1 {
-			title = string(titleRunes[:titleWidth-1]) + "…"
-		} else {
-			title = ""
-		}
-	}
-
-	var selector string
+// selectorGlyph returns the cursor column for a row.
+func selectorGlyph(isSelected bool) string {
 	if isSelected {
-		selector = colors.selectorStyle.Render("█ ")
-	} else {
-		selector = "  "
+		return colors.selectorStyle.Render("█ ")
 	}
+	return "  "
+}
 
+func (i matchedNoteItem) renderWithSelection(isSelected bool, maxNameLen int, termWidth int) string {
+	nameCol := renderName(i.projectName, isSelected, maxNameLen)
+	title := fitTitle(i.noteTitle, termWidth, 2+maxNameLen+2)
 	if isSelected {
-		return selector + nameCol + "  " + colors.highlightStyle.Render(title)
+		title = colors.highlightStyle.Render(title)
 	}
-	return selector + nameCol + "  " + title
+	return selectorGlyph(isSelected) + nameCol + "  " + title
 }
 
 func (i projectItem) renderWithSelection(isSelected bool, maxNameLen int, termWidth int) string {
-	name := i.project.Name
-	var nameRendered string
+	nameCol := renderName(i.project.Name, isSelected, maxNameLen)
 
-	// Dim the namespace prefix (everything up to and including the last dot)
-	if lastDot := strings.LastIndex(name, "."); lastDot != -1 {
-		prefix := name[:lastDot+1]
-		suffix := name[lastDot+1:]
-		if isSelected {
-			nameRendered = colors.grayStyle.Render(prefix) + colors.highlightStyle.Render(suffix)
-		} else {
-			nameRendered = colors.grayStyle.Render(prefix) + colors.projectStyle.Render(suffix)
-		}
-	} else {
-		if isSelected {
-			nameRendered = colors.highlightStyle.Render(name)
-		} else {
-			nameRendered = colors.projectStyle.Render(name)
-		}
-	}
-
-	// Pad name column to fixed width
-	padding := maxNameLen - len(name)
-	if padding < 0 {
-		padding = 0
-	}
-	nameCol := nameRendered + strings.Repeat(" ", padding)
-
-	// Notes column (right-aligned, 4 chars)
 	notesStr := fmt.Sprintf("%4d", i.project.NoteCount)
-
-	// Todos column (right-aligned, 4 chars)
 	todosStr := fmt.Sprintf("%4d", i.project.TodoCount)
 
-	// Modified date column (6 chars)
 	dateStr := "   -- "
 	if i.project.LastNoteID != "" && len(i.project.LastNoteID) >= 8 {
 		if t, err := time.Parse("20060102", i.project.LastNoteID[:8]); err == nil {
@@ -214,35 +177,14 @@ func (i projectItem) renderWithSelection(isSelected bool, maxNameLen int, termWi
 		}
 	}
 
-	// Last note title — fill remaining width
 	// Fixed columns: selector(2) + name(maxNameLen) + gap(2) + notes(4) + gap(2) + todos(4) + gap(2) + date(6) + gap(2) + border(2)
-	fixedWidth := 2 + maxNameLen + 2 + 4 + 2 + 4 + 2 + 6 + 2
-	titleWidth := termWidth - fixedWidth
-	if titleWidth < 0 {
-		titleWidth = 0
-	}
-	title := i.project.LastNoteTitle
-	titleRunes := []rune(title)
-	if len(titleRunes) > titleWidth {
-		if titleWidth > 1 {
-			title = string(titleRunes[:titleWidth-1]) + "…"
-		} else {
-			title = ""
-		}
-	}
+	title := fitTitle(i.project.LastNoteTitle, termWidth, 2+maxNameLen+2+4+2+4+2+6+2)
 
-	// Compose the row
-	var selector string
+	style := colors.grayStyle
 	if isSelected {
-		selector = colors.selectorStyle.Render("█ ")
-	} else {
-		selector = "  "
+		style = colors.highlightStyle
 	}
-
-	if isSelected {
-		return selector + nameCol + "  " + colors.highlightStyle.Render(notesStr) + "  " + colors.highlightStyle.Render(todosStr) + "  " + colors.highlightStyle.Render(dateStr) + "  " + colors.highlightStyle.Render(title)
-	}
-	return selector + nameCol + "  " + colors.grayStyle.Render(notesStr) + "  " + colors.grayStyle.Render(todosStr) + "  " + colors.grayStyle.Render(dateStr) + "  " + colors.grayStyle.Render(title)
+	return selectorGlyph(isSelected) + nameCol + "  " + style.Render(notesStr) + "  " + style.Render(todosStr) + "  " + style.Render(dateStr) + "  " + style.Render(title)
 }
 
 func (i projectItem) Title() string {

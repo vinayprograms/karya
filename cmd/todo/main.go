@@ -110,7 +110,9 @@ func statusStyles(st task.Status) (kwStyle, titleStyle lipgloss.Style) {
 	return colors.completedColor, colors.completedTaskColor
 }
 
-func (i taskItem) renderWithSelection(isSelected bool) string {
+// render builds the task row. isSelected shows the cursor indicator;
+// pad reserves the indicator column when unselected rows must align.
+func (i taskItem) render(isSelected, pad bool) string {
 	var parts []string
 
 	// Show cycle indicator if task is in a cycle
@@ -169,14 +171,17 @@ func (i taskItem) renderWithSelection(isSelected bool) string {
 		titleWidth = 40
 	}
 	formattedTitle = task.TruncateString(formattedTitle, titleWidth)
-	if isSelected {
+	switch {
+	case isSelected:
 		indicator := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("13")).
 			Bold(true).
 			Render("█ ")
 		parts = append(parts, indicator+formattedTitle)
-	} else {
+	case pad:
 		parts = append(parts, "  "+formattedTitle)
+	default:
+		parts = append(parts, formattedTitle)
 	}
 
 	// Render tags with special color if they match special tags
@@ -224,101 +229,7 @@ func (i taskItem) FilterValue() string {
 }
 
 func (i taskItem) Title() string {
-	var parts []string
-
-	// Show cycle indicator if task is in a cycle
-	if i.task.InCycle {
-		parts = append(parts, colors.cycleColor.Render(" ⟲ "))
-	}
-
-	// Project column: blank for child tasks, project name for root tasks
-	if i.task.Parent != nil {
-		parts = append(parts, strings.Repeat(" ", i.projectColWidth))
-	} else {
-		parts = append(parts, colors.prjColor.Render(fmt.Sprintf("%-*s", i.projectColWidth, i.task.Project)))
-	}
-
-	// Only show Zettel column in verbose mode
-	if i.verbose {
-		parts = append(parts, colors.prjColor.Render(fmt.Sprintf("%-16s", i.task.Zettel)))
-	}
-
-	// Indicator slot (always 2 display columns):
-	//   ⌊  for child tasks (connector to parent above)
-	//   ◑  for root tasks with pending children
-	//      blank otherwise
-	done, total := i.task.PendingChildCount(i.config)
-	hasPending := total > 0 && done < total
-	if i.task.Parent != nil {
-		parts = append(parts, colors.childConnectorColor.Render("╰─"))
-	} else if hasPending {
-		parts = append(parts, colors.pendingChildColor.Render("◑ "))
-	} else {
-		parts = append(parts, "  ")
-	}
-
-	kwStyle, titleStyle := statusStyles(i.task.Status(i.config))
-	parts = append(parts, kwStyle.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
-
-	// Progress fraction column immediately after keyword (fixed width, blank when not applicable)
-	if i.fractionColWidth > 0 {
-		if hasPending {
-			parts = append(parts, colors.completedColor.Render(fmt.Sprintf("%-*s", i.fractionColWidth, fmt.Sprintf("[%d/%d]", done, total))))
-		} else {
-			parts = append(parts, strings.Repeat(" ", i.fractionColWidth))
-		}
-	}
-
-	// Build title with optional ID prefix
-	displayTitle := i.task.Title
-	if i.task.ID != "" {
-		displayTitle = fmt.Sprintf("[%s] %s", i.task.ID, i.task.Title)
-	}
-
-	// Render task title with markdown formatting, then truncate (no padding)
-	formattedTitle := task.RenderMarkdownDescription(displayTitle, titleStyle)
-	titleWidth := i.maxTitleWidth
-	if titleWidth <= 0 {
-		titleWidth = 40
-	}
-	formattedTitle = task.TruncateString(formattedTitle, titleWidth)
-	parts = append(parts, formattedTitle)
-
-	// Render tags with special color if they match special tags
-	for _, tag := range i.task.Tags {
-		isSpecial := false
-		for _, specialTag := range i.config.Todo.SpecialTags {
-			if tag == specialTag || strings.HasPrefix(tag, specialTag+":") {
-				isSpecial = true
-				break
-			}
-		}
-		if isSpecial {
-			parts = append(parts, colors.specialTagColor.Render(fmt.Sprintf(" %s ", tag)))
-		} else {
-			parts = append(parts, colors.tagColor.Render(fmt.Sprintf(" %s ", tag)))
-		}
-	}
-	// Display date types with prefixes
-	if i.task.ScheduledAt != "" {
-		dateStyle := getDateStyle(i.task.ScheduledAt, false)
-		parts = append(parts, dateStyle.Render(fmt.Sprintf(" S:%s ", i.task.ScheduledAt)))
-	}
-	if i.task.DueAt != "" {
-		dateStyle := getDateStyle(i.task.DueAt, true)
-		parts = append(parts, dateStyle.Render(fmt.Sprintf(" D:%s ", i.task.DueAt)))
-	}
-	if i.task.Assignee != "" {
-		parts = append(parts, colors.assigneeColor.Render(fmt.Sprintf(" %s ", i.task.Assignee)))
-	}
-
-	// Show references if task has any
-	if len(i.task.References) > 0 {
-		refStr := "^" + strings.Join(i.task.References, " ^")
-		parts = append(parts, colors.prjColor.Render(refStr))
-	}
-
-	return strings.Join(parts, " ")
+	return i.render(false, false)
 }
 
 func (i taskItem) Description() string { return "" }
@@ -362,7 +273,7 @@ func (d taskDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 	}
 
 	isSelected := index == m.Index()
-	content := taskItem.renderWithSelection(isSelected)
+	content := taskItem.render(isSelected, true)
 	fmt.Fprint(w, content)
 }
 
