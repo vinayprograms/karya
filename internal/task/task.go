@@ -1004,38 +1004,26 @@ func UpdateTaskStatus(t *Task, newKeyword string, cfg *config.Config) error {
 		return fmt.Errorf("task has no file path")
 	}
 
-	// Read the file
+	lineNum, err := Locate(t.FilePath, t)
+	if err != nil {
+		return err
+	}
+
 	content, err := os.ReadFile(t.FilePath)
 	if err != nil {
 		return fmt.Errorf("failed to read file: %w", err)
 	}
 
 	lines := strings.Split(string(content), "\n")
-	found := false
-
-	// Build the search pattern from RawTitle (exact match) or reconstructed prefix
-	var searchPrefix string
-	if t.RawTitle != "" {
-		searchPrefix = fmt.Sprintf("%s: %s", t.Keyword, t.RawTitle)
-	} else if t.ID != "" {
-		searchPrefix = fmt.Sprintf("%s: [%s] %s", t.Keyword, t.ID, t.Title)
-	} else {
-		searchPrefix = fmt.Sprintf("%s: %s", t.Keyword, t.Title)
-	}
-
-	for i, line := range lines {
-		stripped, prefixLen := StripLinePrefix(line)
-		if strings.HasPrefix(stripped, searchPrefix) {
-			newLine := line[:prefixLen] + newKeyword + line[prefixLen+len(t.Keyword):]
-			lines[i] = newLine
-			found = true
-			break
-		}
-	}
-
-	if !found {
+	if lineNum > len(lines) {
 		return fmt.Errorf("task not found in file: %s: %s", t.Keyword, t.Title)
 	}
+	line := lines[lineNum-1]
+	stripped, prefixLen := StripLinePrefix(line)
+	if !strings.HasPrefix(stripped, t.Keyword+":") {
+		return fmt.Errorf("task not found in file: %s: %s", t.Keyword, t.Title)
+	}
+	lines[lineNum-1] = line[:prefixLen] + newKeyword + line[prefixLen+len(t.Keyword):]
 
 	// Write the file back
 	newContent := strings.Join(lines, "\n")
@@ -1047,6 +1035,46 @@ func UpdateTaskStatus(t *Task, newKeyword string, cfg *config.Config) error {
 	t.Keyword = newKeyword
 
 	return nil
+}
+
+// Locate finds the 1-based line number of a task in its source file.
+// It matches by RawTitle first (exact source line), then by keyword plus
+// [ID] containment, then by the "KEYWORD: Title" prefix.
+func Locate(filePath string, t *Task) (int, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+
+	var idPrefix string
+	if t.ID != "" {
+		idPrefix = fmt.Sprintf("[%s]", t.ID)
+	}
+	var rawPrefix string
+	if t.RawTitle != "" {
+		rawPrefix = fmt.Sprintf("%s: %s", t.Keyword, t.RawTitle)
+	}
+	titlePrefix := fmt.Sprintf("%s: %s", t.Keyword, t.Title)
+
+	scanner := bufio.NewScanner(file)
+	lineNum := 0
+	for scanner.Scan() {
+		lineNum++
+		stripped, _ := StripLinePrefix(scanner.Text())
+		switch {
+		case rawPrefix != "" && strings.HasPrefix(stripped, rawPrefix):
+			return lineNum, nil
+		case idPrefix != "" && strings.HasPrefix(stripped, t.Keyword+":") && strings.Contains(stripped, idPrefix):
+			return lineNum, nil
+		case strings.HasPrefix(stripped, titlePrefix):
+			return lineNum, nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return 0, err
+	}
+	return 0, fmt.Errorf("task not found in file: %s: %s", t.Keyword, t.Title)
 }
 
 // GetAllKeywords returns all configured keywords grouped by category
@@ -1347,35 +1375,21 @@ func SetTaskDate(t *Task, scheduledAt, dueAt string, removeScheduled, removeDue 
 		return fmt.Errorf("task has no file path")
 	}
 
+	lineNum, err := Locate(t.FilePath, t)
+	if err != nil {
+		return err
+	}
+
 	content, err := os.ReadFile(t.FilePath)
 	if err != nil {
 		return fmt.Errorf("failed to read file: %w", err)
 	}
 
 	lines := strings.Split(string(content), "\n")
-
-	var searchPrefix string
-	if t.RawTitle != "" {
-		searchPrefix = fmt.Sprintf("%s: %s", t.Keyword, t.RawTitle)
-	} else if t.ID != "" {
-		searchPrefix = fmt.Sprintf("%s: [%s] %s", t.Keyword, t.ID, t.Title)
-	} else {
-		searchPrefix = fmt.Sprintf("%s: %s", t.Keyword, t.Title)
-	}
-
-	found := false
-	for i, line := range lines {
-		stripped, _ := StripLinePrefix(line)
-		if strings.HasPrefix(stripped, searchPrefix) {
-			lines[i] = applyDateChanges(line, scheduledAt, dueAt, removeScheduled, removeDue)
-			found = true
-			break
-		}
-	}
-
-	if !found {
+	if lineNum > len(lines) {
 		return fmt.Errorf("task not found in file: %s: %s", t.Keyword, t.Title)
 	}
+	lines[lineNum-1] = applyDateChanges(lines[lineNum-1], scheduledAt, dueAt, removeScheduled, removeDue)
 
 	if err := os.WriteFile(t.FilePath, []byte(strings.Join(lines, "\n")), 0644); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)

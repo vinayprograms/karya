@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -1664,11 +1663,10 @@ func openEditorCmd(cfg *configpkg.Config, t *task.Task, searchTerm string) tea.C
 	lineNum := t.LineNum
 	if lineNum == 0 {
 		var err error
-		lineNum, err = findTaskLine(filePath, t)
+		lineNum, err = task.Locate(filePath, t)
 		if err != nil {
-			return func() tea.Msg {
-				return editorFinishedMsg{err: err}
-			}
+			// Fall back to the top of the file so the editor still opens.
+			lineNum = 1
 		}
 	}
 
@@ -1676,37 +1674,6 @@ func openEditorCmd(cfg *configpkg.Config, t *task.Task, searchTerm string) tea.C
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		return editorFinishedMsg{err: err}
 	})
-}
-
-func findTaskLine(filePath string, t *task.Task) (int, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return 0, err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	lineNum := 0
-
-	// Try matching by ID first (most reliable for JIRA tasks)
-	idPrefix := ""
-	if t.ID != "" {
-		idPrefix = fmt.Sprintf("[%s]", t.ID)
-	}
-	titleSearch := fmt.Sprintf("%s: %s", t.Keyword, t.Title)
-
-	for scanner.Scan() {
-		lineNum++
-		stripped, _ := task.StripLinePrefix(scanner.Text())
-		if idPrefix != "" && strings.Contains(stripped, idPrefix) {
-			return lineNum, nil
-		}
-		if strings.HasPrefix(stripped, titleSearch) {
-			return lineNum, nil
-		}
-	}
-
-	return 1, scanner.Err()
 }
 
 func calculateProjectColWidth(tasks []*task.Task) int {

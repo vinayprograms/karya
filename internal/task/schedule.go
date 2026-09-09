@@ -290,7 +290,6 @@ func (s *Schedule) ExpandOccurrences(rangeStart, rangeEnd time.Time) []time.Time
 	return occurrences
 }
 
-
 // CompleteRecurringTask handles advancing a recurring task's date on completion.
 // Returns advanced=true if the task was recurring and the date was advanced.
 // If not recurring, returns false and the caller should proceed with normal completion.
@@ -365,6 +364,11 @@ func advanceDateInFile(t *Task, oldToken, newToken string, isScheduled bool) err
 		return fmt.Errorf("task has no file path")
 	}
 
+	lineNum, err := Locate(t.FilePath, t)
+	if err != nil {
+		return err
+	}
+
 	content, err := os.ReadFile(t.FilePath)
 	if err != nil {
 		return fmt.Errorf("failed to read file: %w", err)
@@ -372,34 +376,21 @@ func advanceDateInFile(t *Task, oldToken, newToken string, isScheduled bool) err
 
 	lines := strings.Split(string(content), "\n")
 
-	// Build search prefix (same logic as UpdateTaskStatus)
-	var searchPrefix string
-	if t.ID != "" {
-		searchPrefix = fmt.Sprintf("%s: [%s] %s", t.Keyword, t.ID, t.Title)
-	} else {
-		searchPrefix = fmt.Sprintf("%s: %s", t.Keyword, t.Title)
-	}
-
 	found := false
-	for i, line := range lines {
-		stripped, _ := StripLinePrefix(line)
-		if strings.HasPrefix(stripped, searchPrefix) {
-			// Found the line — replace the date token
-			if isScheduled {
-				if strings.Contains(line, "@s:"+oldToken) {
-					lines[i] = strings.Replace(line, "@s:"+oldToken, "@s:"+newToken, 1)
-					found = true
-				} else if strings.Contains(line, "@"+oldToken) {
-					lines[i] = strings.Replace(line, "@"+oldToken, "@"+newToken, 1)
-					found = true
-				}
-			} else {
-				if strings.Contains(line, "@d:"+oldToken) {
-					lines[i] = strings.Replace(line, "@d:"+oldToken, "@d:"+newToken, 1)
-					found = true
-				}
+	if lineNum <= len(lines) {
+		line := lines[lineNum-1]
+		// Replace the date token on the located line.
+		if isScheduled {
+			if strings.Contains(line, "@s:"+oldToken) {
+				lines[lineNum-1] = strings.Replace(line, "@s:"+oldToken, "@s:"+newToken, 1)
+				found = true
+			} else if strings.Contains(line, "@"+oldToken) {
+				lines[lineNum-1] = strings.Replace(line, "@"+oldToken, "@"+newToken, 1)
+				found = true
 			}
-			break
+		} else if strings.Contains(line, "@d:"+oldToken) {
+			lines[lineNum-1] = strings.Replace(line, "@d:"+oldToken, "@d:"+newToken, 1)
+			found = true
 		}
 	}
 
