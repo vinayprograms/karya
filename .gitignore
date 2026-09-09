@@ -8,3 +8,11 @@ tags
 notes/
 .claude/
 decisions.md
+
+# stray build binaries
+/goal
+/note
+/todo
+/zet
+/agenda
+/inbox
