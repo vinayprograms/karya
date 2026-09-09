@@ -19,6 +19,7 @@ import (
 	"github.com/vinayprograms/karya/internal/task"
 	"github.com/vinayprograms/karya/internal/watch"
 	"github.com/vinayprograms/karya/internal/zet"
+	"github.com/vinayprograms/karya/internal/zetui"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
@@ -557,68 +558,20 @@ func findMatchingNotes(notesPath, searchTerm string) []matchedNote {
 	return matches
 }
 
-type zettelItem struct {
-	zettel        Zettel
-	verbose       bool
-	searchResults []SearchResult
-}
+type zettelItem = zetui.Item
 
-func (i zettelItem) FilterValue() string {
-	return i.zettel.ID + " " + i.zettel.Title
-}
-
-func (i zettelItem) renderWithSelection(isSelected bool) string {
-	var parts []string
-
-	if len(i.searchResults) > 0 {
-		matchCount := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("11")).
-			Bold(true).
-			Render(fmt.Sprintf("[%d] ", len(i.searchResults)))
-		parts = append(parts, matchCount)
+func newZettelItem(z Zettel, verbose bool, results []SearchResult) zettelItem {
+	return zetui.Item{
+		Zettel:        z,
+		Verbose:       verbose,
+		SearchResults: results,
+		Styles: zetui.Styles{
+			ID:         colors.zettelIDStyle,
+			Title:      colors.normalStyle,
+			Selector:   colors.selectorStyle,
+			MatchCount: lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true),
+		},
 	}
-
-	if i.verbose {
-		parts = append(parts, colors.zettelIDStyle.Render(fmt.Sprintf("%-14s", i.zettel.ID)))
-	}
-
-	if isSelected {
-		indicator := colors.selectorStyle.
-			Render("█ ")
-		parts = append(parts, indicator+i.zettel.Title)
-	} else {
-		parts = append(parts, "  "+i.zettel.Title)
-	}
-
-	return strings.Join(parts, " ")
-}
-
-func (i zettelItem) Title() string {
-	var parts []string
-
-	if i.verbose {
-		parts = append(parts, colors.zettelIDStyle.Render(fmt.Sprintf("%-14s", i.zettel.ID)))
-	}
-
-	parts = append(parts, i.zettel.Title)
-	return strings.Join(parts, " ")
-}
-
-func (i zettelItem) Description() string { return "" }
-
-type zettelDelegate struct {
-	list.DefaultDelegate
-}
-
-func (d zettelDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
-	zettelItem, ok := item.(zettelItem)
-	if !ok {
-		return
-	}
-
-	isSelected := index == m.Index()
-	content := zettelItem.renderWithSelection(isSelected)
-	fmt.Fprint(w, content)
 }
 
 type zettelModel struct {
@@ -692,7 +645,7 @@ func (m zettelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.zettels = zettels
 						items := make([]list.Item, len(m.zettels))
 						for i, z := range m.zettels {
-							items[i] = zettelItem{zettel: z, verbose: m.verbose}
+							items[i] = newZettelItem(z, m.verbose, nil)
 						}
 						m.allItems = items
 						m.list.SetItems(items)
@@ -804,7 +757,7 @@ func (m zettelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() == "d" {
 			if i, ok := m.list.SelectedItem().(zettelItem); ok {
 				m.showDeleteConfirm = true
-				m.deleteZettel = &i.zettel
+				m.deleteZettel = &i.Zettel
 				m.deleteConfirmSelection = 0
 				return m, nil
 			}
@@ -816,7 +769,7 @@ func (m zettelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.filterMode == "fulltext" && m.customFilter != "" {
 					searchTerm = m.customFilter
 				}
-				return m, openEditorCmd(m.editor, i.zettel.Path, searchTerm)
+				return m, openEditorCmd(m.editor, i.Zettel.Path, searchTerm)
 			}
 		}
 	case fileChangedMsg:
@@ -825,7 +778,7 @@ func (m zettelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.zettels = zettels
 			items := make([]list.Item, len(m.zettels))
 			for i, z := range m.zettels {
-				items[i] = zettelItem{zettel: z, verbose: m.verbose}
+				items[i] = newZettelItem(z, m.verbose, nil)
 			}
 			m.allItems = items
 			if m.customFilter != "" {
@@ -846,7 +799,7 @@ func (m zettelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.zettels = zettels
 			items := make([]list.Item, len(m.zettels))
 			for i, z := range m.zettels {
-				items[i] = zettelItem{zettel: z, verbose: m.verbose}
+				items[i] = newZettelItem(z, m.verbose, nil)
 			}
 			m.allItems = items
 			if m.customFilter != "" {
@@ -1022,19 +975,15 @@ func (m *zettelModel) applyFilter() {
 		for _, item := range m.allItems {
 			if zetItem, ok := item.(zettelItem); ok {
 				if m.filterMode == "title" {
-					if strings.Contains(strings.ToLower(zetItem.zettel.ID), filterLower) ||
-						strings.Contains(strings.ToLower(zetItem.zettel.Title), filterLower) {
+					if strings.Contains(strings.ToLower(zetItem.Zettel.ID), filterLower) ||
+						strings.Contains(strings.ToLower(zetItem.Zettel.Title), filterLower) {
 						filteredItems = append(filteredItems, item)
 					}
 				} else if m.filterMode == "fulltext" {
-					results := m.searchInFile(zetItem.zettel.Path, filterLower)
+					results := m.searchInFile(zetItem.Zettel.Path, filterLower)
 					if len(results) > 0 {
-						m.searchResults[zetItem.zettel.ID] = results
-						newItem := zettelItem{
-							zettel:        zetItem.zettel,
-							verbose:       zetItem.verbose,
-							searchResults: results,
-						}
+						m.searchResults[zetItem.Zettel.ID] = results
+						newItem := newZettelItem(zetItem.Zettel, zetItem.Verbose, results)
 						filteredItems = append(filteredItems, newItem)
 					}
 				}
@@ -1065,7 +1014,7 @@ func (m *zettelModel) sortZettels() {
 
 	items := make([]list.Item, len(m.zettels))
 	for i, z := range m.zettels {
-		items[i] = zettelItem{zettel: z, verbose: m.verbose}
+		items[i] = newZettelItem(z, m.verbose, nil)
 	}
 	m.allItems = items
 
@@ -1527,10 +1476,10 @@ func showZettelTUI(zetDir, projectName, editor string, verbose bool) bool {
 
 	items := make([]list.Item, len(zettels))
 	for i, z := range zettels {
-		items[i] = zettelItem{zettel: z, verbose: verbose}
+		items[i] = newZettelItem(z, verbose, nil)
 	}
 
-	delegate := zettelDelegate{DefaultDelegate: list.NewDefaultDelegate()}
+	delegate := zetui.Delegate{DefaultDelegate: list.NewDefaultDelegate()}
 	delegate.ShowDescription = false
 	delegate.SetHeight(1)
 	delegate.SetSpacing(0)
