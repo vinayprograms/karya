@@ -42,6 +42,7 @@ func NewStatusPicker(t *Task, c *config.Config) *StatusPicker {
 		{"InProgress", c.Colors.InProgressColor, c.Todo.InProgress},
 		{"Completed", c.Colors.CompletedColor, c.Todo.Completed},
 		{"Someday", c.Colors.SomedayColor, c.Todo.Someday},
+		{"Containers", c.Colors.ContainerColor, c.Todo.Containers},
 	}
 
 	for _, cat := range cats {

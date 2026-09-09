@@ -69,12 +69,16 @@ func Print(cfg *config.Config) error {
 	for _, kw := range cfg.Todo.Someday {
 		categoryMap[kw] = "someday"
 	}
+	for _, kw := range cfg.Todo.Containers {
+		categoryMap[kw] = "container"
+	}
 
 	colorForCategory := map[string]string{
 		"active":     normalizeHex(c.ActiveColor),
 		"inprogress": normalizeHex(c.InProgressColor),
 		"completed":  normalizeHex(c.CompletedColor),
 		"someday":    normalizeHex(c.SomedayColor),
+		"container":  normalizeHex(c.ContainerColor),
 	}
 
 	for kw, cat := range categoryMap {

@@ -175,7 +175,23 @@ func appendNewTask(cfg *config.Config, issue *jira.Issue, allIssues map[string]*
 	inboxPath := cfg.GetInboxFilePath()
 
 	isDone := issue.Fields.Status.StatusCategory.Key == "done"
-	keyword := cfg.JiraStatusToKeyword(issue.Fields.Status.Name, isDone)
+	var keyword string
+	if !isDone && !cfg.JiraHierarchyAllowed(issue.Fields.IssueType.HierarchyLevel) {
+		// Use JIRA type name as keyword if it matches a configured container keyword
+		typeName := strings.ToUpper(issue.Fields.IssueType.Name)
+		keyword = "CONTAINER" // fallback
+		if len(cfg.Todo.Containers) > 0 {
+			keyword = cfg.Todo.Containers[0]
+			for _, ck := range cfg.Todo.Containers {
+				if ck == typeName {
+					keyword = ck
+					break
+				}
+			}
+		}
+	} else {
+		keyword = cfg.JiraStatusToKeyword(issue.Fields.Status.Name, isDone)
+	}
 
 	line := renderTaskLine(keyword, issue)
 	content := renderTaskBlock(line, issue, allIssues, siteURL)

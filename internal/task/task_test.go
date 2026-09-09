@@ -25,6 +25,9 @@ func createTestConfig() *config.Config {
 			Someday: []string{
 				"SOMEDAY", "MAYBE", "LATER", "WISHLIST",
 			},
+			Containers: []string{
+				"CONTAINER", "EPIC",
+			},
 			Routines: []string{
 				"REMINDER", "MEETING",
 			},
@@ -393,8 +396,9 @@ func TestTaskPriority(t *testing.T) {
 	activeTask := &Task{Keyword: "TODO"}
 	inProgressTask := &Task{Keyword: "DOING"}
 	somedayTask := &Task{Keyword: "SOMEDAY"}
+	containerTask := &Task{Keyword: "CONTAINER"}
 	completedTask := &Task{Keyword: "DONE"}
-	
+
 	tests := []struct {
 		name         string
 		task         *Task
@@ -403,7 +407,8 @@ func TestTaskPriority(t *testing.T) {
 		{"in-progress task has highest priority", inProgressTask, 1},
 		{"active task has second priority", activeTask, 2},
 		{"someday task has third priority", somedayTask, 3},
-		{"completed task has lowest priority", completedTask, 4},
+		{"container task has fourth priority", containerTask, 4},
+		{"completed task has lowest priority", completedTask, 5},
 	}
 	
 	for _, tt := range tests {
@@ -615,6 +620,9 @@ func TestGetAllKeywords(t *testing.T) {
 	if len(keywords["Someday"]) != 4 {
 		t.Errorf("Expected 4 someday keywords, got %d", len(keywords["Someday"]))
 	}
+	if len(keywords["Containers"]) != 2 {
+		t.Errorf("Expected 2 container keywords, got %d", len(keywords["Containers"]))
+	}
 }
 
 func TestGetAllKeywordsFlat(t *testing.T) {
@@ -623,7 +631,7 @@ func TestGetAllKeywordsFlat(t *testing.T) {
 	entries := GetAllKeywordsFlat(cfg)
 
 	// Should have all keywords
-	expectedTotal := 6 + 5 + 6 + 4 // Active + InProgress + Completed + Someday
+	expectedTotal := 6 + 5 + 6 + 4 + 2 // Active + InProgress + Completed + Someday + Containers
 	if len(entries) != expectedTotal {
 		t.Errorf("Expected %d keyword entries, got %d", expectedTotal, len(entries))
 	}

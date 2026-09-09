@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -92,6 +93,14 @@ func (t *Task) IsSomeday(c *config.Config) bool {
 	return false
 }
 
+// IsContainer returns true if the task is a container (e.g. epic, initiative).
+func (t *Task) IsContainer(c *config.Config) bool {
+	if c == nil {
+		return false
+	}
+	return slices.Contains(c.Todo.Containers, t.Keyword)
+}
+
 // hasRecurrence checks whether a date string contains a recurrence modifier.
 func hasRecurrence(dateStr string) bool {
 	if dateStr == "" {
@@ -141,9 +150,23 @@ func PartitionRoutines(tasks []*Task, c *config.Config) (work []*Task, routines 
 	return work, routines
 }
 
+// Partition splits tasks into work, routines, and containers in a single pass.
+func Partition(tasks []*Task, c *config.Config) (work, routines, containers []*Task) {
+	for _, t := range tasks {
+		if t.IsRoutine(c) {
+			routines = append(routines, t)
+		} else if t.IsContainer(c) {
+			containers = append(containers, t)
+		} else {
+			work = append(work, t)
+		}
+	}
+	return
+}
+
 // Priority returns the sorting priority of the task
 // Lower numbers indicate higher priority
-// 1 = In Progress, 2 = Active, 3 = Someday, 4 = Completed
+// 1 = In Progress, 2 = Active, 3 = Someday, 4 = Container, 5 = Completed
 func (t *Task) Priority(c *config.Config) int {
 	if t.IsInProgress(c) {
 		return 1
@@ -154,11 +177,14 @@ func (t *Task) Priority(c *config.Config) int {
 	if t.IsSomeday(c) {
 		return 3
 	}
-	if t.IsCompleted(c) {
+	if t.IsContainer(c) {
 		return 4
 	}
+	if t.IsCompleted(c) {
+		return 5
+	}
 	// Unknown status gets lowest priority
-	return 5
+	return 6
 }
 
 // FindFiles finds README.md files in project directories (structured mode)
@@ -463,6 +489,11 @@ func isValidKeyword(c *config.Config, keyword string) bool {
 		}
 	}
 	for _, kw := range c.Todo.Someday {
+		if keyword == kw {
+			return true
+		}
+	}
+	for _, kw := range c.Todo.Containers {
 		if keyword == kw {
 			return true
 		}
@@ -1100,6 +1131,7 @@ func GetAllKeywords(c *config.Config) map[string][]string {
 		"InProgress": c.Todo.InProgress,
 		"Completed":  c.Todo.Completed,
 		"Someday":    c.Todo.Someday,
+		"Containers": c.Todo.Containers,
 	}
 }
 
@@ -1123,6 +1155,9 @@ func GetAllKeywordsFlat(c *config.Config) []KeywordEntry {
 	}
 	for _, kw := range c.Todo.Someday {
 		entries = append(entries, KeywordEntry{Keyword: kw, Category: "Someday"})
+	}
+	for _, kw := range c.Todo.Containers {
+		entries = append(entries, KeywordEntry{Keyword: kw, Category: "Containers"})
 	}
 
 	return entries
@@ -1283,6 +1318,37 @@ func GroupWithChildren(tasks []*Task) []*Task {
 		if t.Parent == nil {
 			result = append(result, t)
 			appendDescendants(&result, t)
+		}
+	}
+	return result
+}
+
+// FilterCompletedChildren removes completed child tasks from the list unless
+// the parent has a mix of completed and non-completed children. A parent with
+// ALL children completed has its children stripped (nothing actionable to show).
+// A parent with mixed states keeps all children visible (the mixed state is
+// intentional and the user needs to see it).
+func FilterCompletedChildren(tasks []*Task, c *config.Config) []*Task {
+	result := make([]*Task, 0, len(tasks))
+	for _, t := range tasks {
+		if t.Parent == nil {
+			result = append(result, t)
+			// Check if this parent has any non-completed children in the list
+			hasActive := false
+			for _, child := range t.Children {
+				if !child.IsCompleted(c) {
+					hasActive = true
+					break
+				}
+			}
+			// Mixed state: keep all children. All completed: skip children.
+			if hasActive {
+				for _, child := range t.Children {
+					result = append(result, child)
+				}
+			}
+		} else {
+			// Standalone task (parent not in this list) — already filtered by ListTasks
 		}
 	}
 	return result

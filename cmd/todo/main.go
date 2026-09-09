@@ -25,7 +25,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -36,6 +35,7 @@ type ColorScheme struct {
 	inProgressColor      lipgloss.Style
 	completedColor       lipgloss.Style
 	somedayColor         lipgloss.Style
+	containerColor       lipgloss.Style
 	taskColor            lipgloss.Style
 	completedTaskColor   lipgloss.Style
 	specialTagColor      lipgloss.Style
@@ -60,6 +60,7 @@ func InitializeColors(cfg *configpkg.Config) {
 		inProgressColor:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.InProgressColor)),
 		completedColor:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CompletedColor)),
 		somedayColor:       lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.SomedayColor)),
+		containerColor:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ContainerColor)),
 		taskColor:          lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TaskColor)),
 		completedTaskColor: lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CompletedTaskColor)),
 		tagColor:           lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TagColor)).Background(lipgloss.Color(cfg.Colors.TagBgColor)),
@@ -139,6 +140,9 @@ func (i taskItem) renderWithSelection(isSelected bool) string {
 		titleStyle = colors.taskColor
 	} else if i.task.IsSomeday(i.config) {
 		parts = append(parts, colors.somedayColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
+		titleStyle = colors.taskColor
+	} else if i.task.IsContainer(i.config) {
+		parts = append(parts, colors.containerColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
 		titleStyle = colors.taskColor
 	} else {
 		parts = append(parts, colors.completedColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
@@ -265,6 +269,9 @@ func (i taskItem) Title() string {
 	} else if i.task.IsSomeday(i.config) {
 		parts = append(parts, colors.somedayColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
 		titleStyle = colors.taskColor
+	} else if i.task.IsContainer(i.config) {
+		parts = append(parts, colors.containerColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
+		titleStyle = colors.taskColor
 	} else {
 		parts = append(parts, colors.completedColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
 		titleStyle = colors.completedTaskColor
@@ -384,6 +391,14 @@ func (i noResultsItem) Title() string { return "No results found" }
 
 func (i noResultsItem) Description() string { return "" }
 
+type viewMode int
+
+const (
+	viewWork viewMode = iota
+	viewRoutines
+	viewContainers
+)
+
 type model struct {
 	list            list.Model
 	tasks           []*task.Task
@@ -400,7 +415,7 @@ type model struct {
 	filtering       bool
 	allItems        []list.Item
 	structuredMode  bool
-	routinesView    bool // true = showing routines, false = showing work tasks
+	viewMode        viewMode
 	loading         bool
 	searchTerm      string // Track search term for editor highlighting
 
@@ -803,7 +818,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if !m.structuredMode {
 					m.structuredMode = true
 					m.config.Todo.Structured = true
-					m.routinesView = false
+					m.viewMode = viewWork
 					return m, reloadTasksCmd()
 				}
 				return m, nil
@@ -814,21 +829,47 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.structuredMode {
 					m.structuredMode = false
 					m.config.Todo.Structured = false
-					m.routinesView = false
+					m.viewMode = viewWork
 					return m, reloadTasksCmd()
 				}
 				return m, nil
 			}
 
-			// Toggle routines view
-			if msg.String() == "r" {
-				m.routinesView = !m.routinesView
+			// View switching
+			switch msg.String() {
+			case "tab":
+				switch m.viewMode {
+				case viewWork:
+					m.viewMode = viewRoutines
+				case viewRoutines:
+					m.viewMode = viewContainers
+				case viewContainers:
+					m.viewMode = viewWork
+				}
 				m.customFilter = ""
 				return m, reloadTasksCmd()
+			case "1":
+				if m.viewMode != viewWork {
+					m.viewMode = viewWork
+					m.customFilter = ""
+					return m, reloadTasksCmd()
+				}
+			case "2":
+				if m.viewMode != viewRoutines {
+					m.viewMode = viewRoutines
+					m.customFilter = ""
+					return m, reloadTasksCmd()
+				}
+			case "3":
+				if m.viewMode != viewContainers {
+					m.viewMode = viewContainers
+					m.customFilter = ""
+					return m, reloadTasksCmd()
+				}
 			}
 
 			switch msg.String() {
-			case "enter", "tab":
+			case "enter":
 				// Only open editor if not actively filtering
 				if !m.filtering {
 					if i, ok := m.list.SelectedItem().(taskItem); ok {
@@ -919,13 +960,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					return false
 				})
-				m.tasks = task.GroupWithChildren(m.tasks)
+				m.tasks = groupAndFilter(m.tasks, m.config)
 
 				// Partition routines from work tasks
-				work, routines := task.PartitionRoutines(m.tasks, m.config)
-				if m.routinesView {
+				work, routines, containers := task.Partition(m.tasks, m.config)
+				switch m.viewMode {
+				case viewRoutines:
 					m.tasks = routines
-				} else {
+				case viewContainers:
+					m.tasks = containers
+				default:
 					m.tasks = work
 				}
 
@@ -945,13 +989,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				// Non-verbose mode: preserve order, update tasks in place, append new tasks at end
 				newTasks := appendNewTasksOnly(m.tasks, tasks, m.config)
-				m.tasks = task.GroupWithChildren(newTasks)
+				m.tasks = groupAndFilter(newTasks, m.config)
 
 				// Partition routines from work tasks
-				work, routines := task.PartitionRoutines(m.tasks, m.config)
-				if m.routinesView {
+				work, routines, containers := task.Partition(m.tasks, m.config)
+				switch m.viewMode {
+				case viewRoutines:
 					m.tasks = routines
-				} else {
+				case viewContainers:
+					m.tasks = containers
+				default:
 					m.tasks = work
 				}
 
@@ -981,7 +1028,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case jiraSyncDoneMsg:
 		for _, r := range msg.results {
 			if r.err != nil {
-				m.list.Title = fmt.Sprintf("⚠️ JIRA sync failed: [%s] %v", r.conn, r.err)
 				m.jiraSyncLog = append(m.jiraSyncLog, fmt.Sprintf("%s  [%s] %v", time.Now().Format("15:04:05"), r.conn, r.err))
 			} else {
 				m.jiraSyncLog = append(m.jiraSyncLog, fmt.Sprintf("%s  [%s] ok (%d issues)", time.Now().Format("15:04:05"), r.conn, r.count))
@@ -1014,13 +1060,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return false
 			})
-			m.tasks = task.GroupWithChildren(m.tasks)
+			m.tasks = groupAndFilter(m.tasks, m.config)
 
 			// Partition routines from work tasks
-			work, routines := task.PartitionRoutines(m.tasks, m.config)
-			if m.routinesView {
+			work, routines, containers := task.Partition(m.tasks, m.config)
+			switch m.viewMode {
+			case viewRoutines:
 				m.tasks = routines
-			} else {
+			case viewContainers:
+				m.tasks = containers
+			default:
 				m.tasks = work
 			}
 
@@ -1037,7 +1086,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.list.ResetSelected()
 
 			// Update title bar text and color for current view
-			m.updateViewTitle()
 		}
 		return m, nil
 	case editorFinishedMsg:
@@ -1076,10 +1124,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return false
 			})
-			m.tasks = task.GroupWithChildren(m.tasks)
+			m.tasks = groupAndFilter(m.tasks, m.config)
 		} else {
 			// Non-verbose mode: preserve existing order, append new tasks
-			m.tasks = task.GroupWithChildren(mergeTasksPreservingOrder(m.tasks, tasks, m.config))
+			m.tasks = groupAndFilter(mergeTasksPreservingOrder(m.tasks, tasks, m.config), m.config)
+		}
+
+		// Partition into work/routines/containers for current view
+		work, routines, containers := task.Partition(m.tasks, m.config)
+		switch m.viewMode {
+		case viewRoutines:
+			m.tasks = routines
+		case viewContainers:
+			m.tasks = containers
+		default:
+			m.tasks = work
 		}
 
 		m.projectColWidth = calculateProjectColWidth(m.tasks)
@@ -1131,7 +1190,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.termWidth = msg.Width
 		m.termHeight = msg.Height
 		m.list.SetWidth(msg.Width)
-		m.list.SetHeight(msg.Height - 2)
+		m.list.SetHeight(msg.Height - 4) // reserve: tabbar(1) + blank(1) + help(1) + margin(1)
 		// Rebuild items with new title width
 		newTitleWidth := m.calcMaxTitleWidth()
 		for idx, item := range m.allItems {
@@ -1261,42 +1320,13 @@ func (m model) View() string {
 
 	view := m.list.View()
 
-	// Add custom pagination/count info at the top
-	totalItems := len(m.list.Items())
-	if totalItems > 0 {
-		p := m.list.Paginator
-		totalPages := p.TotalPages
+	// Build header: title + tab bar + optional filter/pagination
+	var header []string
 
-		var paginationText string
-		if totalPages > 1 {
-			currentPage := p.Page
-			itemsPerPage := p.PerPage
-			startIdx := currentPage * itemsPerPage
-			endIdx := startIdx + itemsPerPage
-			if endIdx > totalItems {
-				endIdx = totalItems
-			}
-			paginationText = fmt.Sprintf("Showing %d-%d of %d • Page %d/%d",
-				startIdx+1, endIdx, totalItems, currentPage+1, totalPages)
-		} else if m.customFilter != "" {
-			paginationText = fmt.Sprintf("%d matches", totalItems)
-		}
+	// Tab bar
+	header = append(header, m.renderTabBar())
 
-		if paginationText != "" {
-			paginationInfo := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("240")).
-				Render(paginationText)
-
-			lines := strings.Split(view, "\n")
-			if len(lines) >= 1 {
-				result := []string{lines[0], paginationInfo}
-				result = append(result, lines[1:]...)
-				view = strings.Join(result, "\n")
-			}
-		}
-	}
-
-	// Show filter status inline with title bar (title gets 22 chars, filter gets the rest)
+	// Filter status
 	if m.filtering || m.customFilter != "" {
 		var filterText string
 		if m.filtering {
@@ -1322,12 +1352,7 @@ func (m model) View() string {
 			}
 		}
 
-		// Reserve titleWidth columns for the title; the filter gets the rest of
-		// the line. Clip filterText (plain string, not yet ANSI-styled) to fit
-		// so it never overflows past the terminal edge.
-		const titleWidth = 24
-		const filterPadding = 2 // Padding(0, 1) adds 1 col on each side
-		availWidth := m.termWidth - titleWidth - filterPadding
+		availWidth := m.termWidth - 2
 		if availWidth < 0 {
 			availWidth = 0
 		}
@@ -1342,22 +1367,40 @@ func (m model) View() string {
 			Background(lipgloss.Color("0")).
 			Padding(0, 1).
 			Render(filterText)
+		header = append(header, filterInfo)
+	}
 
-		lines := strings.Split(view, "\n")
-		if len(lines) >= 1 {
-			// lipgloss.JoinVertical already padded the title line with plain
-			// spaces out to the width of the widest section (the task list),
-			// so it's often already full terminal width. Clip it down to
-			// titleWidth columns first (ANSI-safe, won't corrupt escape
-			// sequences), then pad if it came in short, then append filter.
-			titleLine := ansi.Truncate(lines[0], titleWidth, "")
-			if pad := titleWidth - lipgloss.Width(titleLine); pad > 0 {
-				titleLine += strings.Repeat(" ", pad)
+	// Pagination
+	totalItems := len(m.list.Items())
+	if totalItems > 0 {
+		p := m.list.Paginator
+		totalPages := p.TotalPages
+
+		var paginationText string
+		if totalPages > 1 {
+			currentPage := p.Page
+			itemsPerPage := p.PerPage
+			startIdx := currentPage * itemsPerPage
+			endIdx := startIdx + itemsPerPage
+			if endIdx > totalItems {
+				endIdx = totalItems
 			}
-			lines[0] = titleLine + filterInfo
-			view = strings.Join(lines, "\n")
+			paginationText = fmt.Sprintf("Showing %d-%d of %d • Page %d/%d",
+				startIdx+1, endIdx, totalItems, currentPage+1, totalPages)
+		} else if m.customFilter != "" {
+			paginationText = fmt.Sprintf("%d matches", totalItems)
+		}
+
+		if paginationText != "" {
+			paginationInfo := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("240")).
+				Render(paginationText)
+			header = append(header, paginationInfo)
 		}
 	}
+
+	header = append(header, "") // blank line before task list
+	view = strings.Join(header, "\n") + "\n" + view
 
 	// Show status message by replacing the help bar line
 	if m.statusMessage != "" {
@@ -1500,6 +1543,8 @@ func (m model) renderDetailLine(line string) string {
 				kwStyle = colors.activeColor
 			} else if t.IsSomeday(m.config) {
 				kwStyle = colors.somedayColor
+			} else if t.IsContainer(m.config) {
+				kwStyle = colors.containerColor
 			} else {
 				kwStyle = colors.completedColor
 				textStyle = colors.completedTaskColor
@@ -1674,19 +1719,61 @@ func reloadTasksCmd() tea.Cmd {
 	}
 }
 
-// updateViewTitle sets the list title text and style based on the current view mode.
-func (m *model) updateViewTitle() {
-	if m.routinesView {
-		m.list.Title = "▸ Routines"
-		m.list.Styles.Title = m.list.Styles.Title.Foreground(lipgloss.Color("13"))
-	} else {
-		if m.structuredMode {
-			m.list.Title = "Tasks (Zettelkasten)"
-		} else {
-			m.list.Title = "Tasks (All)"
-		}
-		m.list.Styles.Title = m.list.Styles.Title.UnsetForeground()
+// groupAndFilter groups tasks with children, then strips completed children
+// (unless a parent has mixed completed/non-completed children).
+func groupAndFilter(tasks []*task.Task, c *configpkg.Config) []*task.Task {
+	grouped := task.GroupWithChildren(tasks)
+	if !c.Todo.ShowCompleted {
+		grouped = task.FilterCompletedChildren(grouped, c)
 	}
+	return grouped
+}
+
+// renderTabBar renders a styled tab bar showing all views with the active one highlighted.
+func (m *model) renderTabBar() string {
+	type tabDef struct {
+		label string
+		mode  viewMode
+		color string
+	}
+
+	workLabel := "Tasks"
+	if m.structuredMode {
+		workLabel += " (Zettelkasten)"
+	} else {
+		workLabel += " (All)"
+	}
+
+	tabs := []tabDef{
+		{workLabel, viewWork, ""},
+		{"Routines", viewRoutines, "13"},
+		{"Containers", viewContainers, m.config.Colors.ContainerColor},
+	}
+
+	activeStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("0")).
+		Background(lipgloss.Color(m.config.Colors.ProjectColor))
+	dimStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240"))
+
+	var parts []string
+	for i, tab := range tabs {
+		label := fmt.Sprintf(" %d.%s ", i+1, tab.label)
+		if tab.mode == m.viewMode {
+			if tab.color != "" {
+				parts = append(parts, lipgloss.NewStyle().
+					Foreground(lipgloss.Color("0")).
+					Background(lipgloss.Color(tab.color)).
+					Render(label))
+			} else {
+				parts = append(parts, activeStyle.Render(label))
+			}
+		} else {
+			parts = append(parts, dimStyle.Render(label))
+		}
+	}
+
+	return strings.Join(parts, "  ")
 }
 
 func loadTasksCmd(cfg *configpkg.Config, project string) tea.Cmd {
@@ -2523,10 +2610,10 @@ func showInteractiveTUI(config *configpkg.Config, project string) {
 		}
 		return false
 	})
-	tasks = task.GroupWithChildren(tasks)
+	tasks = groupAndFilter(tasks, config)
 
 	// Partition routines — initial load always shows work view
-	work, _ := task.PartitionRoutines(tasks, config)
+	work, _, _ := task.Partition(tasks, config)
 	tasks = work
 
 	projectColWidth := calculateProjectColWidth(tasks)
@@ -2543,11 +2630,7 @@ func showInteractiveTUI(config *configpkg.Config, project string) {
 	delegate.SetSpacing(0)
 
 	l := list.New(items, delegate, 0, 0)
-	if config.Todo.Structured {
-		l.Title = "Tasks (Zettelkasten)"
-	} else {
-		l.Title = "Tasks (All)"
-	}
+	l.SetShowTitle(false)
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false) // Disable built-in filtering
 	l.KeyMap.Quit.SetKeys("ctrl+c")
@@ -2559,8 +2642,8 @@ func showInteractiveTUI(config *configpkg.Config, project string) {
 	l.AdditionalShortHelpKeys = func() []key.Binding {
 		return []key.Binding{
 			key.NewBinding(
-				key.WithKeys("enter/tab"),
-				key.WithHelp("enter/tab", "edit"),
+				key.WithKeys("enter"),
+				key.WithHelp("enter", "edit"),
 			),
 			key.NewBinding(
 				key.WithKeys("t"),
@@ -2603,8 +2686,8 @@ func showInteractiveTUI(config *configpkg.Config, project string) {
 				key.WithHelp("o", "clock out"),
 			),
 			key.NewBinding(
-				key.WithKeys("r"),
-				key.WithHelp("r", "routines"),
+				key.WithKeys("tab"),
+				key.WithHelp("tab/1/2/3", "switch view"),
 			),
 		}
 	}
@@ -2612,8 +2695,8 @@ func showInteractiveTUI(config *configpkg.Config, project string) {
 	l.AdditionalFullHelpKeys = func() []key.Binding {
 		return []key.Binding{
 			key.NewBinding(
-				key.WithKeys("enter", "tab"),
-				key.WithHelp("enter/tab", "edit selected task"),
+				key.WithKeys("enter"),
+				key.WithHelp("enter", "edit selected task"),
 			),
 			key.NewBinding(
 				key.WithKeys("t"),
@@ -2688,8 +2771,8 @@ func showInteractiveTUI(config *configpkg.Config, project string) {
 				key.WithHelp("q", "quit"),
 			),
 			key.NewBinding(
-				key.WithKeys("r"),
-				key.WithHelp("r", "toggle routines view"),
+				key.WithKeys("tab"),
+				key.WithHelp("tab/1/2/3", "switch view (tasks/routines/containers)"),
 			),
 		}
 	}
@@ -2735,7 +2818,7 @@ func printTasksPlain(config *configpkg.Config, tasks []*task.Task) {
 	
 	for _, t := range tasks {
 		var titleStyle lipgloss.Style
-		if t.IsActive(config) || t.IsInProgress(config) || t.IsSomeday(config) {
+		if t.IsActive(config) || t.IsInProgress(config) || t.IsSomeday(config) || t.IsContainer(config) {
 			titleStyle = taskColor
 		} else {
 			titleStyle = completedTaskColor

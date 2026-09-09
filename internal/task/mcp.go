@@ -18,7 +18,8 @@ import (
 type ListTasksArgs struct {
 	Project       string `json:"project,omitempty" jsonschema:"project name to filter tasks (optional, empty for all projects)"`
 	ShowCompleted bool   `json:"show_completed,omitempty" jsonschema:"whether to include completed tasks (default: false)"`
-	ShowRoutines  bool   `json:"show_routines,omitempty" jsonschema:"when true, return only routines (recurring items with routine keywords) instead of work tasks"`
+	ShowRoutines   bool   `json:"show_routines,omitempty" jsonschema:"when true, return only routines (recurring items with routine keywords) instead of work tasks"`
+	ShowContainers bool   `json:"show_containers,omitempty" jsonschema:"when true, return only container tasks (epics, initiatives) instead of work tasks"`
 }
 
 type ListTasksResult struct {
@@ -38,8 +39,8 @@ type TaskInfo struct {
 	Assignee    string   `json:"assignee,omitempty" jsonschema:"task assignee"`
 	Project     string   `json:"project" jsonschema:"project name"`
 	Zettel      string   `json:"zettel,omitempty" jsonschema:"zettel ID (if structured mode)"`
-	Priority    int      `json:"priority" jsonschema:"priority level (1=in_progress, 2=active, 3=someday, 4=completed)"`
-	Status      string   `json:"status" jsonschema:"status category (active, in_progress, completed, someday)"`
+	Priority    int      `json:"priority" jsonschema:"priority level (1=in_progress, 2=active, 3=someday, 4=container, 5=completed)"`
+	Status      string   `json:"status" jsonschema:"status category (active, in_progress, completed, someday, container)"`
 	InCycle    bool   `json:"in_cycle,omitempty" jsonschema:"true if task participates in a circular dependency"`
 	ParentID   string `json:"parent_id,omitempty" jsonschema:"ID of parent task (if this is a sub-task)"`
 	ChildCount int    `json:"child_count,omitempty" jsonschema:"number of direct child tasks"`
@@ -79,7 +80,8 @@ type FilterTasksArgs struct {
 	Filter        string `json:"filter" jsonschema:"filter expression (e.g., '>> alice' for assignee, '#urgent' for tag, '@2025-01-15' for date)"`
 	Project       string `json:"project,omitempty" jsonschema:"optional project name to limit filter"`
 	ShowCompleted bool   `json:"show_completed,omitempty" jsonschema:"whether to include completed tasks (default: false)"`
-	ShowRoutines  bool   `json:"show_routines,omitempty" jsonschema:"when true, filter only routines instead of work tasks"`
+	ShowRoutines   bool   `json:"show_routines,omitempty" jsonschema:"when true, filter only routines instead of work tasks"`
+	ShowContainers bool   `json:"show_containers,omitempty" jsonschema:"when true, filter only container tasks instead of work tasks"`
 }
 
 type FilterTasksResult struct {
@@ -98,7 +100,7 @@ type UpdateTaskStatusArgs struct {
 type UpdateTaskStatusResult struct {
 	Message       string              `json:"message" jsonschema:"status message"`
 	Success       bool                `json:"success" jsonschema:"whether the update succeeded"`
-	ValidKeywords map[string][]string `json:"valid_keywords" jsonschema:"valid keywords grouped by category (Active, InProgress, Completed, Someday)"`
+	ValidKeywords map[string][]string `json:"valid_keywords" jsonschema:"valid keywords grouped by category (Active, InProgress, Completed, Someday, Containers)"`
 }
 
 type GetProjectsArgs struct{}
@@ -116,7 +118,7 @@ type ProjectInfo struct {
 type GetKeywordsArgs struct{}
 
 type GetKeywordsResult struct {
-	Keywords   map[string][]string `json:"keywords" jsonschema:"keywords grouped by category (Active, InProgress, Completed, Someday)"`
+	Keywords   map[string][]string `json:"keywords" jsonschema:"keywords grouped by category (Active, InProgress, Completed, Someday, Containers)"`
 	Categories []string            `json:"categories" jsonschema:"list of category names"`
 }
 
@@ -126,9 +128,10 @@ type CountTasksArgs struct {
 }
 
 type CountTasksResult struct {
-	Count        int            `json:"count" jsonschema:"total number of work tasks (excludes routines)"`
-	RoutineCount int            `json:"routine_count" jsonschema:"number of detected routines (recurring items with routine keywords)"`
-	ByStatus     map[string]int `json:"by_status" jsonschema:"count of tasks by status category"`
+	Count          int            `json:"count" jsonschema:"total number of work tasks (excludes routines and containers)"`
+	RoutineCount   int            `json:"routine_count" jsonschema:"number of detected routines (recurring items with routine keywords)"`
+	ContainerCount int            `json:"container_count" jsonschema:"number of container tasks (epics, initiatives)"`
+	ByStatus       map[string]int `json:"by_status" jsonschema:"count of tasks by status category"`
 }
 
 type GetTaskByIDArgs struct {
@@ -303,7 +306,7 @@ func (s *MCPServer) registerTools() {
 	// List tasks
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "list_tasks",
-		Description: "PREFERRED: View all your tasks across projects, intelligently sorted by priority (in_progress > active > someday > completed). Use this as your primary task dashboard. Filter by project for focused work.",
+		Description: "PREFERRED: View all your tasks across projects, intelligently sorted by priority (in_progress > active > someday > container > completed). Use this as your primary task dashboard. Filter by project for focused work.",
 	}, s.listTasks)
 
 	// Get task
@@ -339,7 +342,7 @@ func (s *MCPServer) registerTools() {
 	// Get keywords
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "get_keywords",
-		Description: "PREFERRED: Discover all valid task status keywords organized by category (Active, InProgress, Completed, Someday). Essential before updating task status to know valid transitions.",
+		Description: "PREFERRED: Discover all valid task status keywords organized by category (Active, InProgress, Completed, Someday, Containers). Essential before updating task status to know valid transitions.",
 	}, s.getKeywords)
 
 	// Count tasks
@@ -411,6 +414,8 @@ func (s *MCPServer) taskToInfo(t *Task) TaskInfo {
 		status = "active"
 	} else if t.IsSomeday(s.config) {
 		status = "someday"
+	} else if t.IsContainer(s.config) {
+		status = "container"
 	} else if t.IsCompleted(s.config) {
 		status = "completed"
 	}
@@ -449,10 +454,12 @@ func (s *MCPServer) listTasks(ctx context.Context, req *mcp.CallToolRequest, arg
 	// Detect circular dependencies
 	DetectCycles(tasks)
 
-	// Partition routines from work tasks
-	work, routines := PartitionRoutines(tasks, s.config)
+	// Partition routines and containers from work tasks
+	work, routines, containers := Partition(tasks, s.config)
 	if args.ShowRoutines {
 		tasks = routines
+	} else if args.ShowContainers {
+		tasks = containers
 	} else {
 		tasks = work
 	}
@@ -534,10 +541,12 @@ func (s *MCPServer) filterTasks(ctx context.Context, req *mcp.CallToolRequest, a
 	// Detect circular dependencies before filtering
 	DetectCycles(tasks)
 
-	// Partition routines from work tasks before applying filter
-	work, routines := PartitionRoutines(tasks, s.config)
+	// Partition routines and containers from work tasks before applying filter
+	work, routines, containers := Partition(tasks, s.config)
 	if args.ShowRoutines {
 		tasks = routines
+	} else if args.ShowContainers {
+		tasks = containers
 	} else {
 		tasks = work
 	}
@@ -694,7 +703,7 @@ func (s *MCPServer) getKeywords(ctx context.Context, req *mcp.CallToolRequest, a
 
 	return nil, GetKeywordsResult{
 		Keywords:   keywords,
-		Categories: []string{"Active", "InProgress", "Completed", "Someday"},
+		Categories: []string{"Active", "InProgress", "Completed", "Someday", "Containers"},
 	}, nil
 }
 
@@ -704,13 +713,14 @@ func (s *MCPServer) countTasks(ctx context.Context, req *mcp.CallToolRequest, ar
 		return nil, CountTasksResult{}, fmt.Errorf("failed to list tasks: %w", err)
 	}
 
-	// Partition routines from work tasks
-	work, routines := PartitionRoutines(tasks, s.config)
+	// Partition into work, routines, and containers
+	work, routines, containers := Partition(tasks, s.config)
 
 	byStatus := map[string]int{
 		"active":      0,
 		"in_progress": 0,
 		"someday":     0,
+		"container":   0,
 		"completed":   0,
 	}
 
@@ -721,15 +731,18 @@ func (s *MCPServer) countTasks(ctx context.Context, req *mcp.CallToolRequest, ar
 			byStatus["active"]++
 		} else if t.IsSomeday(s.config) {
 			byStatus["someday"]++
+		} else if t.IsContainer(s.config) {
+			byStatus["container"]++
 		} else if t.IsCompleted(s.config) {
 			byStatus["completed"]++
 		}
 	}
 
 	return nil, CountTasksResult{
-		Count:        len(work),
-		RoutineCount: len(routines),
-		ByStatus:     byStatus,
+		Count:          len(work),
+		RoutineCount:   len(routines),
+		ContainerCount: len(containers),
+		ByStatus:       byStatus,
 	}, nil
 }
 

@@ -240,8 +240,9 @@ type mcpIssue struct {
 		DueDate   string   `json:"duedate"`
 		Labels    []string `json:"labels"`
 		IssueType struct {
-			Name    string `json:"name"`
-			Subtask bool   `json:"subtask"`
+			Name           string `json:"name"`
+			Subtask        bool   `json:"subtask"`
+			HierarchyLevel int    `json:"hierarchyLevel"`
 		} `json:"issuetype"`
 		Parent *struct {
 			Key string `json:"key"`
@@ -267,7 +268,7 @@ func (mi *mcpIssue) toIssue() Issue {
 			Description: SanitizeContent(mi.Fields.Description),
 			DueDate:     mi.Fields.DueDate,
 			Labels:      mi.Fields.Labels,
-			IssueType:   IssueType{Name: mi.Fields.IssueType.Name, Subtask: mi.Fields.IssueType.Subtask},
+			IssueType:   IssueType{Name: mi.Fields.IssueType.Name, Subtask: mi.Fields.IssueType.Subtask, HierarchyLevel: mi.Fields.IssueType.HierarchyLevel},
 			Status: Status{
 				Name:           mi.Fields.Status.Name,
 				StatusCategory: StatusCategory{Key: mi.Fields.Status.StatusCategory.Key},

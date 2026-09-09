@@ -35,8 +35,9 @@ type User struct {
 }
 
 type IssueType struct {
-	Name    string
-	Subtask bool
+	Name           string
+	Subtask        bool
+	HierarchyLevel int // -1=sub-task, 0=standard, 1=epic, 2+=initiative
 }
 
 type ParentRef struct {

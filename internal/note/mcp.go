@@ -1078,5 +1078,10 @@ func isValidKeyword(c *config.Config, keyword string) bool {
 			return true
 		}
 	}
+	for _, kw := range c.Todo.Containers {
+		if keyword == kw {
+			return true
+		}
+	}
 	return false
 }

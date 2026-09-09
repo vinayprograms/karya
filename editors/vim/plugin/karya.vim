@@ -84,7 +84,7 @@ endfunction
 
 function! s:KaryaSyntax() abort
   " Clear syntax state so we re-apply from scratch
-  silent! syn clear karyaActive karyaInprogress karyaCompleted karyaSomeday
+  silent! syn clear karyaActive karyaInprogress karyaCompleted karyaSomeday karyaContainer
   silent! syn clear karyaCompletedLine karyaAssignee karyaScheduled karyaDue
   silent! syn clear karyaClock karyaLog karyaJira karyaTag karyaSpecialTag
 
@@ -96,7 +96,7 @@ function! s:KaryaSyntax() abort
   " re-invoke `todo colors` — colors don't change while editing.
   let s:karya_data = data
 
-  let keywords_by_cat = {'active': [], 'inprogress': [], 'completed': [], 'someday': []}
+  let keywords_by_cat = {'active': [], 'inprogress': [], 'completed': [], 'someday': [], 'container': []}
   let color_by_cat = {}
 
   for [kw, info] in items(data.keywords)
@@ -111,7 +111,7 @@ function! s:KaryaSyntax() abort
 
   let completed_hi = has_key(color_by_cat, 'completed') ? s:ColorToHighlight(color_by_cat['completed']) : ''
 
-  for category in ['active', 'inprogress', 'completed', 'someday']
+  for category in ['active', 'inprogress', 'completed', 'someday', 'container']
     let kws = keywords_by_cat[category]
     if empty(kws)
       continue
@@ -362,7 +362,7 @@ function! s:KaryaTransition() abort
 
   " Build flat keyword list (all keywords, sorted by category)
   let s:tp_all_keywords = []
-  let categories = ['active', 'inprogress', 'completed', 'someday']
+  let categories = ['active', 'inprogress', 'completed', 'someday', 'container']
   for cat in categories
     let kws = []
     for [kw, info] in items(s:karya_data.keywords)

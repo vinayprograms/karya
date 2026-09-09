@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -59,6 +60,7 @@ type ColorScheme struct {
 	InProgressColor    string `toml:"inprogress"`
 	CompletedColor     string `toml:"completed"`
 	SomedayColor       string `toml:"someday"`
+	ContainerColor     string `toml:"container"`
 	TaskColor          string `toml:"description"`
 	CompletedTaskColor string `toml:"completed-description"`
 	TagColor           string `toml:"tag"`
@@ -95,6 +97,7 @@ type Todo struct {
 	InProgress    []string `toml:"inprogress"`
 	Completed     []string `toml:"completed"`
 	Someday       []string `toml:"someday"`
+	Containers    []string `toml:"containers"`
 	Routines      []string `toml:"routines"`      // Keywords whose items may be routines (if recurring)
 	SpecialTags   []string `toml:"special-tags"`
 }
@@ -124,6 +127,7 @@ type Jira struct {
 	SyncInterval    string            `toml:"sync_interval"`
 	StatusMap       map[string]string `toml:"status_map"`
 	ExcludeProjects []string          `toml:"exclude_projects"`
+	HierarchyLevels []int            `toml:"hierarchy_levels"` // -1=sub-task, 0=standard, 1=epic, 2+=initiative
 }
 
 type Config struct {
@@ -215,6 +219,11 @@ func Load() (*Config, error) {
 			"SOMEDAY", "MAYBE", "LATER", "WISHLIST",
 		}
 	}
+	if len(cfg.Todo.Containers) == 0 {
+		cfg.Todo.Containers = []string{
+			"CONTAINER", "EPIC",
+		}
+	}
 
 	// Schedule defaults
 	if cfg.Schedule.WeekStart == "" {
@@ -241,6 +250,7 @@ func Load() (*Config, error) {
 	cfg.Colors.InProgressColor = resolveColorValue(cfg.Colors.InProgressColor)
 	cfg.Colors.CompletedColor = resolveColorValue(cfg.Colors.CompletedColor)
 	cfg.Colors.SomedayColor = resolveColorValue(cfg.Colors.SomedayColor)
+	cfg.Colors.ContainerColor = resolveColorValue(cfg.Colors.ContainerColor)
 	cfg.Colors.TaskColor = resolveColorValue(cfg.Colors.TaskColor)
 	cfg.Colors.CompletedTaskColor = resolveColorValue(cfg.Colors.CompletedTaskColor)
 	cfg.Colors.TagColor = resolveColorValue(cfg.Colors.TagColor)
@@ -307,6 +317,15 @@ func (c *Config) JiraStatusToKeyword(jiraStatus string, isDoneCategory bool) str
 	return "TODO"
 }
 
+// JiraHierarchyAllowed returns true if the given hierarchy level should be synced.
+// An empty HierarchyLevels config means all levels are allowed (no filtering).
+func (c *Config) JiraHierarchyAllowed(level int) bool {
+	if len(c.Jira.HierarchyLevels) == 0 {
+		return true
+	}
+	return slices.Contains(c.Jira.HierarchyLevels, level)
+}
+
 // DefaultJiraStatusMap returns the default status mapping when none is configured.
 func DefaultJiraStatusMap() map[string]string {
 	return map[string]string{
@@ -361,6 +380,9 @@ func (c *Config) initializeColors() {
 		}
 		if c.Colors.SomedayColor == "" {
 			c.Colors.SomedayColor = string(themeColorCache["white"])
+		}
+		if c.Colors.ContainerColor == "" {
+			c.Colors.ContainerColor = string(themeColorCache["blue"])
 		}
 		if c.Colors.TaskColor == "" {
 			c.Colors.TaskColor = string(themeColorCache["white"])
@@ -427,6 +449,9 @@ func (c *Config) initializeColors() {
 		}
 		if c.Colors.SomedayColor == "" {
 			c.Colors.SomedayColor = "7" // ANSI white - neutral for tasks not yet under consideration
+		}
+		if c.Colors.ContainerColor == "" {
+			c.Colors.ContainerColor = "4" // ANSI blue - structural/organizational
 		}
 		if c.Colors.TaskColor == "" {
 			c.Colors.TaskColor = "" // Empty = terminal default foreground

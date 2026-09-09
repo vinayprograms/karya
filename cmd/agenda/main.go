@@ -54,6 +54,7 @@ type colorScheme struct {
 	inProgress lipgloss.Style
 	completed  lipgloss.Style
 	someday    lipgloss.Style
+	container  lipgloss.Style
 	taskText   lipgloss.Style
 	tag        lipgloss.Style
 	specialTag lipgloss.Style
@@ -76,6 +77,7 @@ func initColors(cfg *config.Config) {
 		inProgress: lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.InProgressColor)),
 		completed:  lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CompletedColor)),
 		someday:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.SomedayColor)),
+		container:  lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ContainerColor)),
 		taskText:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TaskColor)),
 		tag:        lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TagColor)).Background(lipgloss.Color(cfg.Colors.TagBgColor)),
 		specialTag: lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.SpecialTagColor)).Background(lipgloss.Color(cfg.Colors.SpecialTagBgColor)).Bold(true),
@@ -1599,6 +1601,8 @@ func (m model) renderItem(item task.AgendaItem, selected bool) string {
 		kwStyle = colors.active
 	} else if t.IsSomeday(m.config) {
 		kwStyle = colors.someday
+	} else if t.IsContainer(m.config) {
+		kwStyle = colors.container
 	} else {
 		kwStyle = colors.completed
 	}
@@ -2105,6 +2109,8 @@ func (m model) renderClockView() string {
 				kwStyle = colors.active
 			} else if entry.Task.IsSomeday(m.config) {
 				kwStyle = colors.someday
+			} else if entry.Task.IsContainer(m.config) {
+				kwStyle = colors.container
 			} else {
 				kwStyle = colors.completed
 			}
