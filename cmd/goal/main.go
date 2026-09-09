@@ -6,13 +6,13 @@ import (
 	"io"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	colorspkg "github.com/vinayprograms/karya/internal/colors"
 	"github.com/vinayprograms/karya/internal/config"
+	editorpkg "github.com/vinayprograms/karya/internal/editor"
 	"github.com/vinayprograms/karya/internal/goal"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -80,7 +80,7 @@ func (i GoalItem) renderWithSelection(isSelected bool, horizon goal.Horizon) str
 			year := yearMonthSplit[0]
 			month := yearMonthSplit[1]
 			monthName := getMonthName(month)
-			
+
 			parts = append(parts, " "+periodStyle.Render(year)+" ")
 			parts = append(parts, " "+periodStyle.Render(fmt.Sprintf("%-9s", monthName))+" ")
 		}
@@ -93,7 +93,7 @@ func (i GoalItem) renderWithSelection(isSelected bool, horizon goal.Horizon) str
 		if len(periodParts) >= 2 {
 			year := periodParts[0]
 			quarter := periodParts[1]
-			
+
 			parts = append(parts, " "+periodStyle.Render(year)+" ")
 			parts = append(parts, " "+periodStyle.Render(quarter)+" ")
 		}
@@ -107,7 +107,7 @@ func (i GoalItem) renderWithSelection(isSelected bool, horizon goal.Horizon) str
 		// Range: "2025-2027" (9 chars) + 2 padding = 11
 		parts = append(parts, " "+periodStyle.Render(fmt.Sprintf("%-9s", i.goal.Period))+" ")
 	}
-	
+
 	if isSelected {
 		indicator := colors.selectorStyle.Render("█ ")
 		parts = append(parts, indicator+i.goal.Title)
@@ -128,18 +128,18 @@ func (i GoalItem) Description() string {
 
 // Key map for goal TUI
 type KeyMap struct {
-	Enter     key.Binding
-	Quit      key.Binding
-	Help      key.Binding
-	Refresh   key.Binding
-	NewGoal   key.Binding
-	EditGoal  key.Binding
-	Back      key.Binding
-	Tab1      key.Binding
-	Tab2      key.Binding
-	Tab3      key.Binding
-	Tab4      key.Binding
-	Tab5      key.Binding
+	Enter    key.Binding
+	Quit     key.Binding
+	Help     key.Binding
+	Refresh  key.Binding
+	NewGoal  key.Binding
+	EditGoal key.Binding
+	Back     key.Binding
+	Tab1     key.Binding
+	Tab2     key.Binding
+	Tab3     key.Binding
+	Tab4     key.Binding
+	Tab5     key.Binding
 }
 
 func (k KeyMap) ShortHelp() []key.Binding {
@@ -203,21 +203,21 @@ var keys = KeyMap{
 
 // Model represents the TUI state
 type Model struct {
-	goalManager *goal.GoalManager
-	currentHorizon goal.Horizon
-	goalLists   map[goal.Horizon]*list.Model
-	quitting    bool
-	editor      string
-	creatingGoal bool
-	goalTitle   string
-	goalPeriod  string // The period string (e.g., "2025-11", "2025-Q1", "2025")
-	focusedField int   // 0 = title, 1 = period
-	editingPeriod bool // Whether period field is being edited
+	goalManager      *goal.GoalManager
+	currentHorizon   goal.Horizon
+	goalLists        map[goal.Horizon]*list.Model
+	quitting         bool
+	editor           string
+	creatingGoal     bool
+	goalTitle        string
+	goalPeriod       string // The period string (e.g., "2025-11", "2025-Q1", "2025")
+	focusedField     int    // 0 = title, 1 = period
+	editingPeriod    bool   // Whether period field is being edited
 	creatingFeedback string
-	cfg         *config.Config
-	termWidth   int
-	termHeight  int
-	openAfterCreate bool // Whether to open in editor after creating
+	cfg              *config.Config
+	termWidth        int
+	termHeight       int
+	openAfterCreate  bool // Whether to open in editor after creating
 }
 
 // NewModel creates a new TUI model
@@ -249,7 +249,7 @@ func NewModel() (Model, error) {
 	}
 
 	goalLists := make(map[goal.Horizon]*list.Model)
-	
+
 	for _, hor := range []goal.Horizon{
 		goal.HorizonMonthly,
 		goal.HorizonQuarterly,
@@ -313,7 +313,7 @@ func NewGoalList(horizon goal.Horizon, goalManager *goal.GoalManager) list.Model
 			items = append(items, GoalItem{goal: g})
 		}
 	}
-	
+
 	// Sort items for monthly goals by year and month
 	if horizon == goal.HorizonMonthly {
 		sortMonthlyGoals(items)
@@ -322,7 +322,7 @@ func NewGoalList(horizon goal.Horizon, goalManager *goal.GoalManager) list.Model
 	// Use custom delegate
 	delegate := goalDelegate{
 		DefaultDelegate: list.NewDefaultDelegate(),
-		horizon:        horizon,
+		horizon:         horizon,
 	}
 	delegate.ShowDescription = false
 	delegate.SetHeight(1)
@@ -357,7 +357,7 @@ func sortMonthlyGoals(items []list.Item) {
 		"May": 5, "June": 6, "July": 7, "August": 8,
 		"September": 9, "October": 10, "November": 11, "December": 12,
 	}
-	
+
 	for i := 0; i < len(items); i++ {
 		for j := i + 1; j < len(items); j++ {
 			gi1, ok1 := items[i].(GoalItem)
@@ -365,20 +365,20 @@ func sortMonthlyGoals(items []list.Item) {
 			if !ok1 || !ok2 {
 				continue
 			}
-			
+
 			period1 := strings.Split(gi1.goal.Period, "-")
 			period2 := strings.Split(gi2.goal.Period, "-")
-			
+
 			if len(period1) < 2 || len(period2) < 2 {
 				continue
 			}
-			
+
 			year1, month1 := period1[0], period1[1]
 			year2, month2 := period2[0], period2[1]
-			
+
 			monthNum1 := monthNameToNum[getMonthName(month1)]
 			monthNum2 := monthNameToNum[getMonthName(month2)]
-			
+
 			// Sort by year first, then by month number
 			if year1 > year2 || (year1 == year2 && monthNum1 > monthNum2) {
 				items[i], items[j] = items[j], items[i]
@@ -452,14 +452,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			
+
 			// Handle single character keys
 			// Check if this is "c" or "e" pressed on period field to enable editing
 			if m.focusedField == 1 && !m.editingPeriod && (msg.String() == "c" || msg.String() == "e") {
 				m.editingPeriod = true
 				return m, nil
 			}
-			
+
 			// Handle normal text input for both fields
 			if len(msg.Runes) > 0 && msg.Runes[0] >= 32 && msg.Runes[0] <= 126 {
 				if m.focusedField == 0 {
@@ -470,7 +470,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.goalPeriod += string(msg.Runes[0])
 				}
 			}
-			
+
 			return m, nil
 		}
 
@@ -523,7 +523,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Store terminal dimensions
 		m.termWidth = msg.Width
 		m.termHeight = msg.Height
-		
+
 		// Update all lists with new dimensions
 		for _, hor := range []goal.Horizon{
 			goal.HorizonMonthly,
@@ -555,12 +555,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.editingPeriod = false
 		m.openAfterCreate = false
 		m.creatingFeedback = ""
-		
+
 		// If user pressed Shift+Enter, open the goal in editor
 		if msg.openInEditor {
 			return m, m.openGoalInEditor(msg.goalPath)
 		}
-		
+
 		return m, nil
 
 	case errMsg:
@@ -592,15 +592,13 @@ func getMonthName(month string) string {
 		"11": "November",
 		"12": "December",
 	}
-	
+
 	if name, exists := months[month]; exists {
 		return name
 	}
-	
+
 	return month
 }
-
-
 
 func (m Model) View() string {
 	if m.quitting {
@@ -634,7 +632,7 @@ func (m Model) View() string {
 	tabs := strings.Join(tabItems, "  ")
 
 	listView := m.goalLists[m.currentHorizon].View()
-	
+
 	// Split the list view to insert tabs after the title
 	lines := strings.Split(listView, "\n")
 	if len(lines) > 0 {
@@ -683,7 +681,7 @@ func (m Model) View() string {
 		// Help text
 		helpText := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(
 			"TAB: switch fields • Enter: create • Shift+Enter: create and edit • Esc: cancel")
-		
+
 		var content string
 		if m.creatingFeedback != "" {
 			feedback := lipgloss.NewStyle().
@@ -708,8 +706,8 @@ func (m Model) View() string {
 }
 
 type goalCreatedMsg struct {
-	horizon   goal.Horizon
-	goalPath  string
+	horizon      goal.Horizon
+	goalPath     string
 	openInEditor bool
 }
 
@@ -738,10 +736,10 @@ func (m *Model) createGoal(horizon goal.Horizon, title string, period string) te
 func getNextQuarterPeriod(yearStart string) string {
 	// Map month names to numbers for easier calculation
 	monthMap := map[string]int{
-		"January":   1, "February":  2, "March":     3,
-		"April":     4, "May":       5, "June":      6,
-		"July":      7, "August":    8, "September": 9,
-		"October":  10, "November": 11, "December": 12,
+		"January": 1, "February": 2, "March": 3,
+		"April": 4, "May": 5, "June": 6,
+		"July": 7, "August": 8, "September": 9,
+		"October": 10, "November": 11, "December": 12,
 	}
 
 	startMonth, ok := monthMap[yearStart]
@@ -752,7 +750,7 @@ func getNextQuarterPeriod(yearStart string) string {
 	now := time.Now()
 	currentYear := now.Year()
 	currentMonth := int(now.Month())
-	
+
 	// First, determine the current fiscal year
 	// If we're before the fiscal year start month, we're in the previous fiscal year
 	var fiscalYear int
@@ -762,31 +760,31 @@ func getNextQuarterPeriod(yearStart string) string {
 		// We're at or after the fiscal year start, so we're in next fiscal year
 		fiscalYear = currentYear + 1
 	}
-	
+
 	// Calculate which quarter (0-3) we're currently in based on the start month
 	// In the sequence:
 	// Q1: startMonth to (startMonth + 2) % 12
 	// Q2: startMonth+3 to (startMonth + 5) % 12
 	// Q3: startMonth+6 to (startMonth + 8) % 12
 	// Q4: startMonth+9 to (startMonth + 11) % 12
-	
-	// Get offset from start month and compute (with proper cycle wraparound)  
+
+	// Get offset from start month and compute (with proper cycle wraparound)
 	monthOffset := (currentMonth - startMonth + 12) % 12
 	quarterIndex := monthOffset / 3 // 0 for Q1, 1 for Q2, 2 for Q3, 3 for Q4
-	
+
 	// Convert to 1-based quarter numbers
 	quarter := quarterIndex + 1
-	
+
 	// Get the next quarter in sequence
 	nextQuarter := quarter + 1
 	nextFiscalYear := fiscalYear
-	
+
 	if nextQuarter > 4 {
 		// Wrapped to next fiscal year
 		nextQuarter = 1
 		nextFiscalYear++
 	}
-	
+
 	// Return the full period string with fiscal year
 	return fmt.Sprintf("%d-Q%d", nextFiscalYear, nextQuarter)
 }
@@ -798,10 +796,10 @@ func getNextQuarterPeriod(yearStart string) string {
 func getNextYear(yearStart string) int {
 	// Map month names to numbers
 	monthMap := map[string]int{
-		"January":   1, "February":  2, "March":     3,
-		"April":     4, "May":       5, "June":      6,
-		"July":      7, "August":    8, "September": 9,
-		"October":  10, "November": 11, "December": 12,
+		"January": 1, "February": 2, "March": 3,
+		"April": 4, "May": 5, "June": 6,
+		"July": 7, "August": 8, "September": 9,
+		"October": 10, "November": 11, "December": 12,
 	}
 
 	startMonth, ok := monthMap[yearStart]
@@ -812,12 +810,12 @@ func getNextYear(yearStart string) int {
 	now := time.Now()
 	currentYear := now.Year()
 	currentMonth := int(now.Month())
-	
+
 	// Determine the fiscal year we're currently in
 	// If the quarter/year starts in June (month 6):
 	// - Months Jan-May (1-5) belong to the previous fiscal year
 	// - Months Jun-Dec (6-12) belong to the current fiscal year
-	
+
 	var fiscalYear int
 	if currentMonth < startMonth {
 		// We're before the fiscal year start, so we're in the previous fiscal year
@@ -826,7 +824,7 @@ func getNextYear(yearStart string) int {
 		// We're at or after the fiscal year start, so we're in the current fiscal year
 		fiscalYear = currentYear
 	}
-	
+
 	// The next fiscal year is simply fiscalYear + 1
 	return fiscalYear + 1
 }
@@ -838,7 +836,7 @@ func (m *Model) getDefaultPeriod(horizon goal.Horizon) string {
 	if m.cfg.Goals.YearStart != "" {
 		yearStart = m.cfg.Goals.YearStart
 	}
-	
+
 	switch horizon {
 	case goal.HorizonMonthly:
 		// Next month
@@ -868,20 +866,7 @@ func (m *Model) getDefaultPeriod(horizon goal.Horizon) string {
 
 // openGoalInEditor opens the specified goal file in the configured editor
 func (m *Model) openGoalInEditor(goalPath string) tea.Cmd {
-	editor := m.editor
-	if strings.HasPrefix(editor, "~/") {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			editor = filepath.Join(home, editor[2:])
-		}
-	}
-
-	editorParts := strings.Fields(editor)
-	editorCmd := editorParts[0]
-	editorArgs := editorParts[1:]
-	editorArgs = append(editorArgs, goalPath)
-
-	c := exec.Command(editorCmd, editorArgs...)
+	c := editorpkg.Command(m.editor, goalPath, editorpkg.At{})
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		if err != nil {
 			return errMsg(err)
@@ -898,27 +883,7 @@ func (m *Model) editGoal() tea.Cmd {
 
 	if goalItem, ok := item.(GoalItem); ok {
 		goalPath := m.goalManager.GetGoalPathForHorizon(m.currentHorizon, goalItem.goal.Period, goalItem.goal.Title)
-		
-		editor := m.editor
-		if strings.HasPrefix(editor, "~/") {
-			home, err := os.UserHomeDir()
-			if err == nil {
-				editor = filepath.Join(home, editor[2:])
-			}
-		}
-
-		editorParts := strings.Fields(editor)
-		editorCmd := editorParts[0]
-		editorArgs := editorParts[1:]
-		editorArgs = append(editorArgs, goalPath)
-
-		c := exec.Command(editorCmd, editorArgs...)
-		return tea.ExecProcess(c, func(err error) tea.Msg {
-			if err != nil {
-				return errMsg(err)
-			}
-			return nil
-		})
+		return m.openGoalInEditor(goalPath)
 	}
 
 	return nil

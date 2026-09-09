@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -16,6 +15,7 @@ import (
 
 	colorspkg "github.com/vinayprograms/karya/internal/colors"
 	configpkg "github.com/vinayprograms/karya/internal/config"
+	"github.com/vinayprograms/karya/internal/editor"
 	kgit "github.com/vinayprograms/karya/internal/git"
 	"github.com/vinayprograms/karya/internal/jira"
 	"github.com/vinayprograms/karya/internal/task"
@@ -1700,60 +1700,7 @@ func openEditorCmd(cfg *configpkg.Config, t *task.Task, searchTerm string) tea.C
 		}
 	}
 
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		editor = "vim"
-	}
-
-	// Expand ~ in editor path
-	if strings.HasPrefix(editor, "~/") {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			editor = filepath.Join(home, editor[2:])
-		}
-	}
-
-	// Parse editor command (may contain arguments like "emacs -nw")
-	editorParts := strings.Fields(editor)
-	editorCmd := editorParts[0]
-	editorArgs := editorParts[1:]
-
-	// Get the base name of the editor to determine syntax
-	editorBase := filepath.Base(editorCmd)
-
-	// Handle search term if provided (similar to note command)
-	if searchTerm != "" {
-		switch editorBase {
-		case "vim", "nvim", "vi":
-			editorArgs = append(editorArgs, fmt.Sprintf("+/%s", searchTerm))
-		case "emacs":
-			editorArgs = append(editorArgs, "--eval", fmt.Sprintf("(progn (goto-char (point-min)) (search-forward \"%s\" nil t))", searchTerm))
-		}
-	}
-
-	// Handle line number navigation
-	if strings.Contains(editorBase, "vim") || strings.Contains(editorBase, "nvim") {
-		if searchTerm == "" {
-			// Only add line number if no search term
-			editorArgs = append(editorArgs, fmt.Sprintf("+%d", lineNum))
-		}
-		editorArgs = append(editorArgs, filePath)
-	} else if strings.Contains(editorBase, "emacs") {
-		if searchTerm == "" {
-			// Only add line number if no search term
-			editorArgs = append(editorArgs, fmt.Sprintf("+%d", lineNum))
-		}
-		editorArgs = append(editorArgs, filePath)
-	} else if strings.Contains(editorBase, "nano") {
-		editorArgs = append(editorArgs, fmt.Sprintf("+%d", lineNum), filePath)
-	} else if strings.Contains(editorBase, "code") {
-		editorArgs = append(editorArgs, "-g", fmt.Sprintf("%s:%d", filePath, lineNum))
-	} else {
-		// Unknown editor, just pass the file
-		editorArgs = append(editorArgs, filePath)
-	}
-
-	c := exec.Command(editorCmd, editorArgs...)
+	c := editor.Command(cfg.GeneralConfig.EDITOR, filePath, editor.At{Line: lineNum, Search: searchTerm})
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		return editorFinishedMsg{err: err}
 	})

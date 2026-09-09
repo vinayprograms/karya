@@ -5,7 +5,6 @@ import (
 	"log"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -13,6 +12,7 @@ import (
 
 	colorspkg "github.com/vinayprograms/karya/internal/colors"
 	"github.com/vinayprograms/karya/internal/config"
+	editorpkg "github.com/vinayprograms/karya/internal/editor"
 	kgit "github.com/vinayprograms/karya/internal/git"
 	"github.com/vinayprograms/karya/internal/task"
 
@@ -2003,16 +2003,7 @@ func (m model) renderDetailView() string {
 type editorFinishedMsg struct{ err error }
 
 func openEditorCmd(cfg *config.Config, t *task.Task) tea.Cmd {
-	editor := cfg.GeneralConfig.EDITOR
-	if editor == "" {
-		editor = os.Getenv("EDITOR")
-	}
-	if editor == "" {
-		editor = "vi"
-	}
-
-	args := []string{fmt.Sprintf("+%d", t.LineNum), t.FilePath}
-	c := exec.Command(editor, args...)
+	c := editorpkg.Command(cfg.GeneralConfig.EDITOR, t.FilePath, editorpkg.At{Line: t.LineNum})
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		return editorFinishedMsg{err: err}
 	})

@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -15,6 +14,7 @@ import (
 
 	colorspkg "github.com/vinayprograms/karya/internal/colors"
 	"github.com/vinayprograms/karya/internal/config"
+	editorpkg "github.com/vinayprograms/karya/internal/editor"
 	"github.com/vinayprograms/karya/internal/task"
 	"github.com/vinayprograms/karya/internal/zet"
 
@@ -731,19 +731,7 @@ func newZettelCmd(zetDir, editor string) tea.Cmd {
 	// Open in editor using tea.ExecProcess
 	zetPath := filepath.Join(zetDir, zetID, "README.md")
 
-	if strings.HasPrefix(editor, "~/") {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			editor = filepath.Join(home, editor[2:])
-		}
-	}
-
-	editorParts := strings.Fields(editor)
-	editorCmd := editorParts[0]
-	editorArgs := editorParts[1:]
-	editorArgs = append(editorArgs, zetPath)
-
-	c := exec.Command(editorCmd, editorArgs...)
+	c := editorpkg.Command(editor, zetPath, editorpkg.At{})
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		// Update README and pinboard after editing
 		zet.UpdateReadme(zetDir)
@@ -769,19 +757,7 @@ func editLastZettelCmd(zetDir, editor string) tea.Cmd {
 
 	zetPath := filepath.Join(zetDir, zetID, "README.md")
 
-	if strings.HasPrefix(editor, "~/") {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			editor = filepath.Join(home, editor[2:])
-		}
-	}
-
-	editorParts := strings.Fields(editor)
-	editorCmd := editorParts[0]
-	editorArgs := editorParts[1:]
-	editorArgs = append(editorArgs, zetPath)
-
-	c := exec.Command(editorCmd, editorArgs...)
+	c := editorpkg.Command(editor, zetPath, editorpkg.At{})
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		// Update pinboard and commit changes
 		zet.UpdatePinboard(zetDir)
@@ -795,41 +771,7 @@ func editLastZettelCmd(zetDir, editor string) tea.Cmd {
 }
 
 func openEditorCmd(editor, filePath, searchTerm string) tea.Cmd {
-	if strings.HasPrefix(editor, "~/") {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			editor = filepath.Join(home, editor[2:])
-		}
-	}
-
-	editorParts := strings.Fields(editor)
-	editorCmd := editorParts[0]
-	editorArgs := editorParts[1:]
-
-	// Add search term support for common editors
-	if searchTerm != "" {
-		editorName := filepath.Base(editorCmd)
-		switch editorName {
-		case "vim", "nvim", "vi":
-			// Vim: +/pattern to search and highlight
-			editorArgs = append(editorArgs, fmt.Sprintf("+/%s", searchTerm))
-		case "nano":
-			// Nano: -w (disable line wrapping) and then we can't directly search, but we can go to first match
-			// Nano doesn't support opening with search, user will need to Ctrl+W to search
-		case "emacs":
-			// Emacs: --eval to search
-			editorArgs = append(editorArgs, "--eval", fmt.Sprintf("(progn (goto-char (point-min)) (search-forward \"%s\" nil t))", searchTerm))
-		case "code", "code-insiders":
-			// VS Code: -g flag with :line:column, but we can't highlight search
-			// VS Code doesn't support opening with search highlighting
-		case "subl", "sublime_text":
-			// Sublime: doesn't support opening with search
-		}
-	}
-
-	editorArgs = append(editorArgs, filePath)
-
-	c := exec.Command(editorCmd, editorArgs...)
+	c := editorpkg.Command(editor, filePath, editorpkg.At{Search: searchTerm})
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		// Extract zetDir and zetID from filePath
 		// filePath format: /path/to/zetdir/YYYYMMDDHHMMSS/README.md
@@ -1031,11 +973,7 @@ func main() {
 		}
 	case "toc":
 		tocPath := filepath.Join(zetDir, "README.md")
-		cmd := exec.Command(editor, tocPath)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
+		if err := editorpkg.Open(editor, tocPath, editorpkg.At{}); err != nil {
 			log.Fatal(err)
 		}
 	case "mcp":
@@ -1302,11 +1240,7 @@ func newZettel(zetDir, title, editor string) error {
 	}
 
 	zetPath := filepath.Join(zetDir, zetID, "README.md")
-	cmd := exec.Command(editor, zetPath)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	if err := editorpkg.Open(editor, zetPath, editorpkg.At{}); err != nil {
 		return err
 	}
 
@@ -1356,11 +1290,7 @@ func editZettel(zetDir, zetID, editor string) error {
 	}
 	fmt.Printf("EDITING: %s\n", title)
 
-	cmd := exec.Command(editor, zetPath)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	if err := editorpkg.Open(editor, zetPath, editorpkg.At{}); err != nil {
 		return err
 	}
 
