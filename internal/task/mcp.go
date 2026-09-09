@@ -40,10 +40,10 @@ type TaskInfo struct {
 	Zettel      string   `json:"zettel,omitempty" jsonschema:"zettel ID (if structured mode)"`
 	Priority    int      `json:"priority" jsonschema:"priority level (1=in_progress, 2=active, 3=someday, 4=completed)"`
 	Status      string   `json:"status" jsonschema:"status category (active, in_progress, completed, someday)"`
-	InCycle    bool   `json:"in_cycle,omitempty" jsonschema:"true if task participates in a circular dependency"`
-	ParentID   string `json:"parent_id,omitempty" jsonschema:"ID of parent task (if this is a sub-task)"`
-	ChildCount int    `json:"child_count,omitempty" jsonschema:"number of direct child tasks"`
-	RawContent string `json:"raw_content,omitempty" jsonschema:"raw file content of task and all indented lines below it"`
+	InCycle     bool     `json:"in_cycle,omitempty" jsonschema:"true if task participates in a circular dependency"`
+	ParentID    string   `json:"parent_id,omitempty" jsonschema:"ID of parent task (if this is a sub-task)"`
+	ChildCount  int      `json:"child_count,omitempty" jsonschema:"number of direct child tasks"`
+	RawContent  string   `json:"raw_content,omitempty" jsonschema:"raw file content of task and all indented lines below it"`
 }
 
 type GetTaskArgs struct {
@@ -218,9 +218,9 @@ type ClockTableResult struct {
 }
 
 type ClockProjectResult struct {
-	Project string             `json:"project" jsonschema:"project name"`
-	Total   string             `json:"total" jsonschema:"project total time as H:MM"`
-	Tasks   []ClockTaskResult  `json:"tasks" jsonschema:"per-task breakdown"`
+	Project string            `json:"project" jsonschema:"project name"`
+	Total   string            `json:"total" jsonschema:"project total time as H:MM"`
+	Tasks   []ClockTaskResult `json:"tasks" jsonschema:"per-task breakdown"`
 }
 
 type ClockTaskResult struct {
@@ -404,16 +404,7 @@ func (s *MCPServer) registerTools() {
 }
 
 func (s *MCPServer) taskToInfo(t *Task) TaskInfo {
-	status := "unknown"
-	if t.IsInProgress(s.config) {
-		status = "in_progress"
-	} else if t.IsActive(s.config) {
-		status = "active"
-	} else if t.IsSomeday(s.config) {
-		status = "someday"
-	} else if t.IsCompleted(s.config) {
-		status = "completed"
-	}
+	status := t.Status(s.config).String()
 
 	var parentID string
 	if t.Parent != nil && t.Parent.ID != "" {
@@ -620,7 +611,7 @@ func (s *MCPServer) updateTaskStatus(ctx context.Context, req *mcp.CallToolReque
 	oldKeyword := targetTask.Keyword
 
 	// Handle recurring task completion
-	if IsCompletedKeyword(s.config, args.NewKeyword) {
+	if KeywordStatus(s.config, args.NewKeyword) == Completed {
 		advanced, err := CompleteRecurringTask(targetTask, s.config, args.NewKeyword)
 		if err != nil {
 			return nil, UpdateTaskStatusResult{
@@ -715,14 +706,8 @@ func (s *MCPServer) countTasks(ctx context.Context, req *mcp.CallToolRequest, ar
 	}
 
 	for _, t := range work {
-		if t.IsInProgress(s.config) {
-			byStatus["in_progress"]++
-		} else if t.IsActive(s.config) {
-			byStatus["active"]++
-		} else if t.IsSomeday(s.config) {
-			byStatus["someday"]++
-		} else if t.IsCompleted(s.config) {
-			byStatus["completed"]++
+		if st := t.Status(s.config); st != Unknown {
+			byStatus[st.String()]++
 		}
 	}
 

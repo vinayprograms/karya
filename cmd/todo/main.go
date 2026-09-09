@@ -31,22 +31,22 @@ import (
 
 // ColorScheme holds the lipgloss color styles for rendering
 type ColorScheme struct {
-	prjColor             lipgloss.Style
-	activeColor          lipgloss.Style
-	inProgressColor      lipgloss.Style
-	completedColor       lipgloss.Style
-	somedayColor         lipgloss.Style
-	taskColor            lipgloss.Style
-	completedTaskColor   lipgloss.Style
-	specialTagColor      lipgloss.Style
-	tagColor             lipgloss.Style
-	dateColor            lipgloss.Style
-	pastDateColor        lipgloss.Style
-	todayDateColor       lipgloss.Style
-	assigneeColor        lipgloss.Style
-	cycleColor           lipgloss.Style
-	childConnectorColor  lipgloss.Style // ⌊ connector for child tasks
-	pendingChildColor    lipgloss.Style // ◑ indicator for parents with pending children
+	prjColor            lipgloss.Style
+	activeColor         lipgloss.Style
+	inProgressColor     lipgloss.Style
+	completedColor      lipgloss.Style
+	somedayColor        lipgloss.Style
+	taskColor           lipgloss.Style
+	completedTaskColor  lipgloss.Style
+	specialTagColor     lipgloss.Style
+	tagColor            lipgloss.Style
+	dateColor           lipgloss.Style
+	pastDateColor       lipgloss.Style
+	todayDateColor      lipgloss.Style
+	assigneeColor       lipgloss.Style
+	cycleColor          lipgloss.Style
+	childConnectorColor lipgloss.Style // ⌊ connector for child tasks
+	pendingChildColor   lipgloss.Style // ◑ indicator for parents with pending children
 }
 
 // Global color scheme (will be initialized from config)
@@ -55,18 +55,18 @@ var colors ColorScheme
 // InitializeColors initializes the color scheme from task config
 func InitializeColors(cfg *configpkg.Config) {
 	colors = ColorScheme{
-		prjColor:           lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
-		activeColor:        lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ActiveColor)),
-		inProgressColor:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.InProgressColor)),
-		completedColor:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CompletedColor)),
-		somedayColor:       lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.SomedayColor)),
-		taskColor:          lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TaskColor)),
-		completedTaskColor: lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CompletedTaskColor)),
-		tagColor:           lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TagColor)).Background(lipgloss.Color(cfg.Colors.TagBgColor)),
-		specialTagColor:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.SpecialTagColor)).Background(lipgloss.Color(cfg.Colors.SpecialTagBgColor)).Bold(true),
-		dateColor:          lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.DateColor)).Background(lipgloss.Color(cfg.Colors.DateBgColor)),
-		pastDateColor:      lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.PastDateColor)).Background(lipgloss.Color(cfg.Colors.PastDateBgColor)),
-		todayDateColor:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TodayDateColor)).Background(lipgloss.Color(cfg.Colors.TodayDateBgColor)).Bold(true),
+		prjColor:            lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
+		activeColor:         lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ActiveColor)),
+		inProgressColor:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.InProgressColor)),
+		completedColor:      lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CompletedColor)),
+		somedayColor:        lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.SomedayColor)),
+		taskColor:           lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TaskColor)),
+		completedTaskColor:  lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CompletedTaskColor)),
+		tagColor:            lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TagColor)).Background(lipgloss.Color(cfg.Colors.TagBgColor)),
+		specialTagColor:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.SpecialTagColor)).Background(lipgloss.Color(cfg.Colors.SpecialTagBgColor)).Bold(true),
+		dateColor:           lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.DateColor)).Background(lipgloss.Color(cfg.Colors.DateBgColor)),
+		pastDateColor:       lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.PastDateColor)).Background(lipgloss.Color(cfg.Colors.PastDateBgColor)),
+		todayDateColor:      lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TodayDateColor)).Background(lipgloss.Color(cfg.Colors.TodayDateBgColor)).Bold(true),
 		assigneeColor:       lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.AssigneeColor)).Background(lipgloss.Color(cfg.Colors.AssigneeBgColor)).Bold(true),
 		cycleColor:          lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CycleColor)).Background(lipgloss.Color(cfg.Colors.CycleBgColor)).Bold(true),
 		childConnectorColor: lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
@@ -94,6 +94,19 @@ func NewTaskItem(c *configpkg.Config, t *task.Task, projectColWidth, keywordColW
 		maxTitleWidth:    maxTitleWidth,
 		verbose:          verbose,
 	}
+}
+
+// statusStyles returns the keyword and title styles for a task status.
+func statusStyles(st task.Status) (kwStyle, titleStyle lipgloss.Style) {
+	switch st {
+	case task.InProgress:
+		return colors.inProgressColor, colors.taskColor
+	case task.Active:
+		return colors.activeColor, colors.taskColor
+	case task.Someday:
+		return colors.somedayColor, colors.taskColor
+	}
+	return colors.completedColor, colors.completedTaskColor
 }
 
 func (i taskItem) renderWithSelection(isSelected bool) string {
@@ -130,20 +143,8 @@ func (i taskItem) renderWithSelection(isSelected bool) string {
 		parts = append(parts, "  ")
 	}
 
-	var titleStyle lipgloss.Style
-	if i.task.IsActive(i.config) {
-		parts = append(parts, colors.activeColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
-		titleStyle = colors.taskColor
-	} else if i.task.IsInProgress(i.config) {
-		parts = append(parts, colors.inProgressColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
-		titleStyle = colors.taskColor
-	} else if i.task.IsSomeday(i.config) {
-		parts = append(parts, colors.somedayColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
-		titleStyle = colors.taskColor
-	} else {
-		parts = append(parts, colors.completedColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
-		titleStyle = colors.completedTaskColor
-	}
+	kwStyle, titleStyle := statusStyles(i.task.Status(i.config))
+	parts = append(parts, kwStyle.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
 
 	// Progress fraction column immediately after keyword (fixed width, blank when not applicable)
 	if i.fractionColWidth > 0 {
@@ -255,20 +256,8 @@ func (i taskItem) Title() string {
 		parts = append(parts, "  ")
 	}
 
-	var titleStyle lipgloss.Style
-	if i.task.IsActive(i.config) {
-		parts = append(parts, colors.activeColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
-		titleStyle = colors.taskColor
-	} else if i.task.IsInProgress(i.config) {
-		parts = append(parts, colors.inProgressColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
-		titleStyle = colors.taskColor
-	} else if i.task.IsSomeday(i.config) {
-		parts = append(parts, colors.somedayColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
-		titleStyle = colors.taskColor
-	} else {
-		parts = append(parts, colors.completedColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
-		titleStyle = colors.completedTaskColor
-	}
+	kwStyle, titleStyle := statusStyles(i.task.Status(i.config))
+	parts = append(parts, kwStyle.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
 
 	// Progress fraction column immediately after keyword (fixed width, blank when not applicable)
 	if i.fractionColWidth > 0 {
@@ -385,31 +374,31 @@ func (i noResultsItem) Title() string { return "No results found" }
 func (i noResultsItem) Description() string { return "" }
 
 type model struct {
-	list            list.Model
-	tasks           []*task.Task
-	config          *configpkg.Config
-	project         string
-	quitting        bool
-	watcher         *fsnotify.Watcher
+	list             list.Model
+	tasks            []*task.Task
+	config           *configpkg.Config
+	project          string
+	quitting         bool
+	watcher          *fsnotify.Watcher
 	projectColWidth  int
 	keywordColWidth  int
 	fractionColWidth int
 	savedFilter      string
-	customFilter    string
-	filterCursor    int
-	filtering       bool
-	allItems        []list.Item
-	structuredMode  bool
-	routinesView    bool // true = showing routines, false = showing work tasks
-	loading         bool
-	searchTerm      string // Track search term for editor highlighting
+	customFilter     string
+	filterCursor     int
+	filtering        bool
+	allItems         []list.Item
+	structuredMode   bool
+	routinesView     bool // true = showing routines, false = showing work tasks
+	loading          bool
+	searchTerm       string // Track search term for editor highlighting
 
 	// Status selector state
-	showingStatusSelector     bool
-	statusPicker              *task.StatusPicker
-	selectedTask              *task.Task
-	statusMessage             string
-	statusMessageTimer        int
+	showingStatusSelector bool
+	statusPicker          *task.StatusPicker
+	selectedTask          *task.Task
+	statusMessage         string
+	statusMessageTimer    int
 
 	// Pending-child warning state
 	showingPendingChildWarning bool
@@ -1151,7 +1140,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *model) applyCustomFilter() {
 	if m.customFilter == "" {
 		m.list.SetItems(m.allItems)
-		m.searchTerm = ""  // Clear search term
+		m.searchTerm = "" // Clear search term
 		return
 	}
 
@@ -1159,7 +1148,7 @@ func (m *model) applyCustomFilter() {
 	if strings.HasPrefix(m.customFilter, "*") {
 		// Extract search term (everything after "*")
 		searchTerm := strings.TrimSpace(m.customFilter[1:])
-		m.searchTerm = searchTerm  // Store search term for editor
+		m.searchTerm = searchTerm // Store search term for editor
 		if searchTerm == "" {
 			m.list.SetItems(m.allItems)
 			return
@@ -1178,8 +1167,8 @@ func (m *model) applyCustomFilter() {
 		for _, result := range results {
 			// Create a pseudo-task to display the search result
 			pseudoTask := &task.Task{
-				Keyword:  "",  // Leave keyword empty
-				Title:    result.Line,  // Don't include project name in brackets
+				Keyword:  "",          // Leave keyword empty
+				Title:    result.Line, // Don't include project name in brackets
 				Project:  result.Project,
 				Zettel:   result.ZettelID,
 				FilePath: result.Path,
@@ -1191,7 +1180,7 @@ func (m *model) applyCustomFilter() {
 		m.list.SetItems(searchResultItems)
 		return
 	} else {
-		m.searchTerm = ""  // Clear search term for non-fulltext search
+		m.searchTerm = "" // Clear search term for non-fulltext search
 	}
 
 	// Extract tasks from all items
@@ -1386,12 +1375,7 @@ func (m model) renderPendingChildWarning() string {
 		BorderForeground(lipgloss.Color("9")).
 		Padding(1, 2)
 
-	activeCount := 0
-	for _, child := range m.selectedTask.Children {
-		if child.IsActive(m.config) || child.IsInProgress(m.config) {
-			activeCount++
-		}
-	}
+	activeCount := task.PendingChildren(m.selectedTask, m.config)
 
 	var content strings.Builder
 
@@ -1492,16 +1476,9 @@ func (m model) renderDetailLine(line string) string {
 		kw := kwMatch[1]
 		if task.IsKeywordValid(m.config, kw) {
 			// Determine keyword style
-			var kwStyle lipgloss.Style
-			t := &task.Task{Keyword: kw}
-			if t.IsInProgress(m.config) {
-				kwStyle = colors.inProgressColor
-			} else if t.IsActive(m.config) {
-				kwStyle = colors.activeColor
-			} else if t.IsSomeday(m.config) {
-				kwStyle = colors.somedayColor
-			} else {
-				kwStyle = colors.completedColor
+			st := task.KeywordStatus(m.config, kw)
+			kwStyle, _ := statusStyles(st)
+			if st == task.Completed || st == task.Unknown {
 				textStyle = colors.completedTaskColor
 			}
 			// Replace the keyword in the line with styled version
@@ -1558,9 +1535,8 @@ func (m model) renderDetailLine(line string) string {
 
 type editorFinishedMsg struct{ err error }
 
-
 func isCompletedKeyword(cfg *configpkg.Config, keyword string) bool {
-	return task.IsCompletedKeyword(cfg, keyword)
+	return task.KeywordStatus(cfg, keyword) == task.Completed
 }
 
 func hasActiveChildren(t *task.Task, cfg *configpkg.Config) bool {
@@ -2732,18 +2708,19 @@ func printTasksPlain(config *configpkg.Config, tasks []*task.Task) {
 	projectColWidth := calculateProjectColWidth(tasks)
 	taskColor := lipgloss.NewStyle()
 	completedTaskColor := lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // Gray for completed tasks
-	
+
 	for _, t := range tasks {
 		var titleStyle lipgloss.Style
-		if t.IsActive(config) || t.IsInProgress(config) || t.IsSomeday(config) {
+		switch t.Status(config) {
+		case task.Active, task.InProgress, task.Someday:
 			titleStyle = taskColor
-		} else {
+		default:
 			titleStyle = completedTaskColor
 		}
-		
+
 		// Render task title with markdown formatting
 		formattedTitle := task.RenderMarkdownDescription(t.Title, titleStyle)
-		
+
 		if config.GeneralConfig.Verbose {
 			fmt.Printf("%-*s %-16s %-12s %-40s",
 				projectColWidth, t.Project, t.Zettel, t.Keyword, formattedTitle)
@@ -2800,4 +2777,3 @@ func printProjectsList(summary map[string]int) {
 		fmt.Printf("%-20s %5d\n", p, summary[p])
 	}
 }
-

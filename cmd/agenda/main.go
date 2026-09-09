@@ -49,17 +49,17 @@ func (v viewMode) String() string {
 
 // Colors
 type colorScheme struct {
-	project    lipgloss.Style
-	active     lipgloss.Style
-	inProgress lipgloss.Style
-	completed  lipgloss.Style
-	someday    lipgloss.Style
-	taskText   lipgloss.Style
-	tag        lipgloss.Style
-	specialTag lipgloss.Style
-	date       lipgloss.Style
-	overdue    lipgloss.Style
-	deadline   lipgloss.Style
+	project     lipgloss.Style
+	active      lipgloss.Style
+	inProgress  lipgloss.Style
+	completed   lipgloss.Style
+	someday     lipgloss.Style
+	taskText    lipgloss.Style
+	tag         lipgloss.Style
+	specialTag  lipgloss.Style
+	date        lipgloss.Style
+	overdue     lipgloss.Style
+	deadline    lipgloss.Style
 	assignee    lipgloss.Style
 	header      lipgloss.Style
 	schedInfo   lipgloss.Style
@@ -71,19 +71,19 @@ var colors colorScheme
 
 func initColors(cfg *config.Config) {
 	colors = colorScheme{
-		project:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
-		active:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ActiveColor)),
-		inProgress: lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.InProgressColor)),
-		completed:  lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CompletedColor)),
-		someday:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.SomedayColor)),
-		taskText:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TaskColor)),
-		tag:        lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TagColor)).Background(lipgloss.Color(cfg.Colors.TagBgColor)),
-		specialTag: lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.SpecialTagColor)).Background(lipgloss.Color(cfg.Colors.SpecialTagBgColor)).Bold(true),
-		date:       lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.DateColor)).Background(lipgloss.Color(cfg.Colors.DateBgColor)),
-		overdue:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.OverdueColor)).Bold(true),
-		deadline:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.DeadlineColor)).Bold(true),
-		assignee:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.AssigneeColor)).Background(lipgloss.Color(cfg.Colors.AssigneeBgColor)).Bold(true),
-		header:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.AgendaHeaderColor)).Bold(true),
+		project:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
+		active:      lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ActiveColor)),
+		inProgress:  lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.InProgressColor)),
+		completed:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CompletedColor)),
+		someday:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.SomedayColor)),
+		taskText:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TaskColor)),
+		tag:         lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TagColor)).Background(lipgloss.Color(cfg.Colors.TagBgColor)),
+		specialTag:  lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.SpecialTagColor)).Background(lipgloss.Color(cfg.Colors.SpecialTagBgColor)).Bold(true),
+		date:        lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.DateColor)).Background(lipgloss.Color(cfg.Colors.DateBgColor)),
+		overdue:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.OverdueColor)).Bold(true),
+		deadline:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.DeadlineColor)).Bold(true),
+		assignee:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.AssigneeColor)).Background(lipgloss.Color(cfg.Colors.AssigneeBgColor)).Bold(true),
+		header:      lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.AgendaHeaderColor)).Bold(true),
 		schedInfo:   lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
 		dimText:     lipgloss.NewStyle().Foreground(lipgloss.Color("241")),
 		clockActive: lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ClockActiveColor)).Bold(true),
@@ -340,7 +340,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.statusPicker.Confirmed {
 				kw := m.statusPicker.Selected
-				if task.IsCompletedKeyword(m.config, kw) && task.HasActiveChildren(m.statusPickerTask, m.config) {
+				if task.KeywordStatus(m.config, kw) == task.Completed && task.HasActiveChildren(m.statusPickerTask, m.config) {
 					m.showingStatusPicker = false
 					m.showingPendingChildWarning = true
 					m.pendingWarningKeyword = kw
@@ -904,7 +904,7 @@ func updateTaskStatusCmd(cfg *config.Config, t *task.Task, newKeyword string) te
 
 		oldKeyword := t.Keyword
 
-		if task.IsCompletedKeyword(cfg, newKeyword) {
+		if task.KeywordStatus(cfg, newKeyword) == task.Completed {
 			advanced, err := task.CompleteRecurringTask(t, cfg, newKeyword)
 			if err != nil {
 				return statusUpdateMsg{err: fmt.Errorf("recurring advance failed: %w", err)}
@@ -944,20 +944,26 @@ func (m model) renderStatusSelector() string {
 	return m.statusPicker.View(m.termWidth)
 }
 
+// keywordStyle maps a task status to its keyword style.
+func keywordStyle(st task.Status) lipgloss.Style {
+	switch st {
+	case task.InProgress:
+		return colors.inProgress
+	case task.Active:
+		return colors.active
+	case task.Someday:
+		return colors.someday
+	}
+	return colors.completed
+}
+
 func (m model) renderPendingChildWarning() string {
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("9")).
 		Padding(1, 2)
 
-	activeCount := 0
-	if m.statusPickerTask != nil {
-		for _, child := range m.statusPickerTask.Children {
-			if child.IsActive(m.config) || child.IsInProgress(m.config) {
-				activeCount++
-			}
-		}
-	}
+	activeCount := task.PendingChildren(m.statusPickerTask, m.config)
 
 	var content strings.Builder
 
@@ -1593,22 +1599,14 @@ func (m model) renderItem(item task.AgendaItem, selected bool) string {
 		if len(m.config.Todo.Completed) > 0 {
 			displayKeyword = m.config.Todo.Completed[0]
 		}
-	} else if t.IsInProgress(m.config) {
-		kwStyle = colors.inProgress
-	} else if t.IsActive(m.config) {
-		kwStyle = colors.active
-	} else if t.IsSomeday(m.config) {
-		kwStyle = colors.someday
 	} else {
-		kwStyle = colors.completed
+		kwStyle = keywordStyle(t.Status(m.config))
 	}
 	parts = append(parts, kwStyle.Render(fmt.Sprintf("%-*s", kwWidth, displayKeyword)))
 
 	// Title (truncated to fit terminal)
 	titleStyle := colors.taskText
-	if item.IsCompleted {
-		titleStyle = colors.completed
-	} else if t.IsCompleted(m.config) {
+	if item.IsCompleted || t.IsCompleted(m.config) {
 		titleStyle = colors.completed
 	} else if item.IsOverdue {
 		titleStyle = colors.deadline
@@ -2099,14 +2097,8 @@ func (m model) renderClockView() string {
 				if len(m.config.Todo.Completed) > 0 {
 					displayKeyword = m.config.Todo.Completed[0]
 				}
-			} else if entry.Task.IsInProgress(m.config) {
-				kwStyle = colors.inProgress
-			} else if entry.Task.IsActive(m.config) {
-				kwStyle = colors.active
-			} else if entry.Task.IsSomeday(m.config) {
-				kwStyle = colors.someday
 			} else {
-				kwStyle = colors.completed
+				kwStyle = keywordStyle(entry.Task.Status(m.config))
 			}
 
 			displayTitle := entry.Task.Title

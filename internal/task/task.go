@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -22,9 +23,9 @@ var ErrPendingChildren = errors.New("cannot complete: active child tasks pending
 // Task represents a parsed task from a line
 type Task struct {
 	Keyword     string
-	ID          string   // Optional unique identifier [id]
+	ID          string // Optional unique identifier [id]
 	Title       string
-	RawTitle    string   // Unparsed text after "KEYWORD: " (for exact line matching)
+	RawTitle    string // Unparsed text after "KEYWORD: " (for exact line matching)
 	Tags        []string
 	References  []string // IDs of tasks this task depends on (^id syntax)
 	ScheduledAt string   // @date or @s:date (scheduled date)
@@ -40,56 +41,75 @@ type Task struct {
 	Children    []*Task // Child tasks nested under this task in the source file
 }
 
+// Status classifies a task keyword into one of the configured categories.
+type Status int
+
+const (
+	Unknown Status = iota
+	InProgress
+	Active
+	Someday
+	Completed
+)
+
+// String returns the wire/display name of the status.
+func (s Status) String() string {
+	switch s {
+	case InProgress:
+		return "in_progress"
+	case Active:
+		return "active"
+	case Someday:
+		return "someday"
+	case Completed:
+		return "completed"
+	}
+	return "unknown"
+}
+
+// KeywordStatus classifies a keyword using the configured keyword lists.
+// Order matters: InProgress wins over Active so overlapping configs behave
+// the same everywhere.
+func KeywordStatus(c *config.Config, keyword string) Status {
+	if c == nil {
+		return Unknown
+	}
+	switch {
+	case slices.Contains(c.Todo.InProgress, keyword):
+		return InProgress
+	case slices.Contains(c.Todo.Active, keyword):
+		return Active
+	case slices.Contains(c.Todo.Someday, keyword):
+		return Someday
+	case slices.Contains(c.Todo.Completed, keyword):
+		return Completed
+	}
+	return Unknown
+}
+
+// Status classifies the task's keyword.
+func (t *Task) Status(c *config.Config) Status {
+	return KeywordStatus(c, t.Keyword)
+}
+
 // IsActive returns true if the task is active (not completed)
 func (t *Task) IsActive(c *config.Config) bool {
-	if c == nil {
-		return false
-	}
-	for _, kw := range c.Todo.Active {
-		if t.Keyword == kw {
-			return true
-		}
-	}
-	return false
+	return c != nil && slices.Contains(c.Todo.Active, t.Keyword)
 }
 
 // IsInProgress returns true if the task is in progress
 func (t *Task) IsInProgress(c *config.Config) bool {
-	if c == nil {
-		return false
-	}
-	for _, kw := range c.Todo.InProgress {
-		if t.Keyword == kw {
-			return true
-		}
-	}
-	return false
+	return c != nil && slices.Contains(c.Todo.InProgress, t.Keyword)
 }
 
 // IsCompleted returns true if the task is completed
 func (t *Task) IsCompleted(c *config.Config) bool {
-	if c == nil {
-		return false
-	}
-	for _, kw := range c.Todo.Completed {
-		if t.Keyword == kw {
-			return true
-		}
-	}
-	return false
+	return c != nil && slices.Contains(c.Todo.Completed, t.Keyword)
 }
 
 // IsSomeday returns true if the task is a someday/maybe task
 func (t *Task) IsSomeday(c *config.Config) bool {
-	if c == nil {
-		return false
-	}
-	for _, kw := range c.Todo.Someday {
-		if t.Keyword == kw {
-			return true
-		}
-	}
-	return false
+	return c != nil && slices.Contains(c.Todo.Someday, t.Keyword)
 }
 
 // hasRecurrence checks whether a date string contains a recurrence modifier.
@@ -112,14 +132,7 @@ func (t *Task) IsRoutine(c *config.Config) bool {
 	if c == nil || len(c.Todo.Routines) == 0 {
 		return false
 	}
-	keywordMatch := false
-	for _, kw := range c.Todo.Routines {
-		if t.Keyword == kw {
-			keywordMatch = true
-			break
-		}
-	}
-	if !keywordMatch {
+	if !slices.Contains(c.Todo.Routines, t.Keyword) {
 		return false
 	}
 	return hasRecurrence(t.ScheduledAt) || hasRecurrence(t.DueAt)
@@ -145,16 +158,14 @@ func PartitionRoutines(tasks []*Task, c *config.Config) (work []*Task, routines 
 // Lower numbers indicate higher priority
 // 1 = In Progress, 2 = Active, 3 = Someday, 4 = Completed
 func (t *Task) Priority(c *config.Config) int {
-	if t.IsInProgress(c) {
+	switch t.Status(c) {
+	case InProgress:
 		return 1
-	}
-	if t.IsActive(c) {
+	case Active:
 		return 2
-	}
-	if t.IsSomeday(c) {
+	case Someday:
 		return 3
-	}
-	if t.IsCompleted(c) {
+	case Completed:
 		return 4
 	}
 	// Unknown status gets lowest priority
@@ -952,7 +963,7 @@ func SearchTasks(c *config.Config, project string, searchTerm string) ([]SearchR
 						results[i].Project = parts[0]
 					}
 				}
-				
+
 				// Get title if possible
 				if c.Todo.Structured {
 					// For structured mode, try to get the zettel title
@@ -1032,14 +1043,8 @@ func GetZettelTitle(zetDir, zetID string) (string, error) {
 // callers must resolve or reassign those first. Pass a nil cfg to skip this
 // check (e.g. in tests that don't care about it).
 func UpdateTaskStatus(t *Task, newKeyword string, cfg *config.Config) error {
-	if cfg != nil && IsCompletedKeyword(cfg, newKeyword) {
-		pending := 0
-		for _, child := range t.Children {
-			if child.IsActive(cfg) || child.IsInProgress(cfg) {
-				pending++
-			}
-		}
-		if pending > 0 {
+	if cfg != nil && KeywordStatus(cfg, newKeyword) == Completed {
+		if pending := PendingChildren(t, cfg); pending > 0 {
 			return fmt.Errorf("%w: %d task(s) still active/in-progress", ErrPendingChildren, pending)
 		}
 	}
@@ -1128,27 +1133,24 @@ func GetAllKeywordsFlat(c *config.Config) []KeywordEntry {
 	return entries
 }
 
-// IsCompletedKeyword checks whether the given keyword is in the configured Completed list.
-func IsCompletedKeyword(c *config.Config, keyword string) bool {
-	for _, k := range c.Todo.Completed {
-		if k == keyword {
-			return true
+// PendingChildren counts direct children of t that are active or in-progress.
+func PendingChildren(t *Task, c *config.Config) int {
+	if t == nil {
+		return 0
+	}
+	n := 0
+	for _, child := range t.Children {
+		switch child.Status(c) {
+		case Active, InProgress:
+			n++
 		}
 	}
-	return false
+	return n
 }
 
 // HasActiveChildren returns true if any direct child of t is active or in-progress.
 func HasActiveChildren(t *Task, c *config.Config) bool {
-	if t == nil {
-		return false
-	}
-	for _, child := range t.Children {
-		if child.IsActive(c) || child.IsInProgress(c) {
-			return true
-		}
-	}
-	return false
+	return PendingChildren(t, c) > 0
 }
 
 // DetectCycles finds all tasks that participate in circular dependencies.
