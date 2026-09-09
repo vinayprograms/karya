@@ -3,6 +3,8 @@ bin/
 .crush
 .crit.md
 design-files/
+design/
 tags
 notes/
+.claude/
 decisions.md
