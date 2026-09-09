@@ -47,19 +47,20 @@ type ColorScheme struct {
 var colors ColorScheme
 
 func InitializeColors(cfg *config.Config) {
+	s := colorspkg.Styles(cfg)
 	colors = ColorScheme{
-		zettelIDStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
-		titleStyle:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TaskColor)),
-		normalStyle:    lipgloss.NewStyle(),
-		highlightStyle: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(cfg.Colors.ActiveColor)),
-		projectStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
-		grayStyle:      lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CompletedColor)),
-		selectorStyle:  colors.selectorStyle,
-		navStyle:       colors.navStyle,
-		commandStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
-		errorStyle:     colors.errorStyle,
-		successStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
-		filterStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ActiveColor)).Background(lipgloss.Color("0")),
+		zettelIDStyle:  s.Project,
+		titleStyle:     s.Task,
+		normalStyle:    s.Normal,
+		highlightStyle: s.Highlight,
+		projectStyle:   s.Project,
+		grayStyle:      s.Completed,
+		selectorStyle:  s.Selector,
+		navStyle:       s.DimText,
+		commandStyle:   s.Project,
+		errorStyle:     s.Error,
+		successStyle:   s.Project,
+		filterStyle:    s.Active.Background(lipgloss.Color("0")),
 	}
 }
 

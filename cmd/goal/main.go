@@ -40,12 +40,13 @@ type ColorScheme struct {
 var colors ColorScheme
 
 func InitializeColors(cfg *config.Config) {
+	s := colorspkg.Styles(cfg)
 	colors = ColorScheme{
-		primaryColor:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
-		secondaryColor: lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TaskColor)),
-		accentColor:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ActiveColor)),
-		selectorStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ActiveColor)),
-		errorStyle:     lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
+		primaryColor:   s.Project,
+		secondaryColor: s.Task,
+		accentColor:    s.Active,
+		selectorStyle:  s.Active,
+		errorStyle:     s.Error,
 	}
 }
 

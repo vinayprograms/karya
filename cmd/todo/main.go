@@ -54,23 +54,24 @@ var colors ColorScheme
 
 // InitializeColors initializes the color scheme from task config
 func InitializeColors(cfg *configpkg.Config) {
+	s := colorspkg.Styles(cfg)
 	colors = ColorScheme{
-		prjColor:            lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
-		activeColor:         lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ActiveColor)),
-		inProgressColor:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.InProgressColor)),
-		completedColor:      lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CompletedColor)),
-		somedayColor:        lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.SomedayColor)),
-		taskColor:           lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TaskColor)),
-		completedTaskColor:  lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CompletedTaskColor)),
-		tagColor:            lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TagColor)).Background(lipgloss.Color(cfg.Colors.TagBgColor)),
-		specialTagColor:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.SpecialTagColor)).Background(lipgloss.Color(cfg.Colors.SpecialTagBgColor)).Bold(true),
-		dateColor:           lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.DateColor)).Background(lipgloss.Color(cfg.Colors.DateBgColor)),
-		pastDateColor:       lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.PastDateColor)).Background(lipgloss.Color(cfg.Colors.PastDateBgColor)),
-		todayDateColor:      lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TodayDateColor)).Background(lipgloss.Color(cfg.Colors.TodayDateBgColor)).Bold(true),
-		assigneeColor:       lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.AssigneeColor)).Background(lipgloss.Color(cfg.Colors.AssigneeBgColor)).Bold(true),
-		cycleColor:          lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CycleColor)).Background(lipgloss.Color(cfg.Colors.CycleBgColor)).Bold(true),
-		childConnectorColor: lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
-		pendingChildColor:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.InProgressColor)),
+		prjColor:            s.Project,
+		activeColor:         s.Active,
+		inProgressColor:     s.InProgress,
+		completedColor:      s.Completed,
+		somedayColor:        s.Someday,
+		taskColor:           s.Task,
+		completedTaskColor:  s.CompletedTask,
+		tagColor:            s.Tag,
+		specialTagColor:     s.SpecialTag,
+		dateColor:           s.Date,
+		pastDateColor:       s.PastDate,
+		todayDateColor:      s.TodayDate,
+		assigneeColor:       s.Assignee,
+		cycleColor:          s.Cycle,
+		childConnectorColor: s.ChildConnector,
+		pendingChildColor:   s.PendingChild,
 	}
 }
 

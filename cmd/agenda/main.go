@@ -70,23 +70,24 @@ type colorScheme struct {
 var colors colorScheme
 
 func initColors(cfg *config.Config) {
+	s := colorspkg.Styles(cfg)
 	colors = colorScheme{
-		project:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
-		active:      lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ActiveColor)),
-		inProgress:  lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.InProgressColor)),
-		completed:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CompletedColor)),
-		someday:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.SomedayColor)),
-		taskText:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TaskColor)),
-		tag:         lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TagColor)).Background(lipgloss.Color(cfg.Colors.TagBgColor)),
-		specialTag:  lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.SpecialTagColor)).Background(lipgloss.Color(cfg.Colors.SpecialTagBgColor)).Bold(true),
-		date:        lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.DateColor)).Background(lipgloss.Color(cfg.Colors.DateBgColor)),
-		overdue:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.OverdueColor)).Bold(true),
-		deadline:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.DeadlineColor)).Bold(true),
-		assignee:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.AssigneeColor)).Background(lipgloss.Color(cfg.Colors.AssigneeBgColor)).Bold(true),
-		header:      lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.AgendaHeaderColor)).Bold(true),
+		project:     s.Project,
+		active:      s.Active,
+		inProgress:  s.InProgress,
+		completed:   s.Completed,
+		someday:     s.Someday,
+		taskText:    s.Task,
+		tag:         s.Tag,
+		specialTag:  s.SpecialTag,
+		date:        s.Date,
+		overdue:     s.Overdue,
+		deadline:    s.Deadline,
+		assignee:    s.Assignee,
+		header:      s.AgendaHeader,
 		schedInfo:   lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
-		dimText:     lipgloss.NewStyle().Foreground(lipgloss.Color("241")),
-		clockActive: lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ClockActiveColor)).Bold(true),
+		dimText:     s.DimText,
+		clockActive: s.ClockActive,
 	}
 }
 

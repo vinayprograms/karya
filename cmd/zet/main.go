@@ -40,13 +40,14 @@ type ColorScheme struct {
 var colors ColorScheme
 
 func InitializeColors(cfg *config.Config) {
+	s := colorspkg.Styles(cfg)
 	colors = ColorScheme{
-		zettelIDStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
-		titleStyle:      lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TaskColor)),
-		normalStyle:     lipgloss.NewStyle(),
-		highlightStyle:  lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(cfg.Colors.ActiveColor)),
-		matchCountStyle: lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.InProgressColor)).Bold(true),
-		selectorStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Bold(true),
+		zettelIDStyle:   s.Project,
+		titleStyle:      s.Task,
+		normalStyle:     s.Normal,
+		highlightStyle:  s.Highlight,
+		matchCountStyle: s.InProgress.Bold(true),
+		selectorStyle:   s.Selector,
 	}
 }
 
