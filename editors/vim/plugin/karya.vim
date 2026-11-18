@@ -380,9 +380,14 @@ function! s:KaryaTransition() abort
   let s:tp_filter = ''
   let s:tp_cursor = 0
 
-  silent! call prop_type_delete('KaryaPickerGreen')
-  call prop_type_add('KaryaPickerGreen', {'highlight': 'String'})
-  call s:TransitionOpen()
+  if has('nvim')
+    call luaeval("require('karya.picker').open(_A[1], _A[2], _A[3])",
+          \ [s:tp_all_keywords, parsed.keyword, get(function('s:TransitionApply'), 'name')])
+  else
+    silent! call prop_type_delete('KaryaPickerGreen')
+    call prop_type_add('KaryaPickerGreen', {'highlight': 'String'})
+    call s:TransitionOpen()
+  endif
 endfunction
 
 function! s:TransitionFiltered() abort
@@ -488,7 +493,11 @@ function! s:TransitionCallback(winid, result) abort
   if empty(filtered) || s:tp_cursor >= len(filtered)
     return
   endif
-  let new_kw = filtered[s:tp_cursor]
+  call s:TransitionApply(filtered[s:tp_cursor])
+endfunction
+
+function! s:TransitionApply(new_kw) abort
+  let new_kw = a:new_kw
   if new_kw == s:transition_ctx.keyword
     return
   endif
