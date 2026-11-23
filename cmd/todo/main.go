@@ -32,6 +32,7 @@ import (
 type ColorScheme struct {
 	prjColor            lipgloss.Style
 	activeColor         lipgloss.Style
+	eventsColor         lipgloss.Style
 	inProgressColor     lipgloss.Style
 	completedColor      lipgloss.Style
 	somedayColor        lipgloss.Style
@@ -58,6 +59,7 @@ func InitializeColors(cfg *configpkg.Config) {
 	colors = ColorScheme{
 		prjColor:            s.Project,
 		activeColor:         s.Active,
+		eventsColor:         s.Events,
 		inProgressColor:     s.InProgress,
 		completedColor:      s.Completed,
 		somedayColor:        s.Someday,
@@ -109,6 +111,8 @@ func statusStyles(st task.Status) (kwStyle, titleStyle lipgloss.Style) {
 		return colors.somedayColor, colors.taskColor
 	case task.Container:
 		return colors.containerColor, colors.taskColor
+	case task.Events:
+		return colors.eventsColor, colors.taskColor
 	}
 	return colors.completedColor, colors.completedTaskColor
 }

@@ -14,13 +14,13 @@ import (
 func TestEventColor(t *testing.T) {
 	cfg := &config.Config{
 		Todo:   config.Todo{Events: []string{"MEETING", "CUSTOM"}},
-		Colors: config.ColorScheme{ActiveColor: "#00ff00", TaskColor: "#123456", CompletedColor: "#abcdef"},
+		Colors: config.ColorScheme{EventsColor: "#56B6C2", ActiveColor: "#00ff00", TaskColor: "#123456", CompletedColor: "#abcdef"},
 	}
 	initColors(cfg)
 	for _, keyword := range cfg.Todo.Events {
 		got := keywordStyle(task.KeywordStatus(cfg, keyword)).GetForeground()
-		if got != colors.active.GetForeground() || got == colors.taskText.GetForeground() || got == colors.completed.GetForeground() {
-			t.Errorf("%s color = %v, want active keyword color, distinct from description", keyword, got)
+		if got != colors.events.GetForeground() || got == colors.active.GetForeground() || got == colors.taskText.GetForeground() || got == colors.completed.GetForeground() {
+			t.Errorf("%s color = %v, want dedicated event color, distinct from description", keyword, got)
 		}
 	}
 }

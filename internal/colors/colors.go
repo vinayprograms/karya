@@ -78,7 +78,7 @@ func Print(cfg *config.Config) error {
 	}
 
 	colorForCategory := map[string]string{
-		"events":     normalizeHex(c.ActiveColor),
+		"events":     normalizeHex(c.EventsColor),
 		"active":     normalizeHex(c.ActiveColor),
 		"inprogress": normalizeHex(c.InProgressColor),
 		"completed":  normalizeHex(c.CompletedColor),

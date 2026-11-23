@@ -57,6 +57,7 @@ type ColorScheme struct {
 	Theme              string `toml:"theme"`
 	ProjectColor       string `toml:"project"`
 	ActiveColor        string `toml:"active"`
+	EventsColor        string `toml:"events"`
 	InProgressColor    string `toml:"inprogress"`
 	CompletedColor     string `toml:"completed"`
 	SomedayColor       string `toml:"someday"`
@@ -262,6 +263,10 @@ func Load() (*Config, error) {
 	// Resolve color names in user-specified colors (from config file)
 	cfg.Colors.ProjectColor = resolveColorValue(cfg.Colors.ProjectColor)
 	cfg.Colors.ActiveColor = resolveColorValue(cfg.Colors.ActiveColor)
+	if cfg.Colors.EventsColor == "" {
+		cfg.Colors.EventsColor = "cyan"
+	}
+	cfg.Colors.EventsColor = resolveColorValue(cfg.Colors.EventsColor)
 	cfg.Colors.InProgressColor = resolveColorValue(cfg.Colors.InProgressColor)
 	cfg.Colors.CompletedColor = resolveColorValue(cfg.Colors.CompletedColor)
 	cfg.Colors.SomedayColor = resolveColorValue(cfg.Colors.SomedayColor)

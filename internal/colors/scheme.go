@@ -10,6 +10,7 @@ import (
 type Scheme struct {
 	Project        lipgloss.Style
 	Active         lipgloss.Style
+	Events         lipgloss.Style
 	InProgress     lipgloss.Style
 	Completed      lipgloss.Style
 	Someday        lipgloss.Style
@@ -50,6 +51,7 @@ func Styles(cfg *config.Config) Scheme {
 	return Scheme{
 		Project:        fg(c.ProjectColor),
 		Active:         fg(c.ActiveColor),
+		Events:         fg(c.EventsColor),
 		InProgress:     fg(c.InProgressColor),
 		Completed:      fg(c.CompletedColor),
 		Someday:        fg(c.SomedayColor),

@@ -51,6 +51,7 @@ func (v viewMode) String() string {
 type colorScheme struct {
 	project     lipgloss.Style
 	active      lipgloss.Style
+	events      lipgloss.Style
 	inProgress  lipgloss.Style
 	completed   lipgloss.Style
 	someday     lipgloss.Style
@@ -75,6 +76,7 @@ func initColors(cfg *config.Config) {
 	colors = colorScheme{
 		project:     s.Project,
 		active:      s.Active,
+		events:      s.Events,
 		inProgress:  s.InProgress,
 		completed:   s.Completed,
 		someday:     s.Someday,
@@ -965,7 +967,7 @@ func keywordStyle(st task.Status) lipgloss.Style {
 	case task.Container:
 		return colors.container
 	case task.Events:
-		return colors.active
+		return colors.events
 	}
 	return colors.completed
 }
