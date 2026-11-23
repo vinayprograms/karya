@@ -25,6 +25,40 @@ func TestEventColor(t *testing.T) {
 	}
 }
 
+func TestHints(t *testing.T) {
+	cfg := &config.Config{Todo: config.Todo{Events: []string{"MEETING"}}}
+	initColors(cfg)
+	m := initialModel(cfg)
+	m.termWidth, m.termHeight = 160, 40
+	m.flatItems = []task.AgendaItem{{Task: &task.Task{Keyword: "MEETING"}}, {Task: &task.Task{Keyword: "TODO"}}}
+	for _, cursor := range []int{0, 1, 0} {
+		m.cursor = cursor
+		view, help := m.View(), m.renderHelp()
+		for _, hint := range []string{"t: status", "i/o: in/out"} {
+			if strings.Contains(view, hint) != (cursor == 1) {
+				t.Errorf("cursor %d footer hint %q incorrect", cursor, hint)
+			}
+		}
+		for _, hint := range []string{"change status", "clock in", "clock out"} {
+			if strings.Contains(help, hint) != (cursor == 1) {
+				t.Errorf("cursor %d help hint %q incorrect", cursor, hint)
+			}
+		}
+		if !strings.Contains(view, "enter: edit") || !strings.Contains(view, "S/D: schedule/due") {
+			t.Fatal("event-compatible actions missing")
+		}
+	}
+	m.showingClockView = true
+	if !strings.Contains(m.renderHelp(), "change status") {
+		t.Fatal("clock view lost task actions")
+	}
+	m.showingClockView = false
+	m.flatItems = nil
+	if m.event() {
+		t.Fatal("empty selection treated as event")
+	}
+}
+
 func TestEvents(t *testing.T) {
 	cfg := &config.Config{Directories: config.Directories{Projects: t.TempDir(), Karya: t.TempDir()}, Todo: config.Todo{Active: []string{"TODO"}, Events: []string{"MEETING"}}}
 	content := "MEETING: sync @2026-11-20+1d\n  Notes\n"

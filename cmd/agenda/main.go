@@ -1058,6 +1058,9 @@ func (m model) renderHelp() string {
 	}
 
 	for _, kb := range bindings {
+		if m.event() && (kb.key == "t" || kb.key == "i" || kb.key == "o") {
+			continue
+		}
 		b.WriteString(fmt.Sprintf("  %s  %s\n",
 			keyStyle.Render(fmt.Sprintf("%-12s", kb.key)),
 			descStyle.Render(kb.desc)))
@@ -1553,10 +1556,18 @@ func (m model) View() string {
 	}
 
 	// Footer (anchored to bottom)
-	footer := colors.dimText.Render("t: status • S/D: schedule/due • c: clock • i/o: in/out • v: detail • enter: edit • ?: help • q: quit")
+	hints := "t: status • S/D: schedule/due • c: clock • i/o: in/out • v: detail • enter: edit • ?: help • q: quit"
+	if m.event() {
+		hints = "S/D: schedule/due • c: clock • v: detail • enter: edit • ?: help • q: quit"
+	}
+	footer := colors.dimText.Render(hints)
 	b.WriteString(footer)
 
 	return b.String()
+}
+
+func (m model) event() bool {
+	return !m.showingClockView && m.cursor >= 0 && m.cursor < len(m.flatItems) && m.flatItems[m.cursor].Task.Event(m.config)
 }
 
 func (m model) renderItem(item task.AgendaItem, selected bool) string {
