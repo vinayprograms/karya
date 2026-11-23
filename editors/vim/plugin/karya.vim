@@ -84,7 +84,7 @@ endfunction
 
 function! s:KaryaSyntax() abort
   " Clear syntax state so we re-apply from scratch
-  silent! syn clear karyaActive karyaInprogress karyaCompleted karyaSomeday karyaContainer
+  silent! syn clear karyaActive karyaInprogress karyaCompleted karyaSomeday karyaContainer karyaEvents
   silent! syn clear karyaCompletedLine karyaAssignee karyaScheduled karyaDue
   silent! syn clear karyaClock karyaLog karyaJira karyaTag karyaSpecialTag
 
@@ -96,7 +96,7 @@ function! s:KaryaSyntax() abort
   " re-invoke `todo colors` — colors don't change while editing.
   let s:karya_data = data
 
-  let keywords_by_cat = {'active': [], 'inprogress': [], 'completed': [], 'someday': [], 'container': []}
+  let keywords_by_cat = {'active': [], 'inprogress': [], 'completed': [], 'someday': [], 'container': [], 'events': []}
   let color_by_cat = {}
 
   for [kw, info] in items(data.keywords)
@@ -111,7 +111,7 @@ function! s:KaryaSyntax() abort
 
   let completed_hi = has_key(color_by_cat, 'completed') ? s:ColorToHighlight(color_by_cat['completed']) : ''
 
-  for category in ['active', 'inprogress', 'completed', 'someday', 'container']
+  for category in ['active', 'inprogress', 'completed', 'someday', 'container', 'events']
     let kws = keywords_by_cat[category]
     if empty(kws)
       continue
@@ -284,6 +284,9 @@ function! s:ParseTaskLine(line) abort
   endif
   let stripped = substitute(a:line, '^\s*[-*+]\?\s*', '', '')
   for [kw, info] in items(s:karya_data.keywords)
+    if info.category ==# 'events'
+      continue
+    endif
     if stripped =~# '^\V' . kw . '\m:\s'
       let title = substitute(stripped, '^\V' . kw . '\m:\s*', '', '')
       return {'keyword': kw, 'title': title}

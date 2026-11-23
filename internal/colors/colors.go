@@ -73,7 +73,12 @@ func Print(cfg *config.Config) error {
 		categoryMap[kw] = "container"
 	}
 
+	for _, kw := range cfg.Todo.Events {
+		categoryMap[kw] = "events"
+	}
+
 	colorForCategory := map[string]string{
+		"events":     normalizeHex(c.ActiveColor),
 		"active":     normalizeHex(c.ActiveColor),
 		"inprogress": normalizeHex(c.InProgressColor),
 		"completed":  normalizeHex(c.CompletedColor),

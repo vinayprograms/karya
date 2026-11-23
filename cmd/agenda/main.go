@@ -964,6 +964,8 @@ func keywordStyle(st task.Status) lipgloss.Style {
 		return colors.someday
 	case task.Container:
 		return colors.container
+	case task.Events:
+		return colors.active
 	}
 	return colors.completed
 }

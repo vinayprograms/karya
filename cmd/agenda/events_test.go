@@ -11,6 +11,20 @@ import (
 	"github.com/vinayprograms/karya/internal/task"
 )
 
+func TestEventColor(t *testing.T) {
+	cfg := &config.Config{
+		Todo:   config.Todo{Events: []string{"MEETING", "CUSTOM"}},
+		Colors: config.ColorScheme{ActiveColor: "#00ff00", TaskColor: "#123456", CompletedColor: "#abcdef"},
+	}
+	initColors(cfg)
+	for _, keyword := range cfg.Todo.Events {
+		got := keywordStyle(task.KeywordStatus(cfg, keyword)).GetForeground()
+		if got != colors.active.GetForeground() || got == colors.taskText.GetForeground() || got == colors.completed.GetForeground() {
+			t.Errorf("%s color = %v, want active keyword color, distinct from description", keyword, got)
+		}
+	}
+}
+
 func TestEvents(t *testing.T) {
 	cfg := &config.Config{Directories: config.Directories{Projects: t.TempDir(), Karya: t.TempDir()}, Todo: config.Todo{Active: []string{"TODO"}, Events: []string{"MEETING"}}}
 	content := "MEETING: sync @2026-11-20+1d\n  Notes\n"
