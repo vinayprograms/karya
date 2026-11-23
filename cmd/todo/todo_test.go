@@ -17,7 +17,7 @@ func createTestConfig() *config.Config {
 			InProgress: []string{"DOING", "WIP"},
 			Completed:  []string{"DONE", "COMPLETED"},
 			Someday:    []string{"SOMEDAY", "MAYBE"},
-			Routines:   []string{"REMINDER", "MEETING"},
+			Events:     []string{"REMINDER", "MEETING"},
 		},
 	}
 }
@@ -178,7 +178,7 @@ func TestParseLine(t *testing.T) {
 
 func TestProcessFile(t *testing.T) {
 	cfg := createTestConfig()
-	
+
 	// Create temp directory structure
 	tmpDir := t.TempDir()
 	projectDir := filepath.Join(tmpDir, "testproject", "notes", "20240101000000")
@@ -186,16 +186,16 @@ func TestProcessFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	
+
 	// Set the projects directory in config
 	cfg.Directories.Projects = tmpDir
 	cfg.Todo.Structured = true
-	
+
 	content := `TODO: Write code #urgent @2023-10-01 >> john
 DONE: Completed task
 SOMEDAY: Learn new language
 INVALID: Skip this`
-	
+
 	filePath := filepath.Join(projectDir, "README.md")
 	err = os.WriteFile(filePath, []byte(content), 0644)
 	if err != nil {
@@ -209,7 +209,7 @@ INVALID: Skip this`
 	if len(tasks) != 3 {
 		t.Errorf("Expected 3 tasks, got %d", len(tasks))
 	}
-	
+
 	expectedKeywords := []string{"TODO", "DONE", "SOMEDAY"}
 	for i, expectedKeyword := range expectedKeywords {
 		if i >= len(tasks) || tasks[i].Keyword != expectedKeyword {
@@ -224,7 +224,7 @@ func TestListTasks(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg.Directories.Projects = tmpDir
 	cfg.Todo.Structured = true
-	
+
 	tasks, err := task.ListTasks(cfg, "", true)
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
@@ -236,17 +236,17 @@ func TestListTasks(t *testing.T) {
 
 func TestTaskItemMarkdownRendering(t *testing.T) {
 	cfg := createTestConfig()
-	
+
 	// Initialize colors
 	InitializeColors(cfg)
-	
+
 	task := &task.Task{
 		Keyword: "TODO",
 		Title:   "This is **bold** and *italic* text with `code` and ~~strikethrough~~",
 		Project: "test",
 		Zettel:  "12345678901234",
 	}
-	
+
 	item := taskItem{
 		config:          cfg,
 		task:            task,
@@ -254,22 +254,22 @@ func TestTaskItemMarkdownRendering(t *testing.T) {
 		keywordColWidth: 10,
 		verbose:         false,
 	}
-	
+
 	// Test Title rendering
 	title := item.Title()
-	
+
 	// Check that markdown syntax is not present in the output
-	if strings.Contains(title, "**") || strings.Contains(title, "*") || 
-	   strings.Contains(title, "~~") || strings.Contains(title, "`") {
+	if strings.Contains(title, "**") || strings.Contains(title, "*") ||
+		strings.Contains(title, "~~") || strings.Contains(title, "`") {
 		t.Errorf("Title() should remove markdown syntax, got %v", title)
 	}
-	
-	// Test renderWithSelection
-	rendered := item.renderWithSelection(false)
-	
+
+	// Test render with indicator padding
+	rendered := item.render(false, true)
+
 	// Check that markdown syntax is not present in the output
-	if strings.Contains(rendered, "**") || strings.Contains(rendered, "*") || 
-	   strings.Contains(rendered, "~~") || strings.Contains(rendered, "`") {
-		t.Errorf("renderWithSelection() should remove markdown syntax, got %v", rendered)
+	if strings.Contains(rendered, "**") || strings.Contains(rendered, "*") ||
+		strings.Contains(rendered, "~~") || strings.Contains(rendered, "`") {
+		t.Errorf("render() should remove markdown syntax, got %v", rendered)
 	}
 }

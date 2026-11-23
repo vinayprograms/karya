@@ -253,6 +253,9 @@ func QueryClockTable(c *config.Config, start, end time.Time) (*ClockTable, error
 	projectMap := make(map[string][]ClockTableEntry)
 
 	for _, t := range tasks {
+		if t.Event(c) {
+			continue
+		}
 		entries, err := ParseClockEntries(t)
 		if err != nil || len(entries) == 0 {
 			continue

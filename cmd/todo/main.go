@@ -1,13 +1,11 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -16,9 +14,11 @@ import (
 
 	colorspkg "github.com/vinayprograms/karya/internal/colors"
 	configpkg "github.com/vinayprograms/karya/internal/config"
+	"github.com/vinayprograms/karya/internal/editor"
 	kgit "github.com/vinayprograms/karya/internal/git"
 	"github.com/vinayprograms/karya/internal/jira"
 	"github.com/vinayprograms/karya/internal/task"
+	"github.com/vinayprograms/karya/internal/watch"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
@@ -30,23 +30,23 @@ import (
 
 // ColorScheme holds the lipgloss color styles for rendering
 type ColorScheme struct {
-	prjColor             lipgloss.Style
-	activeColor          lipgloss.Style
-	inProgressColor      lipgloss.Style
-	completedColor       lipgloss.Style
-	somedayColor         lipgloss.Style
-	containerColor       lipgloss.Style
-	taskColor            lipgloss.Style
-	completedTaskColor   lipgloss.Style
-	specialTagColor      lipgloss.Style
-	tagColor             lipgloss.Style
-	dateColor            lipgloss.Style
-	pastDateColor        lipgloss.Style
-	todayDateColor       lipgloss.Style
-	assigneeColor        lipgloss.Style
-	cycleColor           lipgloss.Style
-	childConnectorColor  lipgloss.Style // ⌊ connector for child tasks
-	pendingChildColor    lipgloss.Style // ◑ indicator for parents with pending children
+	prjColor            lipgloss.Style
+	activeColor         lipgloss.Style
+	inProgressColor     lipgloss.Style
+	completedColor      lipgloss.Style
+	somedayColor        lipgloss.Style
+	containerColor      lipgloss.Style
+	taskColor           lipgloss.Style
+	completedTaskColor  lipgloss.Style
+	specialTagColor     lipgloss.Style
+	tagColor            lipgloss.Style
+	dateColor           lipgloss.Style
+	pastDateColor       lipgloss.Style
+	todayDateColor      lipgloss.Style
+	assigneeColor       lipgloss.Style
+	cycleColor          lipgloss.Style
+	childConnectorColor lipgloss.Style // ⌊ connector for child tasks
+	pendingChildColor   lipgloss.Style // ◑ indicator for parents with pending children
 }
 
 // Global color scheme (will be initialized from config)
@@ -54,24 +54,25 @@ var colors ColorScheme
 
 // InitializeColors initializes the color scheme from task config
 func InitializeColors(cfg *configpkg.Config) {
+	s := colorspkg.Styles(cfg)
 	colors = ColorScheme{
-		prjColor:           lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
-		activeColor:        lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ActiveColor)),
-		inProgressColor:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.InProgressColor)),
-		completedColor:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CompletedColor)),
-		somedayColor:       lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.SomedayColor)),
-		containerColor:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ContainerColor)),
-		taskColor:          lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TaskColor)),
-		completedTaskColor: lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CompletedTaskColor)),
-		tagColor:           lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TagColor)).Background(lipgloss.Color(cfg.Colors.TagBgColor)),
-		specialTagColor:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.SpecialTagColor)).Background(lipgloss.Color(cfg.Colors.SpecialTagBgColor)).Bold(true),
-		dateColor:          lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.DateColor)).Background(lipgloss.Color(cfg.Colors.DateBgColor)),
-		pastDateColor:      lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.PastDateColor)).Background(lipgloss.Color(cfg.Colors.PastDateBgColor)),
-		todayDateColor:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TodayDateColor)).Background(lipgloss.Color(cfg.Colors.TodayDateBgColor)).Bold(true),
-		assigneeColor:       lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.AssigneeColor)).Background(lipgloss.Color(cfg.Colors.AssigneeBgColor)).Bold(true),
-		cycleColor:          lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CycleColor)).Background(lipgloss.Color(cfg.Colors.CycleBgColor)).Bold(true),
-		childConnectorColor: lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
-		pendingChildColor:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.InProgressColor)),
+		prjColor:            s.Project,
+		activeColor:         s.Active,
+		inProgressColor:     s.InProgress,
+		completedColor:      s.Completed,
+		somedayColor:        s.Someday,
+		containerColor:      s.Container,
+		taskColor:           s.Task,
+		completedTaskColor:  s.CompletedTask,
+		tagColor:            s.Tag,
+		specialTagColor:     s.SpecialTag,
+		dateColor:           s.Date,
+		pastDateColor:       s.PastDate,
+		todayDateColor:      s.TodayDate,
+		assigneeColor:       s.Assignee,
+		cycleColor:          s.Cycle,
+		childConnectorColor: s.ChildConnector,
+		pendingChildColor:   s.PendingChild,
 	}
 }
 
@@ -97,7 +98,24 @@ func NewTaskItem(c *configpkg.Config, t *task.Task, projectColWidth, keywordColW
 	}
 }
 
-func (i taskItem) renderWithSelection(isSelected bool) string {
+// statusStyles returns the keyword and title styles for a task status.
+func statusStyles(st task.Status) (kwStyle, titleStyle lipgloss.Style) {
+	switch st {
+	case task.InProgress:
+		return colors.inProgressColor, colors.taskColor
+	case task.Active:
+		return colors.activeColor, colors.taskColor
+	case task.Someday:
+		return colors.somedayColor, colors.taskColor
+	case task.Container:
+		return colors.containerColor, colors.taskColor
+	}
+	return colors.completedColor, colors.completedTaskColor
+}
+
+// render builds the task row. isSelected shows the cursor indicator;
+// pad reserves the indicator column when unselected rows must align.
+func (i taskItem) render(isSelected, pad bool) string {
 	var parts []string
 
 	// Show cycle indicator if task is in a cycle
@@ -131,23 +149,8 @@ func (i taskItem) renderWithSelection(isSelected bool) string {
 		parts = append(parts, "  ")
 	}
 
-	var titleStyle lipgloss.Style
-	if i.task.IsActive(i.config) {
-		parts = append(parts, colors.activeColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
-		titleStyle = colors.taskColor
-	} else if i.task.IsInProgress(i.config) {
-		parts = append(parts, colors.inProgressColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
-		titleStyle = colors.taskColor
-	} else if i.task.IsSomeday(i.config) {
-		parts = append(parts, colors.somedayColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
-		titleStyle = colors.taskColor
-	} else if i.task.IsContainer(i.config) {
-		parts = append(parts, colors.containerColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
-		titleStyle = colors.taskColor
-	} else {
-		parts = append(parts, colors.completedColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
-		titleStyle = colors.completedTaskColor
-	}
+	kwStyle, titleStyle := statusStyles(i.task.Status(i.config))
+	parts = append(parts, kwStyle.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
 
 	// Progress fraction column immediately after keyword (fixed width, blank when not applicable)
 	if i.fractionColWidth > 0 {
@@ -171,14 +174,17 @@ func (i taskItem) renderWithSelection(isSelected bool) string {
 		titleWidth = 40
 	}
 	formattedTitle = task.TruncateString(formattedTitle, titleWidth)
-	if isSelected {
+	switch {
+	case isSelected:
 		indicator := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("13")).
 			Bold(true).
 			Render("█ ")
 		parts = append(parts, indicator+formattedTitle)
-	} else {
+	case pad:
 		parts = append(parts, "  "+formattedTitle)
+	default:
+		parts = append(parts, formattedTitle)
 	}
 
 	// Render tags with special color if they match special tags
@@ -226,116 +232,7 @@ func (i taskItem) FilterValue() string {
 }
 
 func (i taskItem) Title() string {
-	var parts []string
-
-	// Show cycle indicator if task is in a cycle
-	if i.task.InCycle {
-		parts = append(parts, colors.cycleColor.Render(" ⟲ "))
-	}
-
-	// Project column: blank for child tasks, project name for root tasks
-	if i.task.Parent != nil {
-		parts = append(parts, strings.Repeat(" ", i.projectColWidth))
-	} else {
-		parts = append(parts, colors.prjColor.Render(fmt.Sprintf("%-*s", i.projectColWidth, i.task.Project)))
-	}
-
-	// Only show Zettel column in verbose mode
-	if i.verbose {
-		parts = append(parts, colors.prjColor.Render(fmt.Sprintf("%-16s", i.task.Zettel)))
-	}
-
-	// Indicator slot (always 2 display columns):
-	//   ⌊  for child tasks (connector to parent above)
-	//   ◑  for root tasks with pending children
-	//      blank otherwise
-	done, total := i.task.PendingChildCount(i.config)
-	hasPending := total > 0 && done < total
-	if i.task.Parent != nil {
-		parts = append(parts, colors.childConnectorColor.Render("╰─"))
-	} else if hasPending {
-		parts = append(parts, colors.pendingChildColor.Render("◑ "))
-	} else {
-		parts = append(parts, "  ")
-	}
-
-	var titleStyle lipgloss.Style
-	if i.task.IsActive(i.config) {
-		parts = append(parts, colors.activeColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
-		titleStyle = colors.taskColor
-	} else if i.task.IsInProgress(i.config) {
-		parts = append(parts, colors.inProgressColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
-		titleStyle = colors.taskColor
-	} else if i.task.IsSomeday(i.config) {
-		parts = append(parts, colors.somedayColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
-		titleStyle = colors.taskColor
-	} else if i.task.IsContainer(i.config) {
-		parts = append(parts, colors.containerColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
-		titleStyle = colors.taskColor
-	} else {
-		parts = append(parts, colors.completedColor.Render(fmt.Sprintf("%-*s", i.keywordColWidth, i.task.Keyword)))
-		titleStyle = colors.completedTaskColor
-	}
-
-	// Progress fraction column immediately after keyword (fixed width, blank when not applicable)
-	if i.fractionColWidth > 0 {
-		if hasPending {
-			parts = append(parts, colors.completedColor.Render(fmt.Sprintf("%-*s", i.fractionColWidth, fmt.Sprintf("[%d/%d]", done, total))))
-		} else {
-			parts = append(parts, strings.Repeat(" ", i.fractionColWidth))
-		}
-	}
-
-	// Build title with optional ID prefix
-	displayTitle := i.task.Title
-	if i.task.ID != "" {
-		displayTitle = fmt.Sprintf("[%s] %s", i.task.ID, i.task.Title)
-	}
-
-	// Render task title with markdown formatting, then truncate (no padding)
-	formattedTitle := task.RenderMarkdownDescription(displayTitle, titleStyle)
-	titleWidth := i.maxTitleWidth
-	if titleWidth <= 0 {
-		titleWidth = 40
-	}
-	formattedTitle = task.TruncateString(formattedTitle, titleWidth)
-	parts = append(parts, formattedTitle)
-
-	// Render tags with special color if they match special tags
-	for _, tag := range i.task.Tags {
-		isSpecial := false
-		for _, specialTag := range i.config.Todo.SpecialTags {
-			if tag == specialTag || strings.HasPrefix(tag, specialTag+":") {
-				isSpecial = true
-				break
-			}
-		}
-		if isSpecial {
-			parts = append(parts, colors.specialTagColor.Render(fmt.Sprintf(" %s ", tag)))
-		} else {
-			parts = append(parts, colors.tagColor.Render(fmt.Sprintf(" %s ", tag)))
-		}
-	}
-	// Display date types with prefixes
-	if i.task.ScheduledAt != "" {
-		dateStyle := getDateStyle(i.task.ScheduledAt, false)
-		parts = append(parts, dateStyle.Render(fmt.Sprintf(" S:%s ", i.task.ScheduledAt)))
-	}
-	if i.task.DueAt != "" {
-		dateStyle := getDateStyle(i.task.DueAt, true)
-		parts = append(parts, dateStyle.Render(fmt.Sprintf(" D:%s ", i.task.DueAt)))
-	}
-	if i.task.Assignee != "" {
-		parts = append(parts, colors.assigneeColor.Render(fmt.Sprintf(" %s ", i.task.Assignee)))
-	}
-
-	// Show references if task has any
-	if len(i.task.References) > 0 {
-		refStr := "^" + strings.Join(i.task.References, " ^")
-		parts = append(parts, colors.prjColor.Render(refStr))
-	}
-
-	return strings.Join(parts, " ")
+	return i.render(false, false)
 }
 
 func (i taskItem) Description() string { return "" }
@@ -379,7 +276,7 @@ func (d taskDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 	}
 
 	isSelected := index == m.Index()
-	content := taskItem.renderWithSelection(isSelected)
+	content := taskItem.render(isSelected, true)
 	fmt.Fprint(w, content)
 }
 
@@ -395,36 +292,35 @@ type viewMode int
 
 const (
 	viewWork viewMode = iota
-	viewRoutines
 	viewContainers
 )
 
 type model struct {
-	list            list.Model
-	tasks           []*task.Task
-	config          *configpkg.Config
-	project         string
-	quitting        bool
-	watcher         *fsnotify.Watcher
+	list             list.Model
+	tasks            []*task.Task
+	config           *configpkg.Config
+	project          string
+	quitting         bool
+	watcher          *fsnotify.Watcher
 	projectColWidth  int
 	keywordColWidth  int
 	fractionColWidth int
 	savedFilter      string
-	customFilter    string
-	filterCursor    int
-	filtering       bool
-	allItems        []list.Item
-	structuredMode  bool
-	viewMode        viewMode
-	loading         bool
-	searchTerm      string // Track search term for editor highlighting
+	customFilter     string
+	filterCursor     int
+	filtering        bool
+	allItems         []list.Item
+	structuredMode   bool
+	viewMode         viewMode
+	loading          bool
+	searchTerm       string // Track search term for editor highlighting
 
 	// Status selector state
-	showingStatusSelector     bool
-	statusPicker              *task.StatusPicker
-	selectedTask              *task.Task
-	statusMessage             string
-	statusMessageTimer        int
+	showingStatusSelector bool
+	statusPicker          *task.StatusPicker
+	selectedTask          *task.Task
+	statusMessage         string
+	statusMessageTimer    int
 
 	// Pending-child warning state
 	showingPendingChildWarning bool
@@ -467,7 +363,7 @@ func (m model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-type fileChangedMsg struct{}
+type fileChangedMsg = watch.Changed
 
 type jiraSyncDoneMsg struct {
 	results []jiraSyncResult
@@ -532,37 +428,7 @@ type statusUpdateMsg struct {
 type clearStatusMsg struct{}
 
 func waitForFileChange(watcher *fsnotify.Watcher) tea.Cmd {
-	return func() tea.Msg {
-		if watcher == nil {
-			return nil
-		}
-
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					// Channel closed
-					return nil
-				}
-				// Watch for Write (file modification), Create (new file), and Remove (file deletion) events
-				if event.Op&fsnotify.Write == fsnotify.Write ||
-					event.Op&fsnotify.Create == fsnotify.Create ||
-					event.Op&fsnotify.Remove == fsnotify.Remove {
-					// Debounce: wait a bit for multiple writes to settle
-					time.Sleep(100 * time.Millisecond)
-					return fileChangedMsg{}
-				}
-				// If it's not a matching event, continue the loop to wait for the next one
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					// Channel closed
-					return nil
-				}
-				log.Printf("Watcher error: %v", err)
-				// Continue the loop to keep watching even after an error
-			}
-		}
-	}
+	return watch.Wait(watcher)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -840,8 +706,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "tab":
 				switch m.viewMode {
 				case viewWork:
-					m.viewMode = viewRoutines
-				case viewRoutines:
 					m.viewMode = viewContainers
 				case viewContainers:
 					m.viewMode = viewWork
@@ -855,12 +719,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, reloadTasksCmd()
 				}
 			case "2":
-				if m.viewMode != viewRoutines {
-					m.viewMode = viewRoutines
-					m.customFilter = ""
-					return m, reloadTasksCmd()
-				}
-			case "3":
 				if m.viewMode != viewContainers {
 					m.viewMode = viewContainers
 					m.customFilter = ""
@@ -963,10 +821,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.tasks = groupAndFilter(m.tasks, m.config)
 
 				// Partition routines from work tasks
-				work, routines, containers := task.Partition(m.tasks, m.config)
+				work, _, containers := task.Partition(m.tasks, m.config)
 				switch m.viewMode {
-				case viewRoutines:
-					m.tasks = routines
 				case viewContainers:
 					m.tasks = containers
 				default:
@@ -992,10 +848,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.tasks = groupAndFilter(newTasks, m.config)
 
 				// Partition routines from work tasks
-				work, routines, containers := task.Partition(m.tasks, m.config)
+				work, _, containers := task.Partition(m.tasks, m.config)
 				switch m.viewMode {
-				case viewRoutines:
-					m.tasks = routines
 				case viewContainers:
 					m.tasks = containers
 				default:
@@ -1063,10 +917,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.tasks = groupAndFilter(m.tasks, m.config)
 
 			// Partition routines from work tasks
-			work, routines, containers := task.Partition(m.tasks, m.config)
+			work, _, containers := task.Partition(m.tasks, m.config)
 			switch m.viewMode {
-			case viewRoutines:
-				m.tasks = routines
 			case viewContainers:
 				m.tasks = containers
 			default:
@@ -1131,10 +983,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Partition into work/routines/containers for current view
-		work, routines, containers := task.Partition(m.tasks, m.config)
+		work, _, containers := task.Partition(m.tasks, m.config)
 		switch m.viewMode {
-		case viewRoutines:
-			m.tasks = routines
 		case viewContainers:
 			m.tasks = containers
 		default:
@@ -1210,7 +1060,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *model) applyCustomFilter() {
 	if m.customFilter == "" {
 		m.list.SetItems(m.allItems)
-		m.searchTerm = ""  // Clear search term
+		m.searchTerm = "" // Clear search term
 		return
 	}
 
@@ -1218,7 +1068,7 @@ func (m *model) applyCustomFilter() {
 	if strings.HasPrefix(m.customFilter, "*") {
 		// Extract search term (everything after "*")
 		searchTerm := strings.TrimSpace(m.customFilter[1:])
-		m.searchTerm = searchTerm  // Store search term for editor
+		m.searchTerm = searchTerm // Store search term for editor
 		if searchTerm == "" {
 			m.list.SetItems(m.allItems)
 			return
@@ -1237,8 +1087,8 @@ func (m *model) applyCustomFilter() {
 		for _, result := range results {
 			// Create a pseudo-task to display the search result
 			pseudoTask := &task.Task{
-				Keyword:  "",  // Leave keyword empty
-				Title:    result.Line,  // Don't include project name in brackets
+				Keyword:  "",          // Leave keyword empty
+				Title:    result.Line, // Don't include project name in brackets
 				Project:  result.Project,
 				Zettel:   result.ZettelID,
 				FilePath: result.Path,
@@ -1250,7 +1100,7 @@ func (m *model) applyCustomFilter() {
 		m.list.SetItems(searchResultItems)
 		return
 	} else {
-		m.searchTerm = ""  // Clear search term for non-fulltext search
+		m.searchTerm = "" // Clear search term for non-fulltext search
 	}
 
 	// Extract tasks from all items
@@ -1429,12 +1279,7 @@ func (m model) renderPendingChildWarning() string {
 		BorderForeground(lipgloss.Color("9")).
 		Padding(1, 2)
 
-	activeCount := 0
-	for _, child := range m.selectedTask.Children {
-		if child.IsActive(m.config) || child.IsInProgress(m.config) {
-			activeCount++
-		}
-	}
+	activeCount := task.PendingChildren(m.selectedTask, m.config)
 
 	var content strings.Builder
 
@@ -1535,18 +1380,9 @@ func (m model) renderDetailLine(line string) string {
 		kw := kwMatch[1]
 		if task.IsKeywordValid(m.config, kw) {
 			// Determine keyword style
-			var kwStyle lipgloss.Style
-			t := &task.Task{Keyword: kw}
-			if t.IsInProgress(m.config) {
-				kwStyle = colors.inProgressColor
-			} else if t.IsActive(m.config) {
-				kwStyle = colors.activeColor
-			} else if t.IsSomeday(m.config) {
-				kwStyle = colors.somedayColor
-			} else if t.IsContainer(m.config) {
-				kwStyle = colors.containerColor
-			} else {
-				kwStyle = colors.completedColor
+			st := task.KeywordStatus(m.config, kw)
+			kwStyle, _ := statusStyles(st)
+			if st == task.Completed || st == task.Unknown {
 				textStyle = colors.completedTaskColor
 			}
 			// Replace the keyword in the line with styled version
@@ -1603,9 +1439,8 @@ func (m model) renderDetailLine(line string) string {
 
 type editorFinishedMsg struct{ err error }
 
-
 func isCompletedKeyword(cfg *configpkg.Config, keyword string) bool {
-	return task.IsCompletedKeyword(cfg, keyword)
+	return task.KeywordStatus(cfg, keyword) == task.Completed
 }
 
 func hasActiveChildren(t *task.Task, cfg *configpkg.Config) bool {
@@ -1746,7 +1581,6 @@ func (m *model) renderTabBar() string {
 
 	tabs := []tabDef{
 		{workLabel, viewWork, ""},
-		{"Routines", viewRoutines, "13"},
 		{"Containers", viewContainers, m.config.Colors.ContainerColor},
 	}
 
@@ -1803,102 +1637,17 @@ func openEditorCmd(cfg *configpkg.Config, t *task.Task, searchTerm string) tea.C
 	lineNum := t.LineNum
 	if lineNum == 0 {
 		var err error
-		lineNum, err = findTaskLine(filePath, t)
+		lineNum, err = task.Locate(filePath, t)
 		if err != nil {
-			return func() tea.Msg {
-				return editorFinishedMsg{err: err}
-			}
+			// Fall back to the top of the file so the editor still opens.
+			lineNum = 1
 		}
 	}
 
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		editor = "vim"
-	}
-
-	// Expand ~ in editor path
-	if strings.HasPrefix(editor, "~/") {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			editor = filepath.Join(home, editor[2:])
-		}
-	}
-
-	// Parse editor command (may contain arguments like "emacs -nw")
-	editorParts := strings.Fields(editor)
-	editorCmd := editorParts[0]
-	editorArgs := editorParts[1:]
-
-	// Get the base name of the editor to determine syntax
-	editorBase := filepath.Base(editorCmd)
-
-	// Handle search term if provided (similar to note command)
-	if searchTerm != "" {
-		switch editorBase {
-		case "vim", "nvim", "vi":
-			editorArgs = append(editorArgs, fmt.Sprintf("+/%s", searchTerm))
-		case "emacs":
-			editorArgs = append(editorArgs, "--eval", fmt.Sprintf("(progn (goto-char (point-min)) (search-forward \"%s\" nil t))", searchTerm))
-		}
-	}
-
-	// Handle line number navigation
-	if strings.Contains(editorBase, "vim") || strings.Contains(editorBase, "nvim") {
-		if searchTerm == "" {
-			// Only add line number if no search term
-			editorArgs = append(editorArgs, fmt.Sprintf("+%d", lineNum))
-		}
-		editorArgs = append(editorArgs, filePath)
-	} else if strings.Contains(editorBase, "emacs") {
-		if searchTerm == "" {
-			// Only add line number if no search term
-			editorArgs = append(editorArgs, fmt.Sprintf("+%d", lineNum))
-		}
-		editorArgs = append(editorArgs, filePath)
-	} else if strings.Contains(editorBase, "nano") {
-		editorArgs = append(editorArgs, fmt.Sprintf("+%d", lineNum), filePath)
-	} else if strings.Contains(editorBase, "code") {
-		editorArgs = append(editorArgs, "-g", fmt.Sprintf("%s:%d", filePath, lineNum))
-	} else {
-		// Unknown editor, just pass the file
-		editorArgs = append(editorArgs, filePath)
-	}
-
-	c := exec.Command(editorCmd, editorArgs...)
+	c := editor.Command(cfg.GeneralConfig.EDITOR, filePath, editor.At{Line: lineNum, Search: searchTerm})
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		return editorFinishedMsg{err: err}
 	})
-}
-
-func findTaskLine(filePath string, t *task.Task) (int, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return 0, err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	lineNum := 0
-
-	// Try matching by ID first (most reliable for JIRA tasks)
-	idPrefix := ""
-	if t.ID != "" {
-		idPrefix = fmt.Sprintf("[%s]", t.ID)
-	}
-	titleSearch := fmt.Sprintf("%s: %s", t.Keyword, t.Title)
-
-	for scanner.Scan() {
-		lineNum++
-		stripped, _ := task.StripLinePrefix(scanner.Text())
-		if idPrefix != "" && strings.Contains(stripped, idPrefix) {
-			return lineNum, nil
-		}
-		if strings.HasPrefix(stripped, titleSearch) {
-			return lineNum, nil
-		}
-	}
-
-	return 1, scanner.Err()
 }
 
 func calculateProjectColWidth(tasks []*task.Task) int {
@@ -1937,144 +1686,13 @@ func calculateFractionColWidth(tasks []*task.Task, cfg *configpkg.Config) int {
 
 // setupWatcher creates a new watcher and watches all relevant directories
 func setupWatcher(config *configpkg.Config, project string) (*fsnotify.Watcher, error) {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return nil, err
-	}
-
-	updateWatcher(watcher, config, project)
-	return watcher, nil
+	return watch.Dirs(task.WatchDirs(config, project)...)
 }
 
-// updateWatcher updates the watcher to monitor all relevant directories and files
+// updateWatcher refreshes the watched directory set (fsnotify tolerates
+// duplicate adds, so newly created directories are simply added).
 func updateWatcher(watcher *fsnotify.Watcher, config *configpkg.Config, project string) {
-	if watcher == nil {
-		return
-	}
-
-	// Get list of directories to watch
-	dirsToWatch := getWatchDirectories(config, project)
-
-	// Remove all current watches (fsnotify doesn't have a list method, so we track what we add)
-	// Since we can't efficiently remove specific watches, we'll just add new ones
-	// fsnotify handles duplicate adds gracefully
-
-	for _, dir := range dirsToWatch {
-		// Ignore errors - directory might not exist yet or might already be watched
-		watcher.Add(dir)
-	}
-
-	// Watch the inbox file's parent directory so external edits trigger a refresh
-	if inboxPath := config.GetInboxFilePath(); inboxPath != "" {
-		watcher.Add(filepath.Dir(inboxPath))
-	}
-}
-
-// maxWatchDirs limits the number of directories to watch in unstructured mode
-// to avoid exhausting file descriptors. Structured mode has no cap since it
-// only watches zettel directories (bounded by actual project/note count).
-const maxWatchDirs = 1000
-
-// getWatchDirectories returns a list of directories that should be watched.
-// In structured mode, watches only the zettel directories (PRJDIR/*/notes/*/).
-// In unstructured mode, watches up to maxWatchDirs directories, prioritizing shallower ones.
-func getWatchDirectories(config *configpkg.Config, project string) []string {
-	if config.Todo.Structured {
-		return getStructuredWatchDirs(config, project)
-	}
-	return getUnstructuredWatchDirs(config, project)
-}
-
-// getStructuredWatchDirs returns directories for structured (zettelkasten) mode.
-// Only watches: PRJDIR, PRJDIR/*, PRJDIR/*/notes, and PRJDIR/*/notes/*
-func getStructuredWatchDirs(config *configpkg.Config, project string) []string {
-	var dirs []string
-	prjDir := config.Directories.Projects
-
-	if project != "" && project != "*" {
-		// Specific project: watch project dir and its notes subdirs
-		projectDir := filepath.Join(prjDir, project)
-		notesDir := filepath.Join(projectDir, "notes")
-		dirs = append(dirs, projectDir, notesDir)
-
-		// Add zettel directories under notes/
-		entries, err := os.ReadDir(notesDir)
-		if err == nil {
-			for _, e := range entries {
-				if e.IsDir() {
-					dirs = append(dirs, filepath.Join(notesDir, e.Name()))
-				}
-			}
-		}
-	} else {
-		// All projects: watch PRJDIR and each project's notes structure
-		dirs = append(dirs, prjDir)
-
-		entries, err := os.ReadDir(prjDir)
-		if err == nil {
-			for _, e := range entries {
-				if e.IsDir() {
-					projectDir := filepath.Join(prjDir, e.Name())
-					notesDir := filepath.Join(projectDir, "notes")
-					dirs = append(dirs, projectDir, notesDir)
-
-					// Add zettel directories under notes/
-					zettelEntries, err := os.ReadDir(notesDir)
-					if err == nil {
-						for _, z := range zettelEntries {
-							if z.IsDir() {
-								dirs = append(dirs, filepath.Join(notesDir, z.Name()))
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	return dirs
-}
-
-// getUnstructuredWatchDirs returns directories for unstructured mode.
-// Watches up to maxWatchDirs directories, prioritizing shallower ones.
-func getUnstructuredWatchDirs(config *configpkg.Config, project string) []string {
-	var dirs []string
-
-	rootDir := config.Directories.Projects
-	if project != "" && project != "*" {
-		rootDir = filepath.Join(config.Directories.Projects, project)
-	}
-
-	// Collect directories with depth info for prioritization
-	rootDepth := strings.Count(rootDir, string(filepath.Separator))
-	type dirInfo struct {
-		path  string
-		depth int
-	}
-	var allDirs []dirInfo
-
-	filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
-		if err == nil && info.IsDir() {
-			depth := strings.Count(path, string(filepath.Separator)) - rootDepth
-			allDirs = append(allDirs, dirInfo{path: path, depth: depth})
-		}
-		return nil
-	})
-
-	// Sort by depth (shallower first) to prioritize important directories
-	sort.Slice(allDirs, func(i, j int) bool {
-		return allDirs[i].depth < allDirs[j].depth
-	})
-
-	// Take only up to maxWatchDirs directories
-	for i, d := range allDirs {
-		if i >= maxWatchDirs {
-			break
-		}
-		dirs = append(dirs, d.path)
-	}
-
-	return dirs
+	watch.Add(watcher, task.WatchDirs(config, project)...)
 }
 
 // taskKey creates a unique identifier for a task (includes keyword for cursor restoration)
@@ -2270,10 +1888,7 @@ func mergeTasksPreservingOrder(existing, incoming []*task.Task, cfg *configpkg.C
 }
 
 func main() {
-	config, err := configpkg.Load()
-	if err != nil {
-		log.Fatal(err)
-	}
+	config := configpkg.MustLoad()
 
 	// Initialize colors from config
 	InitializeColors(config)
@@ -2326,6 +1941,7 @@ func main() {
 			}
 			return false
 		})
+		tasks, _, _ = task.Partition(tasks, config)
 		printTasksPlain(config, tasks)
 	case "projects":
 		summary, err := task.SummarizeProjects(config)
@@ -2350,7 +1966,7 @@ func main() {
 			log.Fatal(err)
 		}
 		for _, t := range tasks {
-			if t.Keyword == keyword && matchTaskTitle(t, title) {
+			if t.Keyword == keyword && matchTaskTitle(t, title) && !t.Event(config) {
 				if err := task.ClockIn(t); err != nil {
 					log.Fatal(err)
 				}
@@ -2371,7 +1987,7 @@ func main() {
 			log.Fatal(err)
 		}
 		for _, t := range tasks {
-			if t.Keyword == keyword && matchTaskTitle(t, title) {
+			if t.Keyword == keyword && matchTaskTitle(t, title) && !t.Event(config) {
 				if err := task.ClockOut(t); err != nil {
 					log.Fatal(err)
 				}
@@ -2394,7 +2010,7 @@ func main() {
 			log.Fatal(err)
 		}
 		for _, t := range tasks {
-			if t.Keyword == keyword && matchTaskTitle(t, title) {
+			if t.Keyword == keyword && matchTaskTitle(t, title) && !t.Event(config) {
 				oldKeyword := t.Keyword
 
 				if isCompletedKeyword(config, newKeyword) {
@@ -2687,7 +2303,7 @@ func showInteractiveTUI(config *configpkg.Config, project string) {
 			),
 			key.NewBinding(
 				key.WithKeys("tab"),
-				key.WithHelp("tab/1/2/3", "switch view"),
+				key.WithHelp("tab/1/2", "switch view"),
 			),
 		}
 	}
@@ -2772,7 +2388,7 @@ func showInteractiveTUI(config *configpkg.Config, project string) {
 			),
 			key.NewBinding(
 				key.WithKeys("tab"),
-				key.WithHelp("tab/1/2/3", "switch view (tasks/routines/containers)"),
+				key.WithHelp("tab/1/2", "switch view (tasks/containers)"),
 			),
 		}
 	}
@@ -2815,18 +2431,19 @@ func printTasksPlain(config *configpkg.Config, tasks []*task.Task) {
 	projectColWidth := calculateProjectColWidth(tasks)
 	taskColor := lipgloss.NewStyle()
 	completedTaskColor := lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // Gray for completed tasks
-	
+
 	for _, t := range tasks {
 		var titleStyle lipgloss.Style
-		if t.IsActive(config) || t.IsInProgress(config) || t.IsSomeday(config) || t.IsContainer(config) {
+		switch t.Status(config) {
+		case task.Active, task.InProgress, task.Someday, task.Container:
 			titleStyle = taskColor
-		} else {
+		default:
 			titleStyle = completedTaskColor
 		}
-		
+
 		// Render task title with markdown formatting
 		formattedTitle := task.RenderMarkdownDescription(t.Title, titleStyle)
-		
+
 		if config.GeneralConfig.Verbose {
 			fmt.Printf("%-*s %-16s %-12s %-40s",
 				projectColWidth, t.Project, t.Zettel, t.Keyword, formattedTitle)
@@ -2883,4 +2500,3 @@ func printProjectsList(summary map[string]int) {
 		fmt.Printf("%-20s %5d\n", p, summary[p])
 	}
 }
-

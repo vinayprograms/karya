@@ -3,6 +3,16 @@ bin/
 .crush
 .crit.md
 design-files/
+design/
 tags
 notes/
+.claude/
 decisions.md
+
+# stray build binaries
+/goal
+/note
+/todo
+/zet
+/agenda
+/inbox

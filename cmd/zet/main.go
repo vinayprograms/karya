@@ -4,19 +4,19 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	colorspkg "github.com/vinayprograms/karya/internal/colors"
 	"github.com/vinayprograms/karya/internal/config"
+	editorpkg "github.com/vinayprograms/karya/internal/editor"
 	"github.com/vinayprograms/karya/internal/task"
+	"github.com/vinayprograms/karya/internal/watch"
 	"github.com/vinayprograms/karya/internal/zet"
+	"github.com/vinayprograms/karya/internal/zetui"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
@@ -40,13 +40,14 @@ type ColorScheme struct {
 var colors ColorScheme
 
 func InitializeColors(cfg *config.Config) {
+	s := colorspkg.Styles(cfg)
 	colors = ColorScheme{
-		zettelIDStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
-		titleStyle:      lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TaskColor)),
-		normalStyle:     lipgloss.NewStyle(),
-		highlightStyle:  lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(cfg.Colors.ActiveColor)),
-		matchCountStyle: lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.InProgressColor)).Bold(true),
-		selectorStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Bold(true),
+		zettelIDStyle:   s.Project,
+		titleStyle:      s.Task,
+		normalStyle:     s.Normal,
+		highlightStyle:  s.Highlight,
+		matchCountStyle: s.InProgress.Bold(true),
+		selectorStyle:   s.Selector,
 	}
 }
 
@@ -68,7 +69,7 @@ func (v allZettelsView) refresh(zetDir string, verbose bool) []list.Item {
 	}
 	items := make([]list.Item, len(zettels))
 	for i, z := range zettels {
-		items[i] = zettelItem{zettel: z, verbose: verbose}
+		items[i] = newZettelItem(z, verbose, nil)
 	}
 	return items
 }
@@ -98,7 +99,7 @@ func (v pinboardView) refresh(zetDir string, verbose bool) []list.Item {
 	}
 	items := make([]list.Item, len(pinned))
 	for i, z := range pinned {
-		items[i] = zettelItem{zettel: z, verbose: verbose}
+		items[i] = newZettelItem(z, verbose, nil)
 	}
 	return items
 }
@@ -125,70 +126,20 @@ func (v pinboardView) renderHeader(width int) string {
 		Render(title + strings.Repeat(" ", padding))
 }
 
-type zettelItem struct {
-	zettel        Zettel
-	verbose       bool
-	searchResults []SearchResult // For fulltext search results
-}
+type zettelItem = zetui.Item
 
-func (i zettelItem) FilterValue() string {
-	return i.zettel.ID + " " + i.zettel.Title
-}
-
-func (i zettelItem) renderWithSelection(isSelected bool, glyph string) string {
-	var parts []string
-
-	// Show match count if there are search results
-	if len(i.searchResults) > 0 {
-		matchCount := colors.matchCountStyle.Render(fmt.Sprintf("[%d] ", len(i.searchResults)))
-		parts = append(parts, matchCount)
+func newZettelItem(z Zettel, verbose bool, results []SearchResult) zettelItem {
+	return zetui.Item{
+		Zettel:        z,
+		Verbose:       verbose,
+		SearchResults: results,
+		Styles: zetui.Styles{
+			ID:         colors.zettelIDStyle,
+			Title:      colors.titleStyle,
+			Selector:   colors.selectorStyle,
+			MatchCount: colors.matchCountStyle,
+		},
 	}
-
-	if i.verbose {
-		parts = append(parts, colors.zettelIDStyle.Render(fmt.Sprintf("%-14s", i.zettel.ID)))
-	}
-
-	if isSelected {
-		indicator := colors.selectorStyle.Render(glyph + " ")
-		parts = append(parts, indicator+colors.titleStyle.Render(i.zettel.Title))
-	} else {
-		parts = append(parts, "  "+colors.titleStyle.Render(i.zettel.Title))
-	}
-
-	return strings.Join(parts, " ")
-}
-
-func (i zettelItem) Title() string {
-	var parts []string
-
-	if i.verbose {
-		parts = append(parts, colors.zettelIDStyle.Render(fmt.Sprintf("%-14s", i.zettel.ID)))
-	}
-
-	parts = append(parts, colors.titleStyle.Render(i.zettel.Title))
-	return strings.Join(parts, " ")
-}
-
-func (i zettelItem) Description() string { return "" }
-
-type zettelDelegate struct {
-	list.DefaultDelegate
-	cursorGlyph *string
-}
-
-func (d zettelDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
-	zi, ok := item.(zettelItem)
-	if !ok {
-		return
-	}
-
-	isSelected := index == m.Index()
-	glyph := "█"
-	if d.cursorGlyph != nil {
-		glyph = *d.cursorGlyph
-	}
-	content := zi.renderWithSelection(isSelected, glyph)
-	fmt.Fprint(w, content)
 }
 
 type model struct {
@@ -217,34 +168,10 @@ func (m model) Init() tea.Cmd {
 	return waitForFileChange(m.watcher)
 }
 
-type fileChangedMsg struct{}
+type fileChangedMsg = watch.Changed
 
 func waitForFileChange(watcher *fsnotify.Watcher) tea.Cmd {
-	return func() tea.Msg {
-		if watcher == nil {
-			return nil
-		}
-
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return nil
-				}
-				if event.Op&fsnotify.Write == fsnotify.Write ||
-					event.Op&fsnotify.Create == fsnotify.Create ||
-					event.Op&fsnotify.Remove == fsnotify.Remove {
-					time.Sleep(100 * time.Millisecond)
-					return fileChangedMsg{}
-				}
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					return nil
-				}
-				log.Printf("Watcher error: %v", err)
-			}
-		}
-	}
+	return watch.Wait(watcher)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -291,7 +218,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.zettels = zettels
 						items := make([]list.Item, len(m.zettels))
 						for i, z := range m.zettels {
-							items[i] = zettelItem{zettel: z, verbose: m.verbose}
+							items[i] = newZettelItem(z, m.verbose, nil)
 						}
 						m.allItems = items
 						m.list.SetItems(items)
@@ -425,7 +352,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Delete zettel - show confirmation
 			if i, ok := m.list.SelectedItem().(zettelItem); ok {
 				m.showDeleteConfirm = true
-				m.deleteZettel = &i.zettel
+				m.deleteZettel = &i.Zettel
 				m.deleteConfirmSelection = 0 // Default to Cancel
 				return m, nil
 			}
@@ -438,7 +365,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.filterMode == "fulltext" && m.customFilter != "" {
 					searchTerm = m.customFilter
 				}
-				return m, openEditorCmd(m.editor, i.zettel.Path, searchTerm)
+				return m, openEditorCmd(m.editor, i.Zettel.Path, searchTerm)
 			}
 		}
 	case fileChangedMsg:
@@ -627,21 +554,17 @@ func (m *model) applyFilter() {
 		if zetItem, ok := item.(zettelItem); ok {
 			if m.filterMode == "title" {
 				// Title search: search in ID and title
-				if strings.Contains(strings.ToLower(zetItem.zettel.ID), filterLower) ||
-					strings.Contains(strings.ToLower(zetItem.zettel.Title), filterLower) {
+				if strings.Contains(strings.ToLower(zetItem.Zettel.ID), filterLower) ||
+					strings.Contains(strings.ToLower(zetItem.Zettel.Title), filterLower) {
 					filteredItems = append(filteredItems, item)
 				}
 			} else if m.filterMode == "fulltext" {
 				// Fulltext search: search in file content and collect results
-				results := m.searchInFile(zetItem.zettel.Path, filterLower)
+				results := m.searchInFile(zetItem.Zettel.Path, filterLower)
 				if len(results) > 0 {
-					m.searchResults[zetItem.zettel.ID] = results
+					m.searchResults[zetItem.Zettel.ID] = results
 					// Create new zettelItem with search results
-					newItem := zettelItem{
-						zettel:        zetItem.zettel,
-						verbose:       zetItem.verbose,
-						searchResults: results,
-					}
+					newItem := newZettelItem(zetItem.Zettel, zetItem.Verbose, results)
 					filteredItems = append(filteredItems, newItem)
 				}
 			}
@@ -676,7 +599,7 @@ func (m *model) refreshList() {
 	m.zettels = zettels
 	items := make([]list.Item, len(m.zettels))
 	for i, z := range m.zettels {
-		items[i] = zettelItem{zettel: z, verbose: m.verbose}
+		items[i] = newZettelItem(z, m.verbose, nil)
 	}
 	m.allItems = items
 
@@ -703,7 +626,7 @@ func (m *model) sortZettels() {
 	// Recreate items with sorted zettels
 	items := make([]list.Item, len(m.zettels))
 	for i, z := range m.zettels {
-		items[i] = zettelItem{zettel: z, verbose: m.verbose}
+		items[i] = newZettelItem(z, m.verbose, nil)
 	}
 	m.allItems = items
 
@@ -731,19 +654,7 @@ func newZettelCmd(zetDir, editor string) tea.Cmd {
 	// Open in editor using tea.ExecProcess
 	zetPath := filepath.Join(zetDir, zetID, "README.md")
 
-	if strings.HasPrefix(editor, "~/") {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			editor = filepath.Join(home, editor[2:])
-		}
-	}
-
-	editorParts := strings.Fields(editor)
-	editorCmd := editorParts[0]
-	editorArgs := editorParts[1:]
-	editorArgs = append(editorArgs, zetPath)
-
-	c := exec.Command(editorCmd, editorArgs...)
+	c := editorpkg.Command(editor, zetPath, editorpkg.At{})
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		// Update README and pinboard after editing
 		zet.UpdateReadme(zetDir)
@@ -769,19 +680,7 @@ func editLastZettelCmd(zetDir, editor string) tea.Cmd {
 
 	zetPath := filepath.Join(zetDir, zetID, "README.md")
 
-	if strings.HasPrefix(editor, "~/") {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			editor = filepath.Join(home, editor[2:])
-		}
-	}
-
-	editorParts := strings.Fields(editor)
-	editorCmd := editorParts[0]
-	editorArgs := editorParts[1:]
-	editorArgs = append(editorArgs, zetPath)
-
-	c := exec.Command(editorCmd, editorArgs...)
+	c := editorpkg.Command(editor, zetPath, editorpkg.At{})
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		// Update pinboard and commit changes
 		zet.UpdatePinboard(zetDir)
@@ -795,41 +694,7 @@ func editLastZettelCmd(zetDir, editor string) tea.Cmd {
 }
 
 func openEditorCmd(editor, filePath, searchTerm string) tea.Cmd {
-	if strings.HasPrefix(editor, "~/") {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			editor = filepath.Join(home, editor[2:])
-		}
-	}
-
-	editorParts := strings.Fields(editor)
-	editorCmd := editorParts[0]
-	editorArgs := editorParts[1:]
-
-	// Add search term support for common editors
-	if searchTerm != "" {
-		editorName := filepath.Base(editorCmd)
-		switch editorName {
-		case "vim", "nvim", "vi":
-			// Vim: +/pattern to search and highlight
-			editorArgs = append(editorArgs, fmt.Sprintf("+/%s", searchTerm))
-		case "nano":
-			// Nano: -w (disable line wrapping) and then we can't directly search, but we can go to first match
-			// Nano doesn't support opening with search, user will need to Ctrl+W to search
-		case "emacs":
-			// Emacs: --eval to search
-			editorArgs = append(editorArgs, "--eval", fmt.Sprintf("(progn (goto-char (point-min)) (search-forward \"%s\" nil t))", searchTerm))
-		case "code", "code-insiders":
-			// VS Code: -g flag with :line:column, but we can't highlight search
-			// VS Code doesn't support opening with search highlighting
-		case "subl", "sublime_text":
-			// Sublime: doesn't support opening with search
-		}
-	}
-
-	editorArgs = append(editorArgs, filePath)
-
-	c := exec.Command(editorCmd, editorArgs...)
+	c := editorpkg.Command(editor, filePath, editorpkg.At{Search: searchTerm})
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		// Extract zetDir and zetID from filePath
 		// filePath format: /path/to/zetdir/YYYYMMDDHHMMSS/README.md
@@ -852,10 +717,7 @@ func openEditorCmd(editor, filePath, searchTerm string) tea.Cmd {
 }
 
 func main() {
-	cfg, err := config.Load()
-	if err != nil {
-		log.Fatal(err)
-	}
+	cfg := config.MustLoad()
 
 	InitializeColors(cfg)
 
@@ -1031,11 +893,7 @@ func main() {
 		}
 	case "toc":
 		tocPath := filepath.Join(zetDir, "README.md")
-		cmd := exec.Command(editor, tocPath)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
+		if err := editorpkg.Open(editor, tocPath, editorpkg.At{}); err != nil {
 			log.Fatal(err)
 		}
 	case "mcp":
@@ -1141,13 +999,13 @@ func showInteractiveTUI(zetDir, editor string, verbose bool) {
 
 	items := make([]list.Item, len(zettels))
 	for i, z := range zettels {
-		items[i] = zettelItem{zettel: z, verbose: verbose}
+		items[i] = newZettelItem(z, verbose, nil)
 	}
 
 	cursorGlyph := "█"
-	delegate := zettelDelegate{
+	delegate := zetui.Delegate{
 		DefaultDelegate: list.NewDefaultDelegate(),
-		cursorGlyph:     &cursorGlyph,
+		CursorGlyph:     &cursorGlyph,
 	}
 	delegate.ShowDescription = false
 	delegate.SetHeight(1)
@@ -1302,11 +1160,7 @@ func newZettel(zetDir, title, editor string) error {
 	}
 
 	zetPath := filepath.Join(zetDir, zetID, "README.md")
-	cmd := exec.Command(editor, zetPath)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	if err := editorpkg.Open(editor, zetPath, editorpkg.At{}); err != nil {
 		return err
 	}
 
@@ -1356,11 +1210,7 @@ func editZettel(zetDir, zetID, editor string) error {
 	}
 	fmt.Printf("EDITING: %s\n", title)
 
-	cmd := exec.Command(editor, zetPath)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	if err := editorpkg.Open(editor, zetPath, editorpkg.At{}); err != nil {
 		return err
 	}
 
@@ -1428,35 +1278,21 @@ func printTitleSearchResults(results []Zettel) {
 }
 
 func setupWatcher(zetDir string) (*fsnotify.Watcher, error) {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return nil, err
-	}
-
-	updateWatcher(watcher, zetDir)
-	return watcher, nil
+	return watch.Dirs(zettelWatchDirs(zetDir)...)
 }
 
 func updateWatcher(watcher *fsnotify.Watcher, zetDir string) {
-	if watcher == nil {
-		return
-	}
-
-	dirsToWatch := getWatchDirectories(zetDir)
-	for _, dir := range dirsToWatch {
-		watcher.Add(dir)
-	}
+	watch.Add(watcher, zettelWatchDirs(zetDir)...)
 }
 
-func getWatchDirectories(zetDir string) []string {
+// zettelWatchDirs returns every directory under the zettelkasten root.
+func zettelWatchDirs(zetDir string) []string {
 	var dirs []string
-
 	filepath.Walk(zetDir, func(path string, info os.FileInfo, err error) error {
 		if err == nil && info.IsDir() {
 			dirs = append(dirs, path)
 		}
 		return nil
 	})
-
 	return dirs
 }

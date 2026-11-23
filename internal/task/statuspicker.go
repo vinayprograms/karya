@@ -46,13 +46,19 @@ func NewStatusPicker(t *Task, c *config.Config) *StatusPicker {
 	}
 
 	for _, cat := range cats {
-		if len(cat.keywords) == 0 {
+		var keywords []string
+		for _, keyword := range cat.keywords {
+			if KeywordStatus(c, keyword) != Events {
+				keywords = append(keywords, keyword)
+			}
+		}
+		if len(keywords) == 0 {
 			continue
 		}
 		sp.Columns = append(sp.Columns, statusColumn{
 			Title:    cat.title,
 			Color:    cat.color,
-			Keywords: cat.keywords,
+			Keywords: keywords,
 		})
 	}
 

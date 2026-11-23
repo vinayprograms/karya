@@ -25,10 +25,8 @@ func createTestConfig() *config.Config {
 			Someday: []string{
 				"SOMEDAY", "MAYBE", "LATER", "WISHLIST",
 			},
-			Containers: []string{
-				"CONTAINER", "EPIC",
-			},
-			Routines: []string{
+			Containers: []string{"CONTAINER", "EPIC"},
+			Events: []string{
 				"REMINDER", "MEETING",
 			},
 		},
@@ -40,7 +38,7 @@ func createTestConfig() *config.Config {
 
 func TestTask_IsSomeday(t *testing.T) {
 	cfg := createTestConfig()
-	
+
 	tests := []struct {
 		name    string
 		keyword string
@@ -55,7 +53,7 @@ func TestTask_IsSomeday(t *testing.T) {
 		{"inprogress keyword should not be someday", "DOING", false},
 		{"unknown keyword should not be someday", "UNKNOWN", false},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			task := &Task{Keyword: tt.keyword}
@@ -73,7 +71,7 @@ func TestTask_IsSomeday_NilConfig(t *testing.T) {
 	}
 }
 
-func TestTask_IsRoutine(t *testing.T) {
+func TestTask_Event(t *testing.T) {
 	cfg := createTestConfig()
 
 	tests := []struct {
@@ -94,15 +92,15 @@ func TestTask_IsRoutine(t *testing.T) {
 		{
 			name: "REMINDER with no recurrence — one-off",
 			task: &Task{Keyword: "REMINDER", ScheduledAt: "2026-08-10"},
-			want: false,
+			want: true,
 		},
 		{
 			name: "MEETING with no date at all",
 			task: &Task{Keyword: "MEETING"},
-			want: false,
+			want: true,
 		},
 		{
-			name: "TODO with recurrence — keyword not in routines",
+			name: "TODO with recurrence — keyword not in events",
 			task: &Task{Keyword: "TODO", ScheduledAt: "2026-08-10+1w"},
 			want: false,
 		},
@@ -127,7 +125,7 @@ func TestTask_IsRoutine(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "DOING keyword — not in routines list",
+			name: "DOING keyword — not in events list",
 			task: &Task{Keyword: "DOING", ScheduledAt: "2026-08-10+1d"},
 			want: false,
 		},
@@ -135,33 +133,33 @@ func TestTask_IsRoutine(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.task.IsRoutine(cfg); got != tt.want {
-				t.Errorf("IsRoutine() = %v, want %v", got, tt.want)
+			if got := tt.task.Event(cfg); got != tt.want {
+				t.Errorf("Event() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestTask_IsRoutine_NilConfig(t *testing.T) {
+func TestTask_Event_NilConfig(t *testing.T) {
 	task := &Task{Keyword: "REMINDER", ScheduledAt: "2026-08-10+1w"}
-	if got := task.IsRoutine(nil); got != false {
-		t.Errorf("IsRoutine() with nil config = %v, want false", got)
+	if got := task.Event(nil); got != false {
+		t.Errorf("Event() with nil config = %v, want false", got)
 	}
 }
 
-func TestTask_IsRoutine_EmptyRoutinesConfig(t *testing.T) {
+func TestTask_Event_EmptyEventsConfig(t *testing.T) {
 	cfg := &config.Config{
 		Todo: config.Todo{
 			Active: []string{"TODO", "REMINDER"},
 		},
 	}
 	task := &Task{Keyword: "REMINDER", ScheduledAt: "2026-08-10+1w"}
-	if got := task.IsRoutine(cfg); got != false {
-		t.Errorf("IsRoutine() with empty routines config = %v, want false", got)
+	if got := task.Event(cfg); got != false {
+		t.Errorf("Event() with empty events config = %v, want false", got)
 	}
 }
 
-func TestPartitionRoutines(t *testing.T) {
+func TestPartition(t *testing.T) {
 	cfg := createTestConfig()
 
 	tasks := []*Task{
@@ -173,29 +171,29 @@ func TestPartitionRoutines(t *testing.T) {
 		{Keyword: "REMINDER", Title: "reminder no date"},
 	}
 
-	work, routines := PartitionRoutines(tasks, cfg)
+	work, events, _ := Partition(tasks, cfg)
 
-	if len(work) != 4 {
-		t.Errorf("expected 4 work tasks, got %d", len(work))
+	if len(work) != 2 {
+		t.Errorf("expected 2 work tasks, got %d", len(work))
 	}
-	if len(routines) != 2 {
-		t.Errorf("expected 2 routines, got %d", len(routines))
+	if len(events) != 4 {
+		t.Errorf("expected 4 events, got %d", len(events))
 	}
 
 	// Verify the right tasks ended up in each partition
-	for _, r := range routines {
-		if r.Title != "daily standup" && r.Title != "weekly sync" {
+	for _, r := range events {
+		if !r.Event(cfg) {
 			t.Errorf("unexpected routine: %s", r.Title)
 		}
 	}
 	for _, w := range work {
-		if w.Title == "daily standup" || w.Title == "weekly sync" {
+		if w.Event(cfg) {
 			t.Errorf("routine in work partition: %s", w.Title)
 		}
 	}
 }
 
-func TestPartitionRoutines_EmptyConfig(t *testing.T) {
+func TestPartition_EmptyConfig(t *testing.T) {
 	cfg := &config.Config{
 		Todo: config.Todo{
 			Active: []string{"TODO", "REMINDER"},
@@ -207,19 +205,19 @@ func TestPartitionRoutines_EmptyConfig(t *testing.T) {
 		{Keyword: "REMINDER", Title: "recurring", ScheduledAt: "2026-08-10+1d"},
 	}
 
-	work, routines := PartitionRoutines(tasks, cfg)
+	work, events, _ := Partition(tasks, cfg)
 
 	if len(work) != 2 {
-		t.Errorf("expected all tasks as work when routines config empty, got %d", len(work))
+		t.Errorf("expected all tasks as work when events config empty, got %d", len(work))
 	}
-	if len(routines) != 0 {
-		t.Errorf("expected no routines when config empty, got %d", len(routines))
+	if len(events) != 0 {
+		t.Errorf("expected no events when config empty, got %d", len(events))
 	}
 }
 
 func TestParseLineSomedayKeywords(t *testing.T) {
 	cfg := createTestConfig()
-	
+
 	tests := []struct {
 		name     string
 		line     string
@@ -274,7 +272,7 @@ func TestParseLineSomedayKeywords(t *testing.T) {
 			},
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := ParseLine(cfg, tt.line, tt.project, tt.zettel, tt.filepath)
@@ -289,7 +287,7 @@ func TestParseLineSomedayKeywords(t *testing.T) {
 				t.Errorf("ParseLine() = %v, want nil", got)
 				return
 			}
-			
+
 			if got.Keyword != tt.want.Keyword {
 				t.Errorf("ParseLine().Keyword = %v, want %v", got.Keyword, tt.want.Keyword)
 			}
@@ -391,7 +389,7 @@ func TestParseLineIgnoresEmbeddedMarkers(t *testing.T) {
 
 func TestTaskPriority(t *testing.T) {
 	cfg := createTestConfig()
-	
+
 	// Create tasks of different types
 	activeTask := &Task{Keyword: "TODO"}
 	inProgressTask := &Task{Keyword: "DOING"}
@@ -410,7 +408,7 @@ func TestTaskPriority(t *testing.T) {
 		{"container task has fourth priority", containerTask, 4},
 		{"completed task has lowest priority", completedTask, 5},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := tt.task.Priority(cfg)
@@ -423,17 +421,17 @@ func TestTaskPriority(t *testing.T) {
 
 func TestTaskSorting(t *testing.T) {
 	cfg := createTestConfig()
-	
+
 	tasks := []*Task{
 		{Keyword: "DONE", Title: "Completed task"},
 		{Keyword: "SOMEDAY", Title: "Future task"},
 		{Keyword: "TODO", Title: "Active task"},
 		{Keyword: "DOING", Title: "In progress task"},
 	}
-	
+
 	// Sort by priority
 	SortByPriority(tasks, cfg)
-	
+
 	expectedOrder := []string{"DOING", "TODO", "SOMEDAY", "DONE"}
 	for i, expectedKeyword := range expectedOrder {
 		if tasks[i].Keyword != expectedKeyword {
@@ -631,7 +629,7 @@ func TestGetAllKeywordsFlat(t *testing.T) {
 	entries := GetAllKeywordsFlat(cfg)
 
 	// Should have all keywords
-	expectedTotal := 6 + 5 + 6 + 4 + 2 // Active + InProgress + Completed + Someday + Containers
+	expectedTotal := 4 + 5 + 6 + 4 + 2 // Active + InProgress + Completed + Someday
 	if len(entries) != expectedTotal {
 		t.Errorf("Expected %d keyword entries, got %d", expectedTotal, len(entries))
 	}
@@ -639,12 +637,15 @@ func TestGetAllKeywordsFlat(t *testing.T) {
 	// Check that categories are correctly assigned
 	activeCategoryCount := 0
 	for _, entry := range entries {
+		if KeywordStatus(cfg, entry.Keyword) == Events {
+			t.Errorf("event in status picker: %s", entry.Keyword)
+		}
 		if entry.Category == "Active" {
 			activeCategoryCount++
 		}
 	}
-	if activeCategoryCount != 6 {
-		t.Errorf("Expected 6 entries with Active category, got %d", activeCategoryCount)
+	if activeCategoryCount != 4 {
+		t.Errorf("Expected 4 entries with Active category, got %d", activeCategoryCount)
 	}
 
 	// Check that TODO is in the list
@@ -664,33 +665,33 @@ func TestParseLineWithID(t *testing.T) {
 	cfg := createTestConfig()
 
 	tests := []struct {
-		name     string
-		line     string
-		wantID   string
+		name      string
+		line      string
+		wantID    string
 		wantTitle string
 	}{
 		{
-			name:     "task with ID",
-			line:     "TODO: [auth-01] Implement authentication",
-			wantID:   "auth-01",
+			name:      "task with ID",
+			line:      "TODO: [auth-01] Implement authentication",
+			wantID:    "auth-01",
 			wantTitle: "Implement authentication",
 		},
 		{
-			name:     "task without ID",
-			line:     "TODO: Regular task without ID",
-			wantID:   "",
+			name:      "task without ID",
+			line:      "TODO: Regular task without ID",
+			wantID:    "",
 			wantTitle: "Regular task without ID",
 		},
 		{
-			name:     "task with ID and tag",
-			line:     "TODO: [feat-123] Add feature #backend",
-			wantID:   "feat-123",
+			name:      "task with ID and tag",
+			line:      "TODO: [feat-123] Add feature #backend",
+			wantID:    "feat-123",
 			wantTitle: "Add feature",
 		},
 		{
-			name:     "task with ID and metadata",
-			line:     "TODO: [task-001] Review code @2025-01-15 >> alice",
-			wantID:   "task-001",
+			name:      "task with ID and metadata",
+			line:      "TODO: [task-001] Review code @2025-01-15 >> alice",
+			wantID:    "task-001",
 			wantTitle: "Review code",
 		},
 	}
@@ -715,10 +716,10 @@ func TestParseLineWithReferences(t *testing.T) {
 	cfg := createTestConfig()
 
 	tests := []struct {
-		name          string
-		line          string
-		wantRefs      []string
-		wantTitle     string
+		name      string
+		line      string
+		wantRefs  []string
+		wantTitle string
 	}{
 		{
 			name:      "single reference",
@@ -878,8 +879,8 @@ func TestGetTaskByID(t *testing.T) {
 	}
 
 	tests := []struct {
-		id       string
-		wantNil  bool
+		id        string
+		wantNil   bool
 		wantTitle string
 	}{
 		{id: "a", wantNil: false, wantTitle: "Task A"},
@@ -1032,9 +1033,9 @@ func TestFilterTasksWithIDAndReferences(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		filter     string
-		wantCount  int
+		name      string
+		filter    string
+		wantCount int
 	}{
 		{name: "filter by ID", filter: "auth-01", wantCount: 2}, // matches ID and reference
 		{name: "filter by reference", filter: "api-02", wantCount: 1},

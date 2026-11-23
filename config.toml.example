@@ -36,8 +36,8 @@
 # Keywords are case-sensitive and matched against task markers (e.g., "TODO:", "DOING:").
 #
 # active = [
-#     "TODO", "TASK", "NOTE", "REMINDER", "EVENT", "MEETING",
-#     "CALL", "EMAIL", "MESSAGE", "FOLLOWUP", "REVIEW",
+#     "TODO", "TASK", "NOTE", "REMINDER",
+#     "EMAIL", "MESSAGE", "FOLLOWUP", "REVIEW",
 #     "CHECKIN", "CHECKOUT", "RESEARCH", "READING", "WRITING",
 #     "DRAFT", "FINALIZE", "SUBMIT", "PRESENTATION"
 # ]
@@ -55,12 +55,7 @@
 #     "SOMEDAY", "MAYBE", "LATER", "WISHLIST"
 # ]
 #
-# Keywords whose recurring items are treated as routines (hidden from the
-# default work view, shown in a separate routines view toggled with 'r').
-# An item is a routine only if its keyword is listed here AND it has a
-# recurrence modifier (+Nd, +Nw, +Nm, +Nb). One-off items keep their
-# normal placement.
-# routines = ["REMINDER", "MEETING"]
+events = ["MEETING", "EVENT", "CALL"]
 
 # -----------------------------------------------
 # Settings specific to 'goal' tool

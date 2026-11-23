@@ -14,6 +14,7 @@ import (
 
 	"github.com/vinayprograms/karya/internal/config"
 	"github.com/vinayprograms/karya/internal/parallel"
+	"github.com/vinayprograms/karya/internal/zet"
 )
 
 // ErrPendingChildren is returned by UpdateTaskStatus when a task can't be
@@ -23,9 +24,9 @@ var ErrPendingChildren = errors.New("cannot complete: active child tasks pending
 // Task represents a parsed task from a line
 type Task struct {
 	Keyword     string
-	ID          string   // Optional unique identifier [id]
+	ID          string // Optional unique identifier [id]
 	Title       string
-	RawTitle    string   // Unparsed text after "KEYWORD: " (for exact line matching)
+	RawTitle    string // Unparsed text after "KEYWORD: " (for exact line matching)
 	Tags        []string
 	References  []string // IDs of tasks this task depends on (^id syntax)
 	ScheduledAt string   // @date or @s:date (scheduled date)
@@ -41,124 +42,103 @@ type Task struct {
 	Children    []*Task // Child tasks nested under this task in the source file
 }
 
+// Status classifies a task keyword into one of the configured categories.
+type Status int
+
+const (
+	Unknown Status = iota
+	InProgress
+	Active
+	Someday
+	Completed
+	Events
+	Container
+)
+
+// String returns the wire/display name of the status.
+func (s Status) String() string {
+	switch s {
+	case InProgress:
+		return "in_progress"
+	case Active:
+		return "active"
+	case Someday:
+		return "someday"
+	case Container:
+		return "container"
+	case Events:
+		return "events"
+	case Completed:
+		return "completed"
+	}
+	return "unknown"
+}
+
+// KeywordStatus classifies a keyword using the configured keyword lists.
+// Order matters: InProgress wins over Active so overlapping configs behave
+// the same everywhere.
+func KeywordStatus(c *config.Config, keyword string) Status {
+	if c == nil {
+		return Unknown
+	}
+	switch {
+	case slices.Contains(c.Todo.Events, keyword):
+		return Events
+	case slices.Contains(c.Todo.InProgress, keyword):
+		return InProgress
+	case slices.Contains(c.Todo.Active, keyword):
+		return Active
+	case slices.Contains(c.Todo.Someday, keyword):
+		return Someday
+	case slices.Contains(c.Todo.Containers, keyword):
+		return Container
+	case slices.Contains(c.Todo.Completed, keyword):
+		return Completed
+	}
+	return Unknown
+}
+
+// Status classifies the task's keyword.
+func (t *Task) Status(c *config.Config) Status {
+	return KeywordStatus(c, t.Keyword)
+}
+
 // IsActive returns true if the task is active (not completed)
 func (t *Task) IsActive(c *config.Config) bool {
-	if c == nil {
-		return false
-	}
-	for _, kw := range c.Todo.Active {
-		if t.Keyword == kw {
-			return true
-		}
-	}
-	return false
+	return c != nil && !t.Event(c) && slices.Contains(c.Todo.Active, t.Keyword)
 }
 
 // IsInProgress returns true if the task is in progress
 func (t *Task) IsInProgress(c *config.Config) bool {
-	if c == nil {
-		return false
-	}
-	for _, kw := range c.Todo.InProgress {
-		if t.Keyword == kw {
-			return true
-		}
-	}
-	return false
+	return c != nil && !t.Event(c) && slices.Contains(c.Todo.InProgress, t.Keyword)
 }
 
 // IsCompleted returns true if the task is completed
 func (t *Task) IsCompleted(c *config.Config) bool {
-	if c == nil {
-		return false
-	}
-	for _, kw := range c.Todo.Completed {
-		if t.Keyword == kw {
-			return true
-		}
-	}
-	return false
+	return c != nil && !t.Event(c) && slices.Contains(c.Todo.Completed, t.Keyword)
 }
 
 // IsSomeday returns true if the task is a someday/maybe task
 func (t *Task) IsSomeday(c *config.Config) bool {
-	if c == nil {
-		return false
-	}
-	for _, kw := range c.Todo.Someday {
-		if t.Keyword == kw {
-			return true
-		}
-	}
-	return false
+	return c != nil && !t.Event(c) && slices.Contains(c.Todo.Someday, t.Keyword)
 }
 
-// IsContainer returns true if the task is a container (e.g. epic, initiative).
+func (t *Task) Event(c *config.Config) bool {
+	return t != nil && c != nil && slices.Contains(c.Todo.Events, t.Keyword)
+}
+
 func (t *Task) IsContainer(c *config.Config) bool {
-	if c == nil {
-		return false
-	}
-	return slices.Contains(c.Todo.Containers, t.Keyword)
+	return t != nil && c != nil && !t.Event(c) && slices.Contains(c.Todo.Containers, t.Keyword)
 }
 
-// hasRecurrence checks whether a date string contains a recurrence modifier.
-func hasRecurrence(dateStr string) bool {
-	if dateStr == "" {
-		return false
-	}
-	sched, err := ParseSchedule(dateStr)
-	if err != nil {
-		return false
-	}
-	return sched.Recurrence != nil
-}
-
-// IsRoutine returns true if the task is a routine — its keyword is in the
-// config's Routines list AND it has a recurrence modifier on its scheduled
-// or due date. Items using routine keywords without recurrence (one-off
-// meetings, etc.) are not routines.
-func (t *Task) IsRoutine(c *config.Config) bool {
-	if c == nil || len(c.Todo.Routines) == 0 {
-		return false
-	}
-	keywordMatch := false
-	for _, kw := range c.Todo.Routines {
-		if t.Keyword == kw {
-			keywordMatch = true
-			break
-		}
-	}
-	if !keywordMatch {
-		return false
-	}
-	return hasRecurrence(t.ScheduledAt) || hasRecurrence(t.DueAt)
-}
-
-// PartitionRoutines splits tasks into work tasks and routines in a single pass.
-// When the routines config is empty, all tasks are returned as work.
-func PartitionRoutines(tasks []*Task, c *config.Config) (work []*Task, routines []*Task) {
-	if len(c.Todo.Routines) == 0 {
-		return tasks, nil
-	}
-	for _, t := range tasks {
-		if t.IsRoutine(c) {
-			routines = append(routines, t)
+func Partition(tasks []*Task, c *config.Config) (work, events, containers []*Task) {
+	for _, item := range tasks {
+		if item.Event(c) {
+			events = append(events, item)
+		} else if item.IsContainer(c) {
+			containers = append(containers, item)
 		} else {
-			work = append(work, t)
-		}
-	}
-	return work, routines
-}
-
-// Partition splits tasks into work, routines, and containers in a single pass.
-func Partition(tasks []*Task, c *config.Config) (work, routines, containers []*Task) {
-	for _, t := range tasks {
-		if t.IsRoutine(c) {
-			routines = append(routines, t)
-		} else if t.IsContainer(c) {
-			containers = append(containers, t)
-		} else {
-			work = append(work, t)
+			work = append(work, item)
 		}
 	}
 	return
@@ -168,19 +148,16 @@ func Partition(tasks []*Task, c *config.Config) (work, routines, containers []*T
 // Lower numbers indicate higher priority
 // 1 = In Progress, 2 = Active, 3 = Someday, 4 = Container, 5 = Completed
 func (t *Task) Priority(c *config.Config) int {
-	if t.IsInProgress(c) {
+	switch t.Status(c) {
+	case InProgress:
 		return 1
-	}
-	if t.IsActive(c) {
+	case Active:
 		return 2
-	}
-	if t.IsSomeday(c) {
+	case Someday:
 		return 3
-	}
-	if t.IsContainer(c) {
+	case Container:
 		return 4
-	}
-	if t.IsCompleted(c) {
+	case Completed:
 		return 5
 	}
 	// Unknown status gets lowest priority
@@ -473,6 +450,9 @@ func IsKeywordValid(c *config.Config, keyword string) bool {
 }
 
 func isValidKeyword(c *config.Config, keyword string) bool {
+	if slices.Contains(c.Todo.Events, keyword) {
+		return true
+	}
 	for _, kw := range c.Todo.Active {
 		if keyword == kw {
 			return true
@@ -931,33 +911,16 @@ type SearchResult struct {
 	Project  string
 }
 
-// SearchInFile searches for a term within a file and returns matching lines
-func SearchInFile(filePath, searchTerm string) []SearchResult {
+// searchInFile searches for a term within a file via zet's file search.
+func searchInFile(filePath, searchTerm string) []SearchResult {
 	var results []SearchResult
-
-	file, err := os.Open(filePath)
-	if err != nil {
-		return results
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	lineNum := 0
-	for scanner.Scan() {
-		lineNum++
-		line := scanner.Text()
-		if strings.Contains(strings.ToLower(line), strings.ToLower(searchTerm)) {
-			// Extract zettel ID from path if possible
-			dir := filepath.Dir(filePath)
-			zetID := filepath.Base(dir)
-
-			results = append(results, SearchResult{
-				ZettelID: zetID,
-				LineNum:  lineNum,
-				Line:     line,
-				Path:     filePath,
-			})
-		}
+	for _, r := range zet.SearchInFile(filePath, searchTerm) {
+		results = append(results, SearchResult{
+			ZettelID: r.ZettelID,
+			LineNum:  r.LineNum,
+			Line:     r.Line,
+			Path:     r.Path,
+		})
 	}
 	return results
 }
@@ -971,7 +934,7 @@ func SearchTasks(c *config.Config, project string, searchTerm string) ([]SearchR
 
 	var allResults []SearchResult
 	for _, file := range files {
-		results := SearchInFile(file, searchTerm)
+		results := searchInFile(file, searchTerm)
 		if len(results) > 0 {
 			// Add project and title information to results
 			for i := range results {
@@ -983,13 +946,13 @@ func SearchTasks(c *config.Config, project string, searchTerm string) ([]SearchR
 						results[i].Project = parts[0]
 					}
 				}
-				
+
 				// Get title if possible
 				if c.Todo.Structured {
 					// For structured mode, try to get the zettel title
-					if results[i].ZettelID != "" && IsValidZettelID(results[i].ZettelID) {
+					if results[i].ZettelID != "" && zet.IsValidZettelID(results[i].ZettelID) {
 						notesDir := filepath.Join(c.Directories.Projects, results[i].Project, "notes")
-						title, err := GetZettelTitle(notesDir, results[i].ZettelID)
+						title, err := zet.GetZettelTitle(notesDir, results[i].ZettelID)
 						if err == nil {
 							results[i].Title = title
 						}
@@ -1008,7 +971,7 @@ func SearchTasks(c *config.Config, project string, searchTerm string) ([]SearchR
 	if project == "" || project == "inbox" {
 		inboxPath := c.GetInboxFilePath()
 		if _, err := os.Stat(inboxPath); err == nil {
-			results := SearchInFile(inboxPath, searchTerm)
+			results := searchInFile(inboxPath, searchTerm)
 			for i := range results {
 				results[i].Project = "inbox"
 				results[i].Title = "inbox"
@@ -1021,39 +984,6 @@ func SearchTasks(c *config.Config, project string, searchTerm string) ([]SearchR
 	return allResults, nil
 }
 
-// IsValidZettelID checks if a string is a valid zettel ID
-func IsValidZettelID(id string) bool {
-	if len(id) != 14 {
-		return false
-	}
-	for _, c := range id {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-// GetZettelTitle gets the title of a zettel from its README.md file
-func GetZettelTitle(zetDir, zetID string) (string, error) {
-	readmePath := filepath.Join(zetDir, zetID, "README.md")
-	file, err := os.Open(readmePath)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	if scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "# ") {
-			return strings.TrimSpace(line[2:]), nil
-		}
-	}
-
-	return "", fmt.Errorf("no title found")
-}
-
 // UpdateTaskStatus updates the keyword of a task in its source file.
 // It finds the line matching the task and replaces the keyword with the new one.
 // Returns the updated line number, or an error if the task was not found.
@@ -1063,14 +993,11 @@ func GetZettelTitle(zetDir, zetID string) (string, error) {
 // callers must resolve or reassign those first. Pass a nil cfg to skip this
 // check (e.g. in tests that don't care about it).
 func UpdateTaskStatus(t *Task, newKeyword string, cfg *config.Config) error {
-	if cfg != nil && IsCompletedKeyword(cfg, newKeyword) {
-		pending := 0
-		for _, child := range t.Children {
-			if child.IsActive(cfg) || child.IsInProgress(cfg) {
-				pending++
-			}
-		}
-		if pending > 0 {
+	if t.Event(cfg) || KeywordStatus(cfg, newKeyword) == Events {
+		return fmt.Errorf("events do not have task status transitions")
+	}
+	if cfg != nil && KeywordStatus(cfg, newKeyword) == Completed {
+		if pending := PendingChildren(t, cfg); pending > 0 {
 			return fmt.Errorf("%w: %d task(s) still active/in-progress", ErrPendingChildren, pending)
 		}
 	}
@@ -1079,38 +1006,26 @@ func UpdateTaskStatus(t *Task, newKeyword string, cfg *config.Config) error {
 		return fmt.Errorf("task has no file path")
 	}
 
-	// Read the file
+	lineNum, err := Locate(t.FilePath, t)
+	if err != nil {
+		return err
+	}
+
 	content, err := os.ReadFile(t.FilePath)
 	if err != nil {
 		return fmt.Errorf("failed to read file: %w", err)
 	}
 
 	lines := strings.Split(string(content), "\n")
-	found := false
-
-	// Build the search pattern from RawTitle (exact match) or reconstructed prefix
-	var searchPrefix string
-	if t.RawTitle != "" {
-		searchPrefix = fmt.Sprintf("%s: %s", t.Keyword, t.RawTitle)
-	} else if t.ID != "" {
-		searchPrefix = fmt.Sprintf("%s: [%s] %s", t.Keyword, t.ID, t.Title)
-	} else {
-		searchPrefix = fmt.Sprintf("%s: %s", t.Keyword, t.Title)
-	}
-
-	for i, line := range lines {
-		stripped, prefixLen := StripLinePrefix(line)
-		if strings.HasPrefix(stripped, searchPrefix) {
-			newLine := line[:prefixLen] + newKeyword + line[prefixLen+len(t.Keyword):]
-			lines[i] = newLine
-			found = true
-			break
-		}
-	}
-
-	if !found {
+	if lineNum > len(lines) {
 		return fmt.Errorf("task not found in file: %s: %s", t.Keyword, t.Title)
 	}
+	line := lines[lineNum-1]
+	stripped, prefixLen := StripLinePrefix(line)
+	if !strings.HasPrefix(stripped, t.Keyword+":") {
+		return fmt.Errorf("task not found in file: %s: %s", t.Keyword, t.Title)
+	}
+	lines[lineNum-1] = line[:prefixLen] + newKeyword + line[prefixLen+len(t.Keyword):]
 
 	// Write the file back
 	newContent := strings.Join(lines, "\n")
@@ -1124,6 +1039,50 @@ func UpdateTaskStatus(t *Task, newKeyword string, cfg *config.Config) error {
 	return nil
 }
 
+// Locate finds the 1-based line number of a task in its source file.
+// It matches by RawTitle first (exact source line), then by keyword plus
+// [ID] containment, then by the "KEYWORD: Title" prefix.
+func Locate(filePath string, t *Task) (int, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+
+	var idPrefix string
+	if t.ID != "" {
+		idPrefix = fmt.Sprintf("[%s]", t.ID)
+	}
+	var rawPrefix string
+	if t.RawTitle != "" {
+		rawPrefix = fmt.Sprintf("%s: %s", t.Keyword, t.RawTitle)
+	}
+	titlePrefix := fmt.Sprintf("%s: %s", t.Keyword, t.Title)
+
+	scanner := bufio.NewScanner(file)
+	lineNum := 0
+	for scanner.Scan() {
+		lineNum++
+		stripped, _ := StripLinePrefix(scanner.Text())
+		if rawPrefix != "" {
+			if strings.HasPrefix(stripped, t.Keyword+":") && strings.TrimSpace(strings.TrimPrefix(stripped, t.Keyword+":")) == strings.TrimSpace(t.RawTitle) {
+				return lineNum, nil
+			}
+			continue
+		}
+		switch {
+		case idPrefix != "" && strings.HasPrefix(stripped, t.Keyword+":") && strings.Contains(stripped, idPrefix):
+			return lineNum, nil
+		case strings.HasPrefix(stripped, titlePrefix):
+			return lineNum, nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return 0, err
+	}
+	return 0, fmt.Errorf("task not found in file: %s: %s", t.Keyword, t.Title)
+}
+
 // GetAllKeywords returns all configured keywords grouped by category
 func GetAllKeywords(c *config.Config) map[string][]string {
 	return map[string][]string{
@@ -1131,6 +1090,7 @@ func GetAllKeywords(c *config.Config) map[string][]string {
 		"InProgress": c.Todo.InProgress,
 		"Completed":  c.Todo.Completed,
 		"Someday":    c.Todo.Someday,
+		"Events":     c.Todo.Events,
 		"Containers": c.Todo.Containers,
 	}
 }
@@ -1145,15 +1105,27 @@ func GetAllKeywordsFlat(c *config.Config) []KeywordEntry {
 	var entries []KeywordEntry
 
 	for _, kw := range c.Todo.Active {
+		if KeywordStatus(c, kw) == Events {
+			continue
+		}
 		entries = append(entries, KeywordEntry{Keyword: kw, Category: "Active"})
 	}
 	for _, kw := range c.Todo.InProgress {
+		if KeywordStatus(c, kw) == Events {
+			continue
+		}
 		entries = append(entries, KeywordEntry{Keyword: kw, Category: "InProgress"})
 	}
 	for _, kw := range c.Todo.Completed {
+		if KeywordStatus(c, kw) == Events {
+			continue
+		}
 		entries = append(entries, KeywordEntry{Keyword: kw, Category: "Completed"})
 	}
 	for _, kw := range c.Todo.Someday {
+		if KeywordStatus(c, kw) == Events {
+			continue
+		}
 		entries = append(entries, KeywordEntry{Keyword: kw, Category: "Someday"})
 	}
 	for _, kw := range c.Todo.Containers {
@@ -1163,27 +1135,24 @@ func GetAllKeywordsFlat(c *config.Config) []KeywordEntry {
 	return entries
 }
 
-// IsCompletedKeyword checks whether the given keyword is in the configured Completed list.
-func IsCompletedKeyword(c *config.Config, keyword string) bool {
-	for _, k := range c.Todo.Completed {
-		if k == keyword {
-			return true
+// PendingChildren counts direct children of t that are active or in-progress.
+func PendingChildren(t *Task, c *config.Config) int {
+	if t == nil {
+		return 0
+	}
+	n := 0
+	for _, child := range t.Children {
+		switch child.Status(c) {
+		case Active, InProgress:
+			n++
 		}
 	}
-	return false
+	return n
 }
 
 // HasActiveChildren returns true if any direct child of t is active or in-progress.
 func HasActiveChildren(t *Task, c *config.Config) bool {
-	if t == nil {
-		return false
-	}
-	for _, child := range t.Children {
-		if child.IsActive(c) || child.IsInProgress(c) {
-			return true
-		}
-	}
-	return false
+	return PendingChildren(t, c) > 0
 }
 
 // DetectCycles finds all tasks that participate in circular dependencies.
@@ -1460,35 +1429,27 @@ func SetTaskDate(t *Task, scheduledAt, dueAt string, removeScheduled, removeDue 
 		return fmt.Errorf("task has no file path")
 	}
 
+	lineNum, err := Locate(t.FilePath, t)
+	if err != nil {
+		return err
+	}
+
 	content, err := os.ReadFile(t.FilePath)
 	if err != nil {
 		return fmt.Errorf("failed to read file: %w", err)
 	}
 
 	lines := strings.Split(string(content), "\n")
-
-	var searchPrefix string
-	if t.RawTitle != "" {
-		searchPrefix = fmt.Sprintf("%s: %s", t.Keyword, t.RawTitle)
-	} else if t.ID != "" {
-		searchPrefix = fmt.Sprintf("%s: [%s] %s", t.Keyword, t.ID, t.Title)
-	} else {
-		searchPrefix = fmt.Sprintf("%s: %s", t.Keyword, t.Title)
-	}
-
-	found := false
-	for i, line := range lines {
-		stripped, _ := StripLinePrefix(line)
-		if strings.HasPrefix(stripped, searchPrefix) {
-			lines[i] = applyDateChanges(line, scheduledAt, dueAt, removeScheduled, removeDue)
-			found = true
-			break
-		}
-	}
-
-	if !found {
+	if lineNum > len(lines) {
 		return fmt.Errorf("task not found in file: %s: %s", t.Keyword, t.Title)
 	}
+	if t.LineNum > 0 && t.LineNum <= len(lines) && t.RawTitle != "" {
+		stripped, _ := StripLinePrefix(lines[t.LineNum-1])
+		if strings.HasPrefix(stripped, t.Keyword+":") && strings.TrimSpace(strings.TrimPrefix(stripped, t.Keyword+":")) == strings.TrimSpace(t.RawTitle) {
+			lineNum = t.LineNum
+		}
+	}
+	lines[lineNum-1] = applyDateChanges(lines[lineNum-1], scheduledAt, dueAt, removeScheduled, removeDue)
 
 	if err := os.WriteFile(t.FilePath, []byte(strings.Join(lines, "\n")), 0644); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)

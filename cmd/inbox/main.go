@@ -13,13 +13,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/vinayprograms/karya/internal/colors"
 	"github.com/vinayprograms/karya/internal/config"
+	editorpkg "github.com/vinayprograms/karya/internal/editor"
 )
 
 func main() {
-	cfg, err := config.Load()
-	if err != nil {
-		log.Fatal(err)
-	}
+	cfg := config.MustLoad()
 
 	if len(os.Args) > 1 && os.Args[1] == "colors" {
 		if err := colors.Print(cfg); err != nil {
@@ -99,17 +97,16 @@ func main() {
 		ensureTrailingNewline(inboxFile)
 
 		// Open inbox file at end of file, in insert mode for vim/nvim
-		var cmd *exec.Cmd
 		base := filepath.Base(editor)
 		if base == "vim" || base == "nvim" || base == "vi" {
-			cmd = exec.Command(editor, "+$", "+startinsert!", inboxFile)
-		} else {
-			cmd = exec.Command(editor, inboxFile)
-		}
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
+			cmd := exec.Command(editor, "+$", "+startinsert!", inboxFile)
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				log.Fatalf("Failed to open editor: %v", err)
+			}
+		} else if err := editorpkg.Open(editor, inboxFile, editorpkg.At{}); err != nil {
 			log.Fatalf("Failed to open editor: %v", err)
 		}
 		return
@@ -256,10 +253,7 @@ func (m model) View() string {
 }
 
 func addToInbox(taskText string) {
-	cfg, err := config.Load()
-	if err != nil {
-		log.Fatal(err)
-	}
+	cfg := config.MustLoad()
 
 	// Determine the inbox file path from config
 	var inboxFile string

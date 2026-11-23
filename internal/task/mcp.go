@@ -16,9 +16,8 @@ import (
 // MCP Tool Input/Output types
 
 type ListTasksArgs struct {
-	Project       string `json:"project,omitempty" jsonschema:"project name to filter tasks (optional, empty for all projects)"`
-	ShowCompleted bool   `json:"show_completed,omitempty" jsonschema:"whether to include completed tasks (default: false)"`
-	ShowRoutines   bool   `json:"show_routines,omitempty" jsonschema:"when true, return only routines (recurring items with routine keywords) instead of work tasks"`
+	Project        string `json:"project,omitempty" jsonschema:"project name to filter tasks (optional, empty for all projects)"`
+	ShowCompleted  bool   `json:"show_completed,omitempty" jsonschema:"whether to include completed tasks (default: false)"`
 	ShowContainers bool   `json:"show_containers,omitempty" jsonschema:"when true, return only container tasks (epics, initiatives) instead of work tasks"`
 }
 
@@ -39,12 +38,12 @@ type TaskInfo struct {
 	Assignee    string   `json:"assignee,omitempty" jsonschema:"task assignee"`
 	Project     string   `json:"project" jsonschema:"project name"`
 	Zettel      string   `json:"zettel,omitempty" jsonschema:"zettel ID (if structured mode)"`
-	Priority    int      `json:"priority" jsonschema:"priority level (1=in_progress, 2=active, 3=someday, 4=container, 5=completed)"`
-	Status      string   `json:"status" jsonschema:"status category (active, in_progress, completed, someday, container)"`
-	InCycle    bool   `json:"in_cycle,omitempty" jsonschema:"true if task participates in a circular dependency"`
-	ParentID   string `json:"parent_id,omitempty" jsonschema:"ID of parent task (if this is a sub-task)"`
-	ChildCount int    `json:"child_count,omitempty" jsonschema:"number of direct child tasks"`
-	RawContent string `json:"raw_content,omitempty" jsonschema:"raw file content of task and all indented lines below it"`
+	Priority    int      `json:"priority" jsonschema:"priority level (1=in_progress, 2=active, 3=someday, 4=completed)"`
+	Status      string   `json:"status" jsonschema:"status category (active, in_progress, completed, someday, events)"`
+	InCycle     bool     `json:"in_cycle,omitempty" jsonschema:"true if task participates in a circular dependency"`
+	ParentID    string   `json:"parent_id,omitempty" jsonschema:"ID of parent task (if this is a sub-task)"`
+	ChildCount  int      `json:"child_count,omitempty" jsonschema:"number of direct child tasks"`
+	RawContent  string   `json:"raw_content,omitempty" jsonschema:"raw file content of task and all indented lines below it"`
 }
 
 type GetTaskArgs struct {
@@ -77,10 +76,9 @@ type SearchResultInfo struct {
 }
 
 type FilterTasksArgs struct {
-	Filter        string `json:"filter" jsonschema:"filter expression (e.g., '>> alice' for assignee, '#urgent' for tag, '@2025-01-15' for date)"`
-	Project       string `json:"project,omitempty" jsonschema:"optional project name to limit filter"`
-	ShowCompleted bool   `json:"show_completed,omitempty" jsonschema:"whether to include completed tasks (default: false)"`
-	ShowRoutines   bool   `json:"show_routines,omitempty" jsonschema:"when true, filter only routines instead of work tasks"`
+	Filter         string `json:"filter" jsonschema:"filter expression (e.g., '>> alice' for assignee, '#urgent' for tag, '@2025-01-15' for date)"`
+	Project        string `json:"project,omitempty" jsonschema:"optional project name to limit filter"`
+	ShowCompleted  bool   `json:"show_completed,omitempty" jsonschema:"whether to include completed tasks (default: false)"`
 	ShowContainers bool   `json:"show_containers,omitempty" jsonschema:"when true, filter only container tasks instead of work tasks"`
 }
 
@@ -128,8 +126,7 @@ type CountTasksArgs struct {
 }
 
 type CountTasksResult struct {
-	Count          int            `json:"count" jsonschema:"total number of work tasks (excludes routines and containers)"`
-	RoutineCount   int            `json:"routine_count" jsonschema:"number of detected routines (recurring items with routine keywords)"`
+	Count          int            `json:"count" jsonschema:"total number of work tasks (excludes events and containers)"`
 	ContainerCount int            `json:"container_count" jsonschema:"number of container tasks (epics, initiatives)"`
 	ByStatus       map[string]int `json:"by_status" jsonschema:"count of tasks by status category"`
 }
@@ -221,9 +218,9 @@ type ClockTableResult struct {
 }
 
 type ClockProjectResult struct {
-	Project string             `json:"project" jsonschema:"project name"`
-	Total   string             `json:"total" jsonschema:"project total time as H:MM"`
-	Tasks   []ClockTaskResult  `json:"tasks" jsonschema:"per-task breakdown"`
+	Project string            `json:"project" jsonschema:"project name"`
+	Total   string            `json:"total" jsonschema:"project total time as H:MM"`
+	Tasks   []ClockTaskResult `json:"tasks" jsonschema:"per-task breakdown"`
 }
 
 type ClockTaskResult struct {
@@ -303,6 +300,18 @@ func (s *MCPServer) doJiraSync(ctx context.Context) {
 }
 
 func (s *MCPServer) registerTools() {
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "list_events",
+		Description: "List one-off and recurring events separately from work tasks; optionally filter by project, title, tags or dates.",
+	}, s.events)
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "schedule_event",
+		Description: "Update or remove an event's scheduled and due dates without task status transitions or logbook entries. Match by exact title or raw_title.",
+	}, s.reschedule)
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "refresh_events",
+		Description: "Advance past-day recurring events to today or the next occurrence without completion or logbook entries.",
+	}, s.refresh)
 	// List tasks
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "list_tasks",
@@ -407,18 +416,7 @@ func (s *MCPServer) registerTools() {
 }
 
 func (s *MCPServer) taskToInfo(t *Task) TaskInfo {
-	status := "unknown"
-	if t.IsInProgress(s.config) {
-		status = "in_progress"
-	} else if t.IsActive(s.config) {
-		status = "active"
-	} else if t.IsSomeday(s.config) {
-		status = "someday"
-	} else if t.IsContainer(s.config) {
-		status = "container"
-	} else if t.IsCompleted(s.config) {
-		status = "completed"
-	}
+	status := t.Status(s.config).String()
 
 	var parentID string
 	if t.Parent != nil && t.Parent.ID != "" {
@@ -455,10 +453,8 @@ func (s *MCPServer) listTasks(ctx context.Context, req *mcp.CallToolRequest, arg
 	DetectCycles(tasks)
 
 	// Partition routines and containers from work tasks
-	work, routines, containers := Partition(tasks, s.config)
-	if args.ShowRoutines {
-		tasks = routines
-	} else if args.ShowContainers {
+	work, _, containers := Partition(tasks, s.config)
+	if args.ShowContainers {
 		tasks = containers
 	} else {
 		tasks = work
@@ -542,10 +538,8 @@ func (s *MCPServer) filterTasks(ctx context.Context, req *mcp.CallToolRequest, a
 	DetectCycles(tasks)
 
 	// Partition routines and containers from work tasks before applying filter
-	work, routines, containers := Partition(tasks, s.config)
-	if args.ShowRoutines {
-		tasks = routines
-	} else if args.ShowContainers {
+	work, _, containers := Partition(tasks, s.config)
+	if args.ShowContainers {
 		tasks = containers
 	} else {
 		tasks = work
@@ -629,7 +623,7 @@ func (s *MCPServer) updateTaskStatus(ctx context.Context, req *mcp.CallToolReque
 	oldKeyword := targetTask.Keyword
 
 	// Handle recurring task completion
-	if IsCompletedKeyword(s.config, args.NewKeyword) {
+	if KeywordStatus(s.config, args.NewKeyword) == Completed {
 		advanced, err := CompleteRecurringTask(targetTask, s.config, args.NewKeyword)
 		if err != nil {
 			return nil, UpdateTaskStatusResult{
@@ -703,7 +697,7 @@ func (s *MCPServer) getKeywords(ctx context.Context, req *mcp.CallToolRequest, a
 
 	return nil, GetKeywordsResult{
 		Keywords:   keywords,
-		Categories: []string{"Active", "InProgress", "Completed", "Someday", "Containers"},
+		Categories: []string{"Active", "InProgress", "Completed", "Someday", "Containers", "Events"},
 	}, nil
 }
 
@@ -714,7 +708,7 @@ func (s *MCPServer) countTasks(ctx context.Context, req *mcp.CallToolRequest, ar
 	}
 
 	// Partition into work, routines, and containers
-	work, routines, containers := Partition(tasks, s.config)
+	work, _, containers := Partition(tasks, s.config)
 
 	byStatus := map[string]int{
 		"active":      0,
@@ -725,22 +719,13 @@ func (s *MCPServer) countTasks(ctx context.Context, req *mcp.CallToolRequest, ar
 	}
 
 	for _, t := range work {
-		if t.IsInProgress(s.config) {
-			byStatus["in_progress"]++
-		} else if t.IsActive(s.config) {
-			byStatus["active"]++
-		} else if t.IsSomeday(s.config) {
-			byStatus["someday"]++
-		} else if t.IsContainer(s.config) {
-			byStatus["container"]++
-		} else if t.IsCompleted(s.config) {
-			byStatus["completed"]++
+		if st := t.Status(s.config); st != Unknown {
+			byStatus[st.String()]++
 		}
 	}
 
 	return nil, CountTasksResult{
 		Count:          len(work),
-		RoutineCount:   len(routines),
 		ContainerCount: len(containers),
 		ByStatus:       byStatus,
 	}, nil
@@ -927,6 +912,9 @@ func (s *MCPServer) clockIn(ctx context.Context, req *mcp.CallToolRequest, args 
 			matched = t.Title == args.Title || containsIgnoreCase(t.Title, args.Title)
 		}
 		if matched {
+			if t.Event(s.config) {
+				return nil, ClockResult{Message: "events do not support clock tracking"}, nil
+			}
 			if err := ClockIn(t); err != nil {
 				return nil, ClockResult{Message: err.Error(), Success: false}, nil
 			}
@@ -954,6 +942,9 @@ func (s *MCPServer) clockOut(ctx context.Context, req *mcp.CallToolRequest, args
 			matched = t.Title == args.Title || containsIgnoreCase(t.Title, args.Title)
 		}
 		if matched {
+			if t.Event(s.config) {
+				return nil, ClockResult{Message: "events do not support clock tracking"}, nil
+			}
 			if err := ClockOut(t); err != nil {
 				return nil, ClockResult{Message: err.Error(), Success: false}, nil
 			}

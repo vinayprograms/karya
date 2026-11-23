@@ -141,9 +141,28 @@ Press `/` in interactive mode to filter tasks by specific fields:
 
 These are the default task keywords that are automatically recognized by the tool when `config.toml` doesn't specify custom keywords.
 
-- **Active Tasks**: TODO, TASK, NOTE, REMINDER, EVENT, MEETING, CALL, EMAIL, MESSAGE, FOLLOWUP, REVIEW, CHECKIN, CHECKOUT, RESEARCH, READING, WRITING, DRAFT, EDITING, FINALIZE, SUBMIT, PRESENTATION, WAITING, DEFERRED, DELEGATED
+- **Active Tasks**: TODO, TASK, NOTE, REMINDER, EMAIL, MESSAGE, FOLLOWUP, REVIEW, CHECKIN, CHECKOUT, RESEARCH, READING, WRITING, DRAFT, EDITING, FINALIZE, SUBMIT, PRESENTATION, WAITING, DEFERRED, DELEGATED
 - **In-Progress Tasks**: DOING, INPROGRESS, STARTED, WORKING, WIP
 - **Completed Tasks**: ARCHIVED, CANCELED, DELETED, DONE, COMPLETED, CLOSED
+
+## Events
+
+Configure time-sensitive items separately from work tasks:
+
+```toml
+[todo]
+events = ["MEETING", "EVENT", "CALL"]
+```
+
+These are also the defaults. Set `events = []` to disable event classification, or add your own keywords for deadlines, launches, appointments and reminders. Events take precedence if a keyword also appears in a task-state category.
+
+Events appear on their scheduled or due day in `agenda`, never as overdue work. Press Enter in agenda to open the source file and add indented notes below the event. Events do not cycle through TODO/DONE, support clock tracking, or generate logbook entries. They are excluded from the todo TUI, `todo list`, and MCP work-task lists and counts.
+
+Agenda refreshes recurring events on startup and every 15 minutes while running. Past-day dates advance to today or the next recurrence, preserving the keyword, times, recurrence modifiers and notes. Today's event stays visible all day. For events, all recurrence modes advance from the stored date because there is no completion action. One-off events are left unchanged. Refresh pauses while the external editor owns the TUI and retries after one minute while the date picker is open.
+
+The former routines view and `r` toggle have been removed. Migrate `routines` configuration to `events`; unlike routines, events include one-off and undated items. Undated events are available through MCP but have no agenda day.
+
+Todo MCP provides `list_events` (optional project and filter), `schedule_event` (exact title or `raw_title`), and `refresh_events`. `get_keywords` includes Events. The old `show_routines` arguments and `routine_count` result have been removed. Existing task inspection tools can still inspect event notes; task-status and clock operations reject events.
 
 ## Configuration
 

@@ -70,7 +70,7 @@ func QueryAgenda(c *config.Config, start, end time.Time, includeOverdue bool) ([
 		}
 	}
 	for _, t := range tasks {
-		if t.ScheduledAt == "" && t.DueAt == "" {
+		if t.Event(c) || (t.ScheduledAt == "" && t.DueAt == "") {
 			continue
 		}
 		dateField := t.ScheduledAt
@@ -111,6 +111,9 @@ func QueryAgenda(c *config.Config, start, end time.Time, includeOverdue bool) ([
 	for date, items := range dayMap {
 		for i := range items {
 			t := items[i].Task
+			if t.Event(c) {
+				continue
+			}
 			if _, ok := clockCache[t]; !ok {
 				clockCache[t] = IsClockActive(t)
 			}
@@ -138,6 +141,7 @@ func addAgendaEntries(c *config.Config, t *Task, dateToken string, isDeadline bo
 		return
 	}
 
+	event := t.Event(c)
 	warningDays := 0
 	if sched.Warning != nil {
 		warningDays = sched.Warning.Days
@@ -150,7 +154,7 @@ func addAgendaEntries(c *config.Config, t *Task, dateToken string, isDeadline bo
 		occurrences := sched.ExpandOccurrences(start, end)
 		for _, occ := range occurrences {
 			day := truncateToDay(occ)
-			overdue := day.Before(today)
+			overdue := day.Before(today) && !event
 			if overdue && !includeOverdue {
 				continue
 			}
@@ -176,7 +180,7 @@ func addAgendaEntries(c *config.Config, t *Task, dateToken string, isDeadline bo
 		}
 
 		// For recurring tasks, also check if overdue (most recent missed)
-		if includeOverdue {
+		if includeOverdue && !event {
 			schedDay := truncateToDay(sched.Date)
 			if schedDay.Before(today) && schedDay.Before(start) {
 				if sched.Recurrence.Mode == RecurrenceFromDone {
@@ -225,7 +229,7 @@ func addAgendaEntries(c *config.Config, t *Task, dateToken string, isDeadline bo
 		// Non-recurring: single date
 		schedDay := truncateToDay(sched.Date)
 		completed := t.IsCompleted(c)
-		isOverdue := schedDay.Before(today) && !completed
+		isOverdue := schedDay.Before(today) && !completed && !event
 
 		inRange := (schedDay.Before(end) || schedDay.Equal(end)) && (schedDay.After(start) || schedDay.Equal(start))
 

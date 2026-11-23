@@ -5,16 +5,16 @@ import (
 	"log"
 	"math"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	colorspkg "github.com/vinayprograms/karya/internal/colors"
 	"github.com/vinayprograms/karya/internal/config"
+	editorpkg "github.com/vinayprograms/karya/internal/editor"
 	kgit "github.com/vinayprograms/karya/internal/git"
 	"github.com/vinayprograms/karya/internal/task"
+	"github.com/vinayprograms/karya/internal/watch"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -49,18 +49,18 @@ func (v viewMode) String() string {
 
 // Colors
 type colorScheme struct {
-	project    lipgloss.Style
-	active     lipgloss.Style
-	inProgress lipgloss.Style
-	completed  lipgloss.Style
-	someday    lipgloss.Style
-	container  lipgloss.Style
-	taskText   lipgloss.Style
-	tag        lipgloss.Style
-	specialTag lipgloss.Style
-	date       lipgloss.Style
-	overdue    lipgloss.Style
-	deadline   lipgloss.Style
+	project     lipgloss.Style
+	active      lipgloss.Style
+	inProgress  lipgloss.Style
+	completed   lipgloss.Style
+	someday     lipgloss.Style
+	container   lipgloss.Style
+	taskText    lipgloss.Style
+	tag         lipgloss.Style
+	specialTag  lipgloss.Style
+	date        lipgloss.Style
+	overdue     lipgloss.Style
+	deadline    lipgloss.Style
 	assignee    lipgloss.Style
 	header      lipgloss.Style
 	schedInfo   lipgloss.Style
@@ -71,24 +71,25 @@ type colorScheme struct {
 var colors colorScheme
 
 func initColors(cfg *config.Config) {
+	s := colorspkg.Styles(cfg)
 	colors = colorScheme{
-		project:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
-		active:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ActiveColor)),
-		inProgress: lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.InProgressColor)),
-		completed:  lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CompletedColor)),
-		someday:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.SomedayColor)),
-		container:  lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ContainerColor)),
-		taskText:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TaskColor)),
-		tag:        lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TagColor)).Background(lipgloss.Color(cfg.Colors.TagBgColor)),
-		specialTag: lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.SpecialTagColor)).Background(lipgloss.Color(cfg.Colors.SpecialTagBgColor)).Bold(true),
-		date:       lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.DateColor)).Background(lipgloss.Color(cfg.Colors.DateBgColor)),
-		overdue:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.OverdueColor)).Bold(true),
-		deadline:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.DeadlineColor)).Bold(true),
-		assignee:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.AssigneeColor)).Background(lipgloss.Color(cfg.Colors.AssigneeBgColor)).Bold(true),
-		header:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.AgendaHeaderColor)).Bold(true),
+		project:     s.Project,
+		active:      s.Active,
+		inProgress:  s.InProgress,
+		completed:   s.Completed,
+		someday:     s.Someday,
+		container:   s.Container,
+		taskText:    s.Task,
+		tag:         s.Tag,
+		specialTag:  s.SpecialTag,
+		date:        s.Date,
+		overdue:     s.Overdue,
+		deadline:    s.Deadline,
+		assignee:    s.Assignee,
+		header:      s.AgendaHeader,
 		schedInfo:   lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
-		dimText:     lipgloss.NewStyle().Foreground(lipgloss.Color("241")),
-		clockActive: lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ClockActiveColor)).Bold(true),
+		dimText:     s.DimText,
+		clockActive: s.ClockActive,
 	}
 }
 
@@ -138,7 +139,7 @@ type model struct {
 	showingHelp bool
 }
 
-type fileChangedMsg struct{}
+type fileChangedMsg = watch.Changed
 
 type agendaLoadedMsg struct {
 	days []task.AgendaDay
@@ -156,6 +157,7 @@ type clockResultMsg struct {
 }
 
 type minuteTickMsg struct{}
+type refresh time.Time
 
 func initialModel(cfg *config.Config) model {
 	m := model{
@@ -179,36 +181,14 @@ func initialModel(cfg *config.Config) model {
 
 func (m model) Init() tea.Cmd {
 	return tea.Batch(
-		loadAgendaCmd(m.config, m.focusDate, m.mode),
+		func() tea.Msg { return refresh(time.Now()) },
 		waitForFileChange(m.watcher),
 		tea.Tick(time.Minute, func(t time.Time) tea.Msg { return minuteTickMsg{} }),
 	)
 }
 
 func waitForFileChange(watcher *fsnotify.Watcher) tea.Cmd {
-	return func() tea.Msg {
-		if watcher == nil {
-			return nil
-		}
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return nil
-				}
-				if event.Op&fsnotify.Write == fsnotify.Write ||
-					event.Op&fsnotify.Create == fsnotify.Create ||
-					event.Op&fsnotify.Remove == fsnotify.Remove {
-					time.Sleep(100 * time.Millisecond)
-					return fileChangedMsg{}
-				}
-			case _, ok := <-watcher.Errors:
-				if !ok {
-					return nil
-				}
-			}
-		}
-	}
+	return watch.Wait(watcher)
 }
 
 func loadAgendaCmd(cfg *config.Config, focus time.Time, mode viewMode) tea.Cmd {
@@ -277,6 +257,32 @@ type statusUpdateMsg struct {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if instant, ok := msg.(refresh); ok {
+		if m.showingDatePicker {
+			return m, tea.Tick(time.Minute, func(now time.Time) tea.Msg { return refresh(now) })
+		}
+		m.err = task.Refresh(m.config, time.Time(instant))
+		loaded := loadAgendaCmd(m.config, m.focusDate, m.mode)().(agendaLoadedMsg)
+		if loaded.err != nil {
+			m.err = loaded.err
+		} else {
+			m.days = loaded.days
+			if m.mode == viewDay {
+				m.flatItems = flattenDayItems(loaded.days)
+			} else {
+				m.flatItems = flattenItems(loaded.days)
+			}
+			m.buildLineMapping()
+			m.cursor = min(m.cursor, max(0, len(m.flatItems)-1))
+		}
+		return m, tea.Batch(
+			loadAgendaCmd(m.config, m.focusDate, m.mode),
+			tea.Tick(15*time.Minute, func(now time.Time) tea.Msg { return refresh(now) }),
+		)
+	}
+	if _, ok := msg.(minuteTickMsg); ok {
+		return m, tea.Tick(time.Minute, func(now time.Time) tea.Msg { return minuteTickMsg{} })
+	}
 	// Clear status message regardless of UI state
 	if _, ok := msg.(clearStatusMsg); ok {
 		m.statusMessage = ""
@@ -342,7 +348,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.statusPicker.Confirmed {
 				kw := m.statusPicker.Selected
-				if task.IsCompletedKeyword(m.config, kw) && task.HasActiveChildren(m.statusPickerTask, m.config) {
+				if task.KeywordStatus(m.config, kw) == task.Completed && task.HasActiveChildren(m.statusPickerTask, m.config) {
 					m.showingStatusPicker = false
 					m.showingPendingChildWarning = true
 					m.pendingWarningKeyword = kw
@@ -778,11 +784,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Clock in/out
 		case "i":
-			if m.cursor < len(m.flatItems) {
+			if m.cursor < len(m.flatItems) && !m.flatItems[m.cursor].Task.Event(m.config) {
 				return m, clockInAgendaCmd(m.flatItems[m.cursor].Task)
 			}
 		case "o":
-			if m.cursor < len(m.flatItems) {
+			if m.cursor < len(m.flatItems) && !m.flatItems[m.cursor].Task.Event(m.config) {
 				return m, clockOutAgendaCmd(m.flatItems[m.cursor].Task)
 			}
 
@@ -790,6 +796,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "t":
 			if m.cursor < len(m.flatItems) {
 				t := m.flatItems[m.cursor].Task
+				if t.Event(m.config) {
+					return m, nil
+				}
 				m.statusPickerTask = t
 				m.showingStatusPicker = true
 				m.statusPicker = task.NewStatusPicker(t, m.config)
@@ -873,8 +882,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return clearStatusMsg{} }),
 		)
 
-	case minuteTickMsg:
-		return m, tea.Tick(time.Minute, func(t time.Time) tea.Msg { return minuteTickMsg{} })
 	}
 
 	return m, nil
@@ -906,7 +913,7 @@ func updateTaskStatusCmd(cfg *config.Config, t *task.Task, newKeyword string) te
 
 		oldKeyword := t.Keyword
 
-		if task.IsCompletedKeyword(cfg, newKeyword) {
+		if task.KeywordStatus(cfg, newKeyword) == task.Completed {
 			advanced, err := task.CompleteRecurringTask(t, cfg, newKeyword)
 			if err != nil {
 				return statusUpdateMsg{err: fmt.Errorf("recurring advance failed: %w", err)}
@@ -946,20 +953,28 @@ func (m model) renderStatusSelector() string {
 	return m.statusPicker.View(m.termWidth)
 }
 
+// keywordStyle maps a task status to its keyword style.
+func keywordStyle(st task.Status) lipgloss.Style {
+	switch st {
+	case task.InProgress:
+		return colors.inProgress
+	case task.Active:
+		return colors.active
+	case task.Someday:
+		return colors.someday
+	case task.Container:
+		return colors.container
+	}
+	return colors.completed
+}
+
 func (m model) renderPendingChildWarning() string {
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("9")).
 		Padding(1, 2)
 
-	activeCount := 0
-	if m.statusPickerTask != nil {
-		for _, child := range m.statusPickerTask.Children {
-			if child.IsActive(m.config) || child.IsInProgress(m.config) {
-				activeCount++
-			}
-		}
-	}
+	activeCount := task.PendingChildren(m.statusPickerTask, m.config)
 
 	var content strings.Builder
 
@@ -1595,24 +1610,14 @@ func (m model) renderItem(item task.AgendaItem, selected bool) string {
 		if len(m.config.Todo.Completed) > 0 {
 			displayKeyword = m.config.Todo.Completed[0]
 		}
-	} else if t.IsInProgress(m.config) {
-		kwStyle = colors.inProgress
-	} else if t.IsActive(m.config) {
-		kwStyle = colors.active
-	} else if t.IsSomeday(m.config) {
-		kwStyle = colors.someday
-	} else if t.IsContainer(m.config) {
-		kwStyle = colors.container
 	} else {
-		kwStyle = colors.completed
+		kwStyle = keywordStyle(t.Status(m.config))
 	}
 	parts = append(parts, kwStyle.Render(fmt.Sprintf("%-*s", kwWidth, displayKeyword)))
 
 	// Title (truncated to fit terminal)
 	titleStyle := colors.taskText
-	if item.IsCompleted {
-		titleStyle = colors.completed
-	} else if t.IsCompleted(m.config) {
+	if item.IsCompleted || t.IsCompleted(m.config) {
 		titleStyle = colors.completed
 	} else if item.IsOverdue {
 		titleStyle = colors.deadline
@@ -2009,16 +2014,7 @@ func (m model) renderDetailView() string {
 type editorFinishedMsg struct{ err error }
 
 func openEditorCmd(cfg *config.Config, t *task.Task) tea.Cmd {
-	editor := cfg.GeneralConfig.EDITOR
-	if editor == "" {
-		editor = os.Getenv("EDITOR")
-	}
-	if editor == "" {
-		editor = "vi"
-	}
-
-	args := []string{fmt.Sprintf("+%d", t.LineNum), t.FilePath}
-	c := exec.Command(editor, args...)
+	c := editorpkg.Command(cfg.GeneralConfig.EDITOR, t.FilePath, editorpkg.At{Line: t.LineNum})
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		return editorFinishedMsg{err: err}
 	})
@@ -2103,16 +2099,8 @@ func (m model) renderClockView() string {
 				if len(m.config.Todo.Completed) > 0 {
 					displayKeyword = m.config.Todo.Completed[0]
 				}
-			} else if entry.Task.IsInProgress(m.config) {
-				kwStyle = colors.inProgress
-			} else if entry.Task.IsActive(m.config) {
-				kwStyle = colors.active
-			} else if entry.Task.IsSomeday(m.config) {
-				kwStyle = colors.someday
-			} else if entry.Task.IsContainer(m.config) {
-				kwStyle = colors.container
 			} else {
-				kwStyle = colors.completed
+				kwStyle = keywordStyle(entry.Task.Status(m.config))
 			}
 
 			displayTitle := entry.Task.Title
@@ -2184,47 +2172,19 @@ func (m model) renderClockView() string {
 }
 
 func setupWatcher(cfg *config.Config) *fsnotify.Watcher {
-	watcher, err := fsnotify.NewWatcher()
+	// Agenda always reads the structured project tree.
+	structured := *cfg
+	structured.Todo.Structured = true
+	w, err := watch.Dirs(task.WatchDirs(&structured, "")...)
 	if err != nil {
 		log.Printf("Warning: Could not create file watcher: %v", err)
 		return nil
 	}
-
-	prjDir := cfg.Directories.Projects
-	watcher.Add(prjDir)
-
-	entries, err := os.ReadDir(prjDir)
-	if err == nil {
-		for _, e := range entries {
-			if e.IsDir() {
-				projectDir := filepath.Join(prjDir, e.Name())
-				notesDir := filepath.Join(projectDir, "notes")
-				watcher.Add(projectDir)
-				watcher.Add(notesDir)
-
-				zettelEntries, _ := os.ReadDir(notesDir)
-				for _, z := range zettelEntries {
-					if z.IsDir() {
-						watcher.Add(filepath.Join(notesDir, z.Name()))
-					}
-				}
-			}
-		}
-	}
-
-	if inboxPath := cfg.GetInboxFilePath(); inboxPath != "" {
-		watcher.Add(filepath.Dir(inboxPath))
-	}
-
-	return watcher
+	return w
 }
 
 func main() {
-	cfg, err := config.Load()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-		os.Exit(1)
-	}
+	cfg := config.MustLoad()
 
 	if len(os.Args) > 1 && os.Args[1] == "colors" {
 		if err := colorspkg.Print(cfg); err != nil {

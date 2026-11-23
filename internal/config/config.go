@@ -97,8 +97,8 @@ type Todo struct {
 	InProgress    []string `toml:"inprogress"`
 	Completed     []string `toml:"completed"`
 	Someday       []string `toml:"someday"`
+	Events        []string `toml:"events"`
 	Containers    []string `toml:"containers"`
-	Routines      []string `toml:"routines"`      // Keywords whose items may be routines (if recurring)
 	SpecialTags   []string `toml:"special-tags"`
 }
 
@@ -127,7 +127,7 @@ type Jira struct {
 	SyncInterval    string            `toml:"sync_interval"`
 	StatusMap       map[string]string `toml:"status_map"`
 	ExcludeProjects []string          `toml:"exclude_projects"`
-	HierarchyLevels []int            `toml:"hierarchy_levels"` // -1=sub-task, 0=standard, 1=epic, 2+=initiative
+	HierarchyLevels []int             `toml:"hierarchy_levels"` // -1=sub-task, 0=standard, 1=epic, 2+=initiative
 }
 
 type Config struct {
@@ -138,6 +138,17 @@ type Config struct {
 	Schedule      Schedule      `toml:"schedule"`
 	Colors        ColorScheme   `toml:"colors"`
 	Jira          Jira          `toml:"jira"`
+}
+
+// MustLoad loads the configuration and exits the program with an error
+// message when loading fails. For use from command main functions.
+func MustLoad() *Config {
+	cfg, err := Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+		os.Exit(1)
+	}
+	return cfg
 }
 
 func Load() (*Config, error) {
@@ -198,8 +209,8 @@ func Load() (*Config, error) {
 	// Set keyword defaults if not provided
 	if len(cfg.Todo.Active) == 0 {
 		cfg.Todo.Active = []string{
-			"TODO", "TASK", "NOTE", "REMINDER", "EVENT", "MEETING",
-			"CALL", "EMAIL", "MESSAGE", "FOLLOWUP", "REVIEW",
+			"TODO", "TASK", "NOTE", "REMINDER",
+			"EMAIL", "MESSAGE", "FOLLOWUP", "REVIEW",
 			"CHECKIN", "CHECKOUT", "RESEARCH", "READING", "WRITING",
 			"DRAFT", "FINALIZE", "SUBMIT", "PRESENTATION",
 		}
@@ -223,6 +234,10 @@ func Load() (*Config, error) {
 		cfg.Todo.Containers = []string{
 			"CONTAINER", "EPIC",
 		}
+	}
+
+	if cfg.Todo.Events == nil {
+		cfg.Todo.Events = []string{"MEETING", "EVENT", "CALL"}
 	}
 
 	// Schedule defaults

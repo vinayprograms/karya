@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -15,9 +14,12 @@ import (
 
 	colorspkg "github.com/vinayprograms/karya/internal/colors"
 	"github.com/vinayprograms/karya/internal/config"
+	editorpkg "github.com/vinayprograms/karya/internal/editor"
 	"github.com/vinayprograms/karya/internal/note"
 	"github.com/vinayprograms/karya/internal/task"
+	"github.com/vinayprograms/karya/internal/watch"
 	"github.com/vinayprograms/karya/internal/zet"
+	"github.com/vinayprograms/karya/internal/zetui"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
@@ -47,19 +49,20 @@ type ColorScheme struct {
 var colors ColorScheme
 
 func InitializeColors(cfg *config.Config) {
+	s := colorspkg.Styles(cfg)
 	colors = ColorScheme{
-		zettelIDStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
-		titleStyle:     lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.TaskColor)),
-		normalStyle:    lipgloss.NewStyle(),
-		highlightStyle: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(cfg.Colors.ActiveColor)),
-		projectStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
-		grayStyle:      lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.CompletedColor)),
-		selectorStyle:  colors.selectorStyle,
-		navStyle:       colors.navStyle,
-		commandStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
-		errorStyle:     colors.errorStyle,
-		successStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ProjectColor)),
-		filterStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color(cfg.Colors.ActiveColor)).Background(lipgloss.Color("0")),
+		zettelIDStyle:  s.Project,
+		titleStyle:     s.Task,
+		normalStyle:    s.Normal,
+		highlightStyle: s.Highlight,
+		projectStyle:   s.Project,
+		grayStyle:      s.Completed,
+		selectorStyle:  s.Selector,
+		navStyle:       s.DimText,
+		commandStyle:   s.Project,
+		errorStyle:     s.Error,
+		successStyle:   s.Project,
+		filterStyle:    s.Active.Background(lipgloss.Color("0")),
 	}
 }
 
@@ -115,96 +118,59 @@ func (i matchedNoteItem) FilterValue() string {
 	return i.projectName + " " + i.noteTitle
 }
 
-func (i matchedNoteItem) renderWithSelection(isSelected bool, maxNameLen int, termWidth int) string {
-	name := i.projectName
-	var nameRendered string
-
+// renderName renders a project name with its namespace prefix dimmed,
+// highlighted when selected, padded to maxNameLen.
+func renderName(name string, isSelected bool, maxNameLen int) string {
+	main := colors.projectStyle
+	if isSelected {
+		main = colors.highlightStyle
+	}
+	var rendered string
 	if lastDot := strings.LastIndex(name, "."); lastDot != -1 {
-		prefix := name[:lastDot+1]
-		suffix := name[lastDot+1:]
-		if isSelected {
-			nameRendered = colors.grayStyle.Render(prefix) + colors.highlightStyle.Render(suffix)
-		} else {
-			nameRendered = colors.grayStyle.Render(prefix) + colors.projectStyle.Render(suffix)
-		}
+		rendered = colors.grayStyle.Render(name[:lastDot+1]) + main.Render(name[lastDot+1:])
 	} else {
-		if isSelected {
-			nameRendered = colors.highlightStyle.Render(name)
-		} else {
-			nameRendered = colors.projectStyle.Render(name)
-		}
+		rendered = main.Render(name)
 	}
+	padding := max(maxNameLen-len(name), 0)
+	return rendered + strings.Repeat(" ", padding)
+}
 
-	padding := maxNameLen - len(name)
-	if padding < 0 {
-		padding = 0
+// fitTitle truncates a title to the width remaining after fixed columns.
+func fitTitle(title string, termWidth, fixedWidth int) string {
+	titleWidth := max(termWidth-fixedWidth, 0)
+	runes := []rune(title)
+	if len(runes) <= titleWidth {
+		return title
 	}
-	nameCol := nameRendered + strings.Repeat(" ", padding)
+	if titleWidth > 1 {
+		return string(runes[:titleWidth-1]) + "…"
+	}
+	return ""
+}
 
-	// Title fills remaining width after name + gap
-	fixedWidth := 2 + maxNameLen + 2
-	titleWidth := termWidth - fixedWidth
-	if titleWidth < 0 {
-		titleWidth = 0
-	}
-	title := i.noteTitle
-	titleRunes := []rune(title)
-	if len(titleRunes) > titleWidth {
-		if titleWidth > 1 {
-			title = string(titleRunes[:titleWidth-1]) + "…"
-		} else {
-			title = ""
-		}
-	}
-
-	var selector string
+// selectorGlyph returns the cursor column for a row.
+func selectorGlyph(isSelected bool) string {
 	if isSelected {
-		selector = colors.selectorStyle.Render("█ ")
-	} else {
-		selector = "  "
+		return colors.selectorStyle.Render("█ ")
 	}
+	return "  "
+}
 
+func (i matchedNoteItem) renderWithSelection(isSelected bool, maxNameLen int, termWidth int) string {
+	nameCol := renderName(i.projectName, isSelected, maxNameLen)
+	title := fitTitle(i.noteTitle, termWidth, 2+maxNameLen+2)
 	if isSelected {
-		return selector + nameCol + "  " + colors.highlightStyle.Render(title)
+		title = colors.highlightStyle.Render(title)
 	}
-	return selector + nameCol + "  " + title
+	return selectorGlyph(isSelected) + nameCol + "  " + title
 }
 
 func (i projectItem) renderWithSelection(isSelected bool, maxNameLen int, termWidth int) string {
-	name := i.project.Name
-	var nameRendered string
+	nameCol := renderName(i.project.Name, isSelected, maxNameLen)
 
-	// Dim the namespace prefix (everything up to and including the last dot)
-	if lastDot := strings.LastIndex(name, "."); lastDot != -1 {
-		prefix := name[:lastDot+1]
-		suffix := name[lastDot+1:]
-		if isSelected {
-			nameRendered = colors.grayStyle.Render(prefix) + colors.highlightStyle.Render(suffix)
-		} else {
-			nameRendered = colors.grayStyle.Render(prefix) + colors.projectStyle.Render(suffix)
-		}
-	} else {
-		if isSelected {
-			nameRendered = colors.highlightStyle.Render(name)
-		} else {
-			nameRendered = colors.projectStyle.Render(name)
-		}
-	}
-
-	// Pad name column to fixed width
-	padding := maxNameLen - len(name)
-	if padding < 0 {
-		padding = 0
-	}
-	nameCol := nameRendered + strings.Repeat(" ", padding)
-
-	// Notes column (right-aligned, 4 chars)
 	notesStr := fmt.Sprintf("%4d", i.project.NoteCount)
-
-	// Todos column (right-aligned, 4 chars)
 	todosStr := fmt.Sprintf("%4d", i.project.TodoCount)
 
-	// Modified date column (6 chars)
 	dateStr := "   -- "
 	if i.project.LastNoteID != "" && len(i.project.LastNoteID) >= 8 {
 		if t, err := time.Parse("20060102", i.project.LastNoteID[:8]); err == nil {
@@ -212,35 +178,14 @@ func (i projectItem) renderWithSelection(isSelected bool, maxNameLen int, termWi
 		}
 	}
 
-	// Last note title — fill remaining width
 	// Fixed columns: selector(2) + name(maxNameLen) + gap(2) + notes(4) + gap(2) + todos(4) + gap(2) + date(6) + gap(2) + border(2)
-	fixedWidth := 2 + maxNameLen + 2 + 4 + 2 + 4 + 2 + 6 + 2
-	titleWidth := termWidth - fixedWidth
-	if titleWidth < 0 {
-		titleWidth = 0
-	}
-	title := i.project.LastNoteTitle
-	titleRunes := []rune(title)
-	if len(titleRunes) > titleWidth {
-		if titleWidth > 1 {
-			title = string(titleRunes[:titleWidth-1]) + "…"
-		} else {
-			title = ""
-		}
-	}
+	title := fitTitle(i.project.LastNoteTitle, termWidth, 2+maxNameLen+2+4+2+4+2+6+2)
 
-	// Compose the row
-	var selector string
+	style := colors.grayStyle
 	if isSelected {
-		selector = colors.selectorStyle.Render("█ ")
-	} else {
-		selector = "  "
+		style = colors.highlightStyle
 	}
-
-	if isSelected {
-		return selector + nameCol + "  " + colors.highlightStyle.Render(notesStr) + "  " + colors.highlightStyle.Render(todosStr) + "  " + colors.highlightStyle.Render(dateStr) + "  " + colors.highlightStyle.Render(title)
-	}
-	return selector + nameCol + "  " + colors.grayStyle.Render(notesStr) + "  " + colors.grayStyle.Render(todosStr) + "  " + colors.grayStyle.Render(dateStr) + "  " + colors.grayStyle.Render(title)
+	return selectorGlyph(isSelected) + nameCol + "  " + style.Render(notesStr) + "  " + style.Render(todosStr) + "  " + style.Render(dateStr) + "  " + style.Render(title)
 }
 
 func (i projectItem) Title() string {
@@ -613,68 +558,20 @@ func findMatchingNotes(notesPath, searchTerm string) []matchedNote {
 	return matches
 }
 
-type zettelItem struct {
-	zettel        Zettel
-	verbose       bool
-	searchResults []SearchResult
-}
+type zettelItem = zetui.Item
 
-func (i zettelItem) FilterValue() string {
-	return i.zettel.ID + " " + i.zettel.Title
-}
-
-func (i zettelItem) renderWithSelection(isSelected bool) string {
-	var parts []string
-
-	if len(i.searchResults) > 0 {
-		matchCount := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("11")).
-			Bold(true).
-			Render(fmt.Sprintf("[%d] ", len(i.searchResults)))
-		parts = append(parts, matchCount)
+func newZettelItem(z Zettel, verbose bool, results []SearchResult) zettelItem {
+	return zetui.Item{
+		Zettel:        z,
+		Verbose:       verbose,
+		SearchResults: results,
+		Styles: zetui.Styles{
+			ID:         colors.zettelIDStyle,
+			Title:      colors.normalStyle,
+			Selector:   colors.selectorStyle,
+			MatchCount: lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true),
+		},
 	}
-
-	if i.verbose {
-		parts = append(parts, colors.zettelIDStyle.Render(fmt.Sprintf("%-14s", i.zettel.ID)))
-	}
-
-	if isSelected {
-		indicator := colors.selectorStyle.
-			Render("█ ")
-		parts = append(parts, indicator+i.zettel.Title)
-	} else {
-		parts = append(parts, "  "+i.zettel.Title)
-	}
-
-	return strings.Join(parts, " ")
-}
-
-func (i zettelItem) Title() string {
-	var parts []string
-
-	if i.verbose {
-		parts = append(parts, colors.zettelIDStyle.Render(fmt.Sprintf("%-14s", i.zettel.ID)))
-	}
-
-	parts = append(parts, i.zettel.Title)
-	return strings.Join(parts, " ")
-}
-
-func (i zettelItem) Description() string { return "" }
-
-type zettelDelegate struct {
-	list.DefaultDelegate
-}
-
-func (d zettelDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
-	zettelItem, ok := item.(zettelItem)
-	if !ok {
-		return
-	}
-
-	isSelected := index == m.Index()
-	content := zettelItem.renderWithSelection(isSelected)
-	fmt.Fprint(w, content)
 }
 
 type zettelModel struct {
@@ -702,33 +599,10 @@ func (m zettelModel) Init() tea.Cmd {
 	return waitForFileChange(m.watcher)
 }
 
-type fileChangedMsg struct{}
+type fileChangedMsg = watch.Changed
 
 func waitForFileChange(watcher *fsnotify.Watcher) tea.Cmd {
-	return func() tea.Msg {
-		if watcher == nil {
-			return nil
-		}
-
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return nil
-				}
-				if event.Op&fsnotify.Write == fsnotify.Write ||
-					event.Op&fsnotify.Create == fsnotify.Create ||
-					event.Op&fsnotify.Remove == fsnotify.Remove {
-					return fileChangedMsg{}
-				}
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					return nil
-				}
-				log.Printf("Watcher error: %v", err)
-			}
-		}
-	}
+	return watch.Wait(watcher)
 }
 
 func (m zettelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -771,7 +645,7 @@ func (m zettelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.zettels = zettels
 						items := make([]list.Item, len(m.zettels))
 						for i, z := range m.zettels {
-							items[i] = zettelItem{zettel: z, verbose: m.verbose}
+							items[i] = newZettelItem(z, m.verbose, nil)
 						}
 						m.allItems = items
 						m.list.SetItems(items)
@@ -883,7 +757,7 @@ func (m zettelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() == "d" {
 			if i, ok := m.list.SelectedItem().(zettelItem); ok {
 				m.showDeleteConfirm = true
-				m.deleteZettel = &i.zettel
+				m.deleteZettel = &i.Zettel
 				m.deleteConfirmSelection = 0
 				return m, nil
 			}
@@ -895,7 +769,7 @@ func (m zettelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.filterMode == "fulltext" && m.customFilter != "" {
 					searchTerm = m.customFilter
 				}
-				return m, openEditorCmd(m.editor, i.zettel.Path, searchTerm)
+				return m, openEditorCmd(m.editor, i.Zettel.Path, searchTerm)
 			}
 		}
 	case fileChangedMsg:
@@ -904,7 +778,7 @@ func (m zettelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.zettels = zettels
 			items := make([]list.Item, len(m.zettels))
 			for i, z := range m.zettels {
-				items[i] = zettelItem{zettel: z, verbose: m.verbose}
+				items[i] = newZettelItem(z, m.verbose, nil)
 			}
 			m.allItems = items
 			if m.customFilter != "" {
@@ -925,7 +799,7 @@ func (m zettelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.zettels = zettels
 			items := make([]list.Item, len(m.zettels))
 			for i, z := range m.zettels {
-				items[i] = zettelItem{zettel: z, verbose: m.verbose}
+				items[i] = newZettelItem(z, m.verbose, nil)
 			}
 			m.allItems = items
 			if m.customFilter != "" {
@@ -1101,19 +975,15 @@ func (m *zettelModel) applyFilter() {
 		for _, item := range m.allItems {
 			if zetItem, ok := item.(zettelItem); ok {
 				if m.filterMode == "title" {
-					if strings.Contains(strings.ToLower(zetItem.zettel.ID), filterLower) ||
-						strings.Contains(strings.ToLower(zetItem.zettel.Title), filterLower) {
+					if strings.Contains(strings.ToLower(zetItem.Zettel.ID), filterLower) ||
+						strings.Contains(strings.ToLower(zetItem.Zettel.Title), filterLower) {
 						filteredItems = append(filteredItems, item)
 					}
 				} else if m.filterMode == "fulltext" {
-					results := m.searchInFile(zetItem.zettel.Path, filterLower)
+					results := m.searchInFile(zetItem.Zettel.Path, filterLower)
 					if len(results) > 0 {
-						m.searchResults[zetItem.zettel.ID] = results
-						newItem := zettelItem{
-							zettel:        zetItem.zettel,
-							verbose:       zetItem.verbose,
-							searchResults: results,
-						}
+						m.searchResults[zetItem.Zettel.ID] = results
+						newItem := newZettelItem(zetItem.Zettel, zetItem.Verbose, results)
 						filteredItems = append(filteredItems, newItem)
 					}
 				}
@@ -1144,7 +1014,7 @@ func (m *zettelModel) sortZettels() {
 
 	items := make([]list.Item, len(m.zettels))
 	for i, z := range m.zettels {
-		items[i] = zettelItem{zettel: z, verbose: m.verbose}
+		items[i] = newZettelItem(z, m.verbose, nil)
 	}
 	m.allItems = items
 
@@ -1158,7 +1028,7 @@ func (m *zettelModel) sortZettels() {
 
 type editorFinishedMsg struct{ err error }
 
-func newZettelCmd(zetDir, editor string) tea.Cmd {
+func newZettelCmd(zetDir, editorSpec string) tea.Cmd {
 	zetID := zet.GenerateZettelID()
 
 	if err := zet.CreateZettel(zetDir, zetID, ""); err != nil {
@@ -1169,19 +1039,7 @@ func newZettelCmd(zetDir, editor string) tea.Cmd {
 
 	zetPath := filepath.Join(zetDir, zetID, "README.md")
 
-	if strings.HasPrefix(editor, "~/") {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			editor = filepath.Join(home, editor[2:])
-		}
-	}
-
-	editorParts := strings.Fields(editor)
-	editorCmd := editorParts[0]
-	editorArgs := editorParts[1:]
-	editorArgs = append(editorArgs, zetPath)
-
-	c := exec.Command(editorCmd, editorArgs...)
+	c := editorpkg.Command(editorSpec, zetPath, editorpkg.At{})
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		zet.UpdateReadme(zetDir)
 
@@ -1194,7 +1052,7 @@ func newZettelCmd(zetDir, editor string) tea.Cmd {
 	})
 }
 
-func editLastZettelCmd(zetDir, editor string) tea.Cmd {
+func editLastZettelCmd(zetDir, editorSpec string) tea.Cmd {
 	zetID, err := zet.GetLastZettelID(zetDir)
 	if err != nil {
 		return func() tea.Msg {
@@ -1204,19 +1062,7 @@ func editLastZettelCmd(zetDir, editor string) tea.Cmd {
 
 	zetPath := filepath.Join(zetDir, zetID, "README.md")
 
-	if strings.HasPrefix(editor, "~/") {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			editor = filepath.Join(home, editor[2:])
-		}
-	}
-
-	editorParts := strings.Fields(editor)
-	editorCmd := editorParts[0]
-	editorArgs := editorParts[1:]
-	editorArgs = append(editorArgs, zetPath)
-
-	c := exec.Command(editorCmd, editorArgs...)
+	c := editorpkg.Command(editorSpec, zetPath, editorpkg.At{})
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		title, _ := zet.GetZettelTitle(zetDir, zetID)
 		if title != "" {
@@ -1227,80 +1073,21 @@ func editLastZettelCmd(zetDir, editor string) tea.Cmd {
 	})
 }
 
-func openEditorCmd(editor, filePath, searchTerm string) tea.Cmd {
-	if strings.HasPrefix(editor, "~/") {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			editor = filepath.Join(home, editor[2:])
-		}
-	}
-
-	editorParts := strings.Fields(editor)
-	editorCmd := editorParts[0]
-	editorArgs := editorParts[1:]
-
-	if searchTerm != "" {
-		editorName := filepath.Base(editorCmd)
-		switch editorName {
-		case "vim", "nvim", "vi":
-			editorArgs = append(editorArgs, fmt.Sprintf("+/%s", searchTerm))
-		case "emacs":
-			editorArgs = append(editorArgs, "--eval", fmt.Sprintf("(progn (goto-char (point-min)) (search-forward \"%s\" nil t))", searchTerm))
-		}
-	}
-
-	editorArgs = append(editorArgs, filePath)
-
-	c := exec.Command(editorCmd, editorArgs...)
+func openEditorCmd(editorSpec, filePath, searchTerm string) tea.Cmd {
+	c := editorpkg.Command(editorSpec, filePath, editorpkg.At{Search: searchTerm})
 	return tea.ExecProcess(c, func(err error) tea.Msg {
-		dir := filepath.Dir(filePath)
-		zetID := filepath.Base(dir)
-		zetDir := filepath.Dir(dir)
-
-		if zet.IsValidZettelID(zetID) {
-			zet.UpdateReadme(zetDir)
-			title, _ := zet.GetZettelTitle(zetDir, zetID)
-			if title != "" {
-				zet.GitCommit(zetDir, zetID, title)
-			}
-		}
-
+		refreshZettel(filePath)
 		return editorFinishedMsg{err: err}
 	})
 }
 
-func openFileInEditor(editor, filePath, searchTerm string) {
-	if strings.HasPrefix(editor, "~/") {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			editor = filepath.Join(home, editor[2:])
-		}
-	}
-
-	editorParts := strings.Fields(editor)
-	editorCmd := editorParts[0]
-	editorArgs := editorParts[1:]
-
-	if searchTerm != "" {
-		editorName := filepath.Base(editorCmd)
-		switch editorName {
-		case "vim", "nvim", "vi":
-			editorArgs = append(editorArgs, fmt.Sprintf("+/%s", searchTerm))
-		case "emacs":
-			editorArgs = append(editorArgs, "--eval", fmt.Sprintf("(progn (goto-char (point-min)) (search-forward \"%s\" nil t))", searchTerm))
-		}
-	}
-
-	editorArgs = append(editorArgs, filePath)
-	c := exec.Command(editorCmd, editorArgs...)
-	c.Stdin = os.Stdin
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
-	_ = c.Run()
-
+// refreshZettel updates the zettel index and commits changes after an edit,
+// if the edited file belongs to a zettel.
+func refreshZettel(filePath string) {
 	dir := filepath.Dir(filePath)
 	zetID := filepath.Base(dir)
 	zetDir := filepath.Dir(dir)
+
 	if zet.IsValidZettelID(zetID) {
 		zet.UpdateReadme(zetDir)
 		title, _ := zet.GetZettelTitle(zetDir, zetID)
@@ -1308,6 +1095,11 @@ func openFileInEditor(editor, filePath, searchTerm string) {
 			zet.GitCommit(zetDir, zetID, title)
 		}
 	}
+}
+
+func openFileInEditor(editorSpec, filePath, searchTerm string) {
+	_ = editorpkg.Open(editorSpec, filePath, editorpkg.At{Search: searchTerm})
+	refreshZettel(filePath)
 }
 
 func listProjects(prjDir string, cfg *config.Config) ([]Project, error) {
@@ -1489,8 +1281,8 @@ func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 		// Match vim-style keybindings
 		l.KeyMap.NextPage.SetKeys("pgdown", "ctrl+f", "ctrl+d")
 		l.KeyMap.PrevPage.SetKeys("pgup", "ctrl+b", "ctrl+u")
-		l.KeyMap.GoToStart.SetKeys("g")  // Jump to top
-		l.KeyMap.GoToEnd.SetKeys("G")    // Jump to bottom
+		l.KeyMap.GoToStart.SetKeys("g") // Jump to top
+		l.KeyMap.GoToEnd.SetKeys("G")   // Jump to bottom
 
 		// Add help keys
 		l.AdditionalShortHelpKeys = func() []key.Binding {
@@ -1585,7 +1377,7 @@ func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 			maxNameLen:    maxNameLen,
 			watcher:       prjWatcher,
 		}
-		
+
 		m.applySortOrder()
 		// Restore filter if it was active
 		if savedFilter != "" {
@@ -1684,10 +1476,10 @@ func showZettelTUI(zetDir, projectName, editor string, verbose bool) bool {
 
 	items := make([]list.Item, len(zettels))
 	for i, z := range zettels {
-		items[i] = zettelItem{zettel: z, verbose: verbose}
+		items[i] = newZettelItem(z, verbose, nil)
 	}
 
-	delegate := zettelDelegate{DefaultDelegate: list.NewDefaultDelegate()}
+	delegate := zetui.Delegate{DefaultDelegate: list.NewDefaultDelegate()}
 	delegate.ShowDescription = false
 	delegate.SetHeight(1)
 	delegate.SetSpacing(0)
@@ -1927,11 +1719,7 @@ func newZettel(zetDir, title, editor string) error {
 	}
 
 	zetPath := filepath.Join(zetDir, zetID, "README.md")
-	cmd := exec.Command(editor, zetPath)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	if err := editorpkg.Open(editor, zetPath, editorpkg.At{}); err != nil {
 		return err
 	}
 
@@ -1981,11 +1769,7 @@ func editZettel(zetDir, zetID, editor string) error {
 	}
 	fmt.Printf("EDITING: %s\n", title)
 
-	cmd := exec.Command(editor, zetPath)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	if err := editorpkg.Open(editor, zetPath, editorpkg.At{}); err != nil {
 		return err
 	}
 
@@ -2057,73 +1841,47 @@ func setupProjectWatcher(prjDir string) (*fsnotify.Watcher, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	updateProjectWatcher(watcher, prjDir)
 	return watcher, nil
 }
 
 func updateProjectWatcher(watcher *fsnotify.Watcher, prjDir string) {
-	if watcher == nil {
-		return
-	}
-
 	// Watch the projects dir itself and each project's notes dir (1 level of subdirs + notes)
-	watcher.Add(prjDir)
+	dirs := []string{prjDir}
 	entries, err := os.ReadDir(prjDir)
-	if err != nil {
-		return
-	}
-	for _, entry := range entries {
-		if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
-			prjPath := filepath.Join(prjDir, entry.Name())
-			watcher.Add(prjPath)
-			notesPath := filepath.Join(prjPath, "notes")
-			if _, err := os.Stat(notesPath); err == nil {
-				watcher.Add(notesPath)
+	if err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
+				prjPath := filepath.Join(prjDir, entry.Name())
+				dirs = append(dirs, prjPath, filepath.Join(prjPath, "notes"))
 			}
 		}
 	}
+	watch.Add(watcher, dirs...)
 }
 
 func setupWatcher(zetDir string) (*fsnotify.Watcher, error) {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return nil, err
-	}
-
-	updateWatcher(watcher, zetDir)
-	return watcher, nil
+	return watch.Dirs(zettelWatchDirs(zetDir)...)
 }
 
 func updateWatcher(watcher *fsnotify.Watcher, zetDir string) {
-	if watcher == nil {
-		return
-	}
-
-	dirsToWatch := getWatchDirectories(zetDir)
-	for _, dir := range dirsToWatch {
-		watcher.Add(dir)
-	}
+	watch.Add(watcher, zettelWatchDirs(zetDir)...)
 }
 
-func getWatchDirectories(zetDir string) []string {
+// zettelWatchDirs returns every directory under the zettelkasten root.
+func zettelWatchDirs(zetDir string) []string {
 	var dirs []string
-
 	filepath.Walk(zetDir, func(path string, info os.FileInfo, err error) error {
 		if err == nil && info.IsDir() {
 			dirs = append(dirs, path)
 		}
 		return nil
 	})
-
 	return dirs
 }
 
 func main() {
-	cfg, err := config.Load()
-	if err != nil {
-		log.Fatal(err)
-	}
+	cfg := config.MustLoad()
 
 	InitializeColors(cfg)
 
@@ -2391,11 +2149,7 @@ func main() {
 		}
 	case "toc":
 		tocPath := filepath.Join(zetDir, "README.md")
-		cmd := exec.Command(editor, tocPath)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
+		if err := editorpkg.Open(editor, tocPath, editorpkg.At{}); err != nil {
 			log.Fatal(err)
 		}
 	default:
