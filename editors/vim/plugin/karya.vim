@@ -163,7 +163,7 @@ function! s:KaryaSyntax() abort
   exe 'hi karyaClock cterm=italic gui=italic' . (completed_hi != '' ? ' ' . completed_hi : '')
 
   " State transition log entries
-  syn match karyaLog /LOG([A-Z_]\+ -> [A-Z_]\+): .\+/ containedin=ALL
+  syn match karyaLog /LOG(\%([A-Z_]\+ -> [A-Z_]\+\|scheduled\|due\)): .\+/ containedin=ALL
   exe 'hi karyaLog cterm=italic gui=italic' . (completed_hi != '' ? ' ' . completed_hi : '')
 
   " JIRA keys — bold, no underline, so they don't read as clickable links.
