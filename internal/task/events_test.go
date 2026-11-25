@@ -88,6 +88,33 @@ func TestEvents(t *testing.T) {
 	}
 }
 
+func TestEventAgendaActiveClock(t *testing.T) {
+	today := truncateToDay(time.Now())
+	yesterday := today.AddDate(0, 0, -1)
+	tomorrow := today.AddDate(0, 0, 1)
+	cfg := fixture(t, "MEETING: past @"+yesterday.Format("2006-01-02")+"\n  * CLOCK: "+today.Format("2006-01-02")+"T00:00--\n"+
+		"CALL: series @s:dailyT08:00\n  * CLOCK: "+yesterday.Format("2006-01-02")+"T23:00--\n"+
+		"TODO: work @"+yesterday.Format("2006-01-02")+"+1d\n  * CLOCK: "+yesterday.Format("2006-01-02")+"T23:00--\n")
+	days, err := QueryAgenda(cfg, yesterday, tomorrow, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := map[string]time.Time{}
+	for _, day := range days {
+		for _, item := range day.Items {
+			if item.ClockActive {
+				if _, exists := active[item.Task.Title]; exists {
+					t.Fatalf("marked more than one row active for %q", item.Task.Title)
+				}
+				active[item.Task.Title] = day.Date
+			}
+		}
+	}
+	if len(active) != 3 || !active["past"].Equal(yesterday) || !active["series"].Equal(yesterday) || !active["work"].Equal(today) {
+		t.Fatalf("active agenda rows = %v", active)
+	}
+}
+
 func TestEventsMCP(t *testing.T) {
 	cfg := fixture(t, "EVENT: launch @2026-11-20+1d\nTODO: work\n")
 	server := &MCPServer{config: cfg}
@@ -109,7 +136,11 @@ func TestEventsMCP(t *testing.T) {
 	}
 	_, clock, err := server.clockIn(t.Context(), nil, ClockInArgs{Project: "", Keyword: "EVENT", Title: "launch"})
 	if err != nil || clock.Success {
-		t.Fatalf("clock: %+v, %v", clock, err)
+		t.Fatalf("clock in: %+v, %v", clock, err)
+	}
+	_, clock, err = server.clockOut(t.Context(), nil, ClockOutArgs{Project: "", Keyword: "EVENT", Title: "launch"})
+	if err != nil || clock.Success {
+		t.Fatalf("clock out: %+v, %v", clock, err)
 	}
 	_, updated, err := server.reschedule(t.Context(), nil, ScheduleTaskArgs{Project: "", Keyword: "EVENT", Title: "launch", ScheduledAt: "2026-12-01+1d"})
 	if err != nil || !updated.Success {

@@ -256,9 +256,6 @@ func QueryClockTable(c *config.Config, start, end time.Time) (*ClockTable, error
 	projectMap := make(map[string][]ClockTableEntry)
 
 	for _, t := range tasks {
-		if t.Event(c) {
-			continue
-		}
 		entries, err := ParseClockEntries(t)
 		if err != nil || len(entries) == 0 {
 			continue
@@ -282,7 +279,7 @@ func QueryClockTable(c *config.Config, start, end time.Time) (*ClockTable, error
 		if dateField == "" {
 			dateField = t.DueAt
 		}
-		if dateField != "" {
+		if !t.Event(c) && dateField != "" {
 			if sched, err := ParseSchedule(dateField); err == nil && sched.Recurrence != nil {
 				if completions, err := ParseCompletionEntries(t); err == nil {
 					for _, comp := range completions {
@@ -326,9 +323,21 @@ func QueryClockTable(c *config.Config, start, end time.Time) (*ClockTable, error
 	return &table, nil
 }
 
+func ClockInAgenda(c *config.Config, t *Task, occurrence time.Time) error {
+	now := time.Now()
+	if t.Event(c) && hasRecurringSchedule(t) && (occurrence.IsZero() || !truncateToDay(occurrence.In(time.Local)).Equal(truncateToDay(now))) {
+		return fmt.Errorf("clock in on today's occurrence in the agenda")
+	}
+	return clockInAt(t, now)
+}
+
 // ClockIn appends a new open CLOCK entry after the task line.
 // Returns error if task already has an active clock.
 func ClockIn(t *Task) error {
+	return clockInAt(t, time.Now())
+}
+
+func clockInAt(t *Task, now time.Time) error {
 	if IsClockActive(t) {
 		return fmt.Errorf("task already clocked in")
 	}
@@ -347,7 +356,7 @@ func ClockIn(t *Task) error {
 	}
 
 	indent, _ := subItemIndentForTask(t)
-	clockLine := fmt.Sprintf("%s* CLOCK: %s--", indent, time.Now().Format("2006-01-02T15:04"))
+	clockLine := fmt.Sprintf("%s* CLOCK: %s--", indent, now.Format("2006-01-02T15:04"))
 
 	// Insert after task line
 	newLines := make([]string, 0, len(lines)+1)

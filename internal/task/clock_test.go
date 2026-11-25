@@ -191,6 +191,39 @@ func TestClipDuration(t *testing.T) {
 	}
 }
 
+func TestClockTableIncludesEventTimeWithoutCompletion(t *testing.T) {
+	day := time.Date(2026, 11, 25, 0, 0, 0, 0, time.Local)
+	cfg := fixture(t, `MEETING: sync @s:2026-11-25+1d
+  * CLOCK: 2026-11-25T09:00--2026-11-25T09:45
+  * CLOCK: 2026-11-26T09:00--2026-11-26T10:00
+  * LOG(MEETING -> DONE): 2026-11-25T10:00
+EVENT: zero duration
+  * CLOCK: 2026-11-25T12:00--2026-11-25T12:00
+TODO: work @s:2026-11-25+1d
+  * CLOCK: 2026-11-25T10:00--2026-11-25T10:15
+  * LOG(TODO -> DONE): 2026-11-25T10:15
+`)
+	table, err := QueryClockTable(cfg, day, day)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if table.GrandTotal != time.Hour || len(table.Projects) != 1 || table.Projects[0].Total != time.Hour {
+		t.Fatalf("clock totals = %+v", table)
+	}
+	entries := table.Projects[0].Entries
+	if len(entries) != 2 || !entries[0].Task.Event(cfg) || entries[0].Duration != 45*time.Minute || entries[0].WasCompleted {
+		t.Fatalf("event report = %+v", entries)
+	}
+	if entries[1].Task.Title != "work" || entries[1].Duration != 15*time.Minute || !entries[1].WasCompleted {
+		t.Fatalf("work report = %+v", entries[1])
+	}
+	server := &MCPServer{config: cfg}
+	_, report, err := server.getClockTable(t.Context(), nil, GetClockTableArgs{Start: "2026-11-24", End: "2026-11-27"})
+	if err != nil || len(report.Projects) != 1 || len(report.Projects[0].Tasks) != 2 || report.Projects[0].Tasks[0].Keyword != "MEETING" {
+		t.Fatalf("MCP report missing event: %+v, %v", report, err)
+	}
+}
+
 func TestClockIn(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "test.md")

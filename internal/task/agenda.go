@@ -1,6 +1,7 @@
 package task
 
 import (
+	"slices"
 	"sort"
 	"time"
 
@@ -138,18 +139,32 @@ func QueryAgenda(c *config.Config, start, end time.Time, includeOverdue bool) ([
 		}
 	}
 
-	// Mark items with active clocks only on today's occurrence
-	clockCache := make(map[*Task]bool)
+	type clockState struct {
+		openDays       []time.Time
+		event          bool
+		recurringEvent bool
+	}
+	clockCache := make(map[*Task]clockState)
 	for date, items := range dayMap {
 		for i := range items {
 			t := items[i].Task
-			if t.Event(c) {
-				continue
+			state, ok := clockCache[t]
+			if !ok {
+				entries, _ := ParseClockEntries(t)
+				for _, entry := range entries {
+					if entry.Open {
+						state.openDays = append(state.openDays, truncateToDay(entry.Start))
+					}
+				}
+				state.event = t.Event(c)
+				state.recurringEvent = len(state.openDays) > 0 && state.event && hasRecurringSchedule(t)
+				clockCache[t] = state
 			}
-			if _, ok := clockCache[t]; !ok {
-				clockCache[t] = IsClockActive(t)
+			if state.recurringEvent {
+				items[i].ClockActive = slices.ContainsFunc(state.openDays, date.Equal)
+			} else {
+				items[i].ClockActive = len(state.openDays) > 0 && (state.event || date.Equal(today))
 			}
-			items[i].ClockActive = clockCache[t] && date.Equal(today)
 		}
 		dayMap[date] = items
 	}
@@ -398,6 +413,15 @@ func sortAgendaItems(items []AgendaItem, c *config.Config) {
 		// Among untimed, sort by priority
 		return items[i].Task.Priority(c) < items[j].Task.Priority(c)
 	})
+}
+
+func hasRecurringSchedule(t *Task) bool {
+	for _, token := range []string{t.ScheduledAt, t.DueAt} {
+		if sched, err := ParseSchedule(token); err == nil && sched.Recurrence != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func truncateToDay(t time.Time) time.Time {

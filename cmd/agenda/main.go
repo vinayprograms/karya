@@ -290,6 +290,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMessage = ""
 		return m, nil
 	}
+	if result, ok := msg.(clockResultMsg); ok {
+		clear := tea.Tick(3*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} })
+		if result.err != nil {
+			m.statusMessage = fmt.Sprintf("Clock: %v", result.err)
+			return m, clear
+		}
+		m.statusMessage = result.message
+		if m.showingClockView {
+			return m, tea.Batch(loadClockTableCmd(m.config, m.focusDate, m.mode), clear)
+		}
+		return m, tea.Batch(loadAgendaCmd(m.config, m.focusDate, m.mode), clear)
+	}
 
 	// Help overlay
 	if m.showingHelp {
@@ -506,7 +518,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			case "c", "esc", "a":
 				m.showingClockView = false
-				return m, nil
+				return m, loadAgendaCmd(m.config, m.focusDate, m.mode)
 
 			// View switching (reload clock table for new view)
 			case "d":
@@ -591,7 +603,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Clock in/out
 			case "i":
 				if m.clockCursor < len(m.clockTasks) {
-					return m, clockInAgendaCmd(m.clockTasks[m.clockCursor])
+					return m, clockInAgendaCmd(m.config, m.clockTasks[m.clockCursor], time.Time{})
 				}
 			case "o":
 				if m.clockCursor < len(m.clockTasks) {
@@ -600,7 +612,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Status change
 			case "t":
-				if m.clockCursor < len(m.clockTasks) {
+				if m.clockCursor < len(m.clockTasks) && !m.event() {
 					t := m.clockTasks[m.clockCursor]
 					m.statusPickerTask = t
 					m.showingStatusPicker = true
@@ -651,10 +663,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				loadClockTableCmd(m.config, m.focusDate, m.mode),
 				waitForFileChange(m.watcher),
 			)
-
-		case clockResultMsg:
-			// Reload after clock operation
-			return m, loadClockTableCmd(m.config, m.focusDate, m.mode)
 		}
 
 		return m, nil
@@ -786,11 +794,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Clock in/out
 		case "i":
-			if m.cursor < len(m.flatItems) && !m.flatItems[m.cursor].Task.Event(m.config) {
-				return m, clockInAgendaCmd(m.flatItems[m.cursor].Task)
+			if m.cursor < len(m.flatItems) {
+				item := m.flatItems[m.cursor]
+				return m, clockInAgendaCmd(m.config, item.Task, item.Date)
 			}
 		case "o":
-			if m.cursor < len(m.flatItems) && !m.flatItems[m.cursor].Task.Event(m.config) {
+			if m.cursor < len(m.flatItems) {
 				return m, clockOutAgendaCmd(m.flatItems[m.cursor].Task)
 			}
 
@@ -872,10 +881,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			loadAgendaCmd(m.config, m.focusDate, m.mode),
 			waitForFileChange(m.watcher),
 		)
-
-	case clockResultMsg:
-		// Reload after clock operation
-		return m, loadAgendaCmd(m.config, m.focusDate, m.mode)
 
 	case statusUpdateMsg:
 		m.statusPickerTask = nil
@@ -1064,8 +1069,9 @@ func (m model) renderHelp() string {
 		bindings = append(bindings, agenda...)
 	}
 
+	event := m.event()
 	for _, kb := range bindings {
-		if m.event() && (kb.key == "t" || kb.key == "i" || kb.key == "o") {
+		if event && kb.key == "t" {
 			continue
 		}
 		b.WriteString(fmt.Sprintf("  %s  %s\n",
@@ -1418,9 +1424,9 @@ func (m *model) buildClockLineMapping() {
 	m.clockTotalLines = lineIdx
 }
 
-func clockInAgendaCmd(t *task.Task) tea.Cmd {
+func clockInAgendaCmd(c *config.Config, t *task.Task, occurrence time.Time) tea.Cmd {
 	return func() tea.Msg {
-		err := task.ClockIn(t)
+		err := task.ClockInAgenda(c, t, occurrence)
 		if err != nil {
 			return clockResultMsg{err: err}
 		}
@@ -1555,26 +1561,27 @@ func (m model) View() string {
 		b.WriteString("\n")
 	}
 
-	// Status message
-	if m.statusMessage != "" {
-		statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-		b.WriteString(statusStyle.Render(m.statusMessage))
-		b.WriteString("\n")
-	}
-
-	// Footer (anchored to bottom)
-	hints := "t: status • S/D: schedule/due • c: clock • i/o: in/out • v: detail • enter: edit • ?: help • q: quit"
-	if m.event() {
-		hints = "S/D: schedule/due • c: clock • v: detail • enter: edit • ?: help • q: quit"
-	}
-	footer := colors.dimText.Render(hints)
-	b.WriteString(footer)
-
+	b.WriteString(m.renderFooter("S/D: schedule/due • c: clock • i/o: in/out • v: detail • enter: edit • ?: help • q: quit"))
 	return b.String()
 }
 
+func (m model) renderFooter(hints string) string {
+	if !m.event() {
+		hints = "t: status • " + hints
+	}
+	footer := colors.dimText.Render(hints)
+	if m.statusMessage != "" {
+		statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+		return statusStyle.Render(m.statusMessage) + "\n" + footer
+	}
+	return footer
+}
+
 func (m model) event() bool {
-	return !m.showingClockView && m.cursor >= 0 && m.cursor < len(m.flatItems) && m.flatItems[m.cursor].Task.Event(m.config)
+	if m.showingClockView {
+		return m.clockCursor >= 0 && m.clockCursor < len(m.clockTasks) && m.clockTasks[m.clockCursor].Event(m.config)
+	}
+	return m.cursor >= 0 && m.cursor < len(m.flatItems) && m.flatItems[m.cursor].Task.Event(m.config)
 }
 
 func (m model) renderItem(item task.AgendaItem, selected bool) string {
@@ -2058,6 +2065,7 @@ func (m model) renderClockView() string {
 	}
 	b.WriteString("\n")
 
+	const hints = "i/o: in/out • v: detail • enter: edit • esc/a: agenda • ?: help • q: quit"
 	if m.clockTable == nil || m.clockTable.GrandTotal == 0 {
 		contentHeight := max(5, m.termHeight-4)
 		b.WriteString(colors.dimText.Render("  No clock data for this period."))
@@ -2065,8 +2073,7 @@ func (m model) renderClockView() string {
 		for i := 1; i < contentHeight-1; i++ {
 			b.WriteString("\n")
 		}
-		footer := colors.dimText.Render("t: status • i/o: in/out • v: detail • enter: edit • esc/a: agenda • ?: help • q: quit")
-		b.WriteString(footer)
+		b.WriteString(m.renderFooter(hints))
 		return b.String()
 	}
 
@@ -2184,9 +2191,7 @@ func (m model) renderClockView() string {
 		b.WriteString("\n")
 	}
 
-	// Footer
-	footer := colors.dimText.Render("t: status • i/o: in/out • v: detail • enter: edit • esc/a: agenda • ?: help • q: quit")
-	b.WriteString(footer)
+	b.WriteString(m.renderFooter(hints))
 
 	return b.String()
 }

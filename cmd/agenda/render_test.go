@@ -34,6 +34,9 @@ func TestRenderingPreservesStyles(t *testing.T) {
 				if !strings.Contains(row, want) {
 					t.Errorf("%s %s: original description style missing: %q", keyword, test.state, row)
 				}
+				if keyword == "MEETING" && test.state == "clock" && !strings.Contains(row, colors.events.Render("MEETING     ")) {
+					t.Errorf("active event keyword lost its dedicated color: %q", row)
+				}
 			}
 		}
 	}

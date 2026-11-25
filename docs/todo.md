@@ -156,13 +156,15 @@ events = ["MEETING", "EVENT", "CALL"]
 
 These are also the defaults. Set `events = []` to disable event classification, or add your own keywords for deadlines, launches, appointments and reminders. Events take precedence if a keyword also appears in a task-state category.
 
-Events appear on their scheduled or due day in `agenda`, never as overdue work. Press Enter in agenda to open the source file and add indented notes below the event. Events do not cycle through TODO/DONE, support clock tracking, or generate completion logbook entries. They are excluded from the todo TUI, `todo list`, and MCP work-task lists and counts.
+Events appear on their scheduled or due day in `agenda`, never as overdue work. Press Enter in agenda to open the source file and add indented notes below the event. Events do not cycle through TODO/DONE or generate completion logbook entries. They are excluded from the todo TUI, `todo list`, and MCP work-task lists and counts.
+
+Press `i` to clock in and `o` to clock out. For recurring events, start the clock from today's occurrence in the agenda. You can stop an open clock from the agenda or its clock table (`c`), even after midnight. Clocking records actual time without changing the event's dates or keyword. Event time is included in clock reports.
 
 Agenda refreshes recurring events on startup and every 15 minutes while running. Past-day dates advance to today or the next recurrence, preserving the keyword, times, recurrence modifiers and notes. Today's event stays visible all day. For events, all recurrence modes advance from the stored date because there is no completion action. One-off events are left unchanged. Refresh pauses while the external editor owns the TUI and retries after one minute while the date picker is open.
 
 The former routines view and `r` toggle have been removed. Migrate `routines` configuration to `events`; unlike routines, events include one-off and undated items. Undated events are available through MCP but have no agenda day.
 
-Todo MCP provides `list_events` (optional project and filter), `schedule_event` (exact title or `raw_title`), and `refresh_events`. `get_keywords` includes Events. The old `show_routines` arguments and `routine_count` result have been removed. Existing task inspection tools can still inspect event notes; task-status and clock operations reject events.
+Todo MCP provides `list_events` (optional project and filter), `schedule_event` (exact title or `raw_title`), and `refresh_events`. `get_keywords` includes Events. The old `show_routines` arguments and `routine_count` result have been removed. Existing task inspection tools can still inspect event notes. MCP clock reports include event time, but MCP task-status, clock-in, and clock-out tools still reject events.
 
 ## Calendar rules
 
