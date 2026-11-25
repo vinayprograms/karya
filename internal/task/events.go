@@ -3,6 +3,7 @@ package task
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,12 +15,15 @@ func Refresh(cfg *config.Config, now time.Time) error {
 	if err != nil {
 		return err
 	}
+	sort.SliceStable(tasks, func(left, right int) bool {
+		if tasks[left].FilePath != tasks[right].FilePath {
+			return tasks[left].FilePath < tasks[right].FilePath
+		}
+		return tasks[left].LineNum > tasks[right].LineNum
+	})
 	var failures []error
 	today := truncateToDay(now)
 	for _, event := range tasks {
-		if !event.Event(cfg) {
-			continue
-		}
 		for _, scheduled := range []bool{true, false} {
 			token := event.DueAt
 			if scheduled {
@@ -28,9 +32,16 @@ func Refresh(cfg *config.Config, now time.Time) error {
 			if token == "" {
 				continue
 			}
-			schedule, err := ParseSchedule(token)
+			field := "due"
+			if scheduled {
+				field = "scheduled"
+			}
+			schedule, err := resolve(event, token, field, now, true)
 			if err != nil {
 				failures = append(failures, fmt.Errorf("event %q: %w", event.Title, err))
+				continue
+			}
+			if schedule.Rule != "" || !event.Event(cfg) {
 				continue
 			}
 			if schedule.Recurrence == nil || !truncateToDay(schedule.Date).Before(today) {

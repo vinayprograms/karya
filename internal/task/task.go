@@ -1449,7 +1449,13 @@ func SetTaskDate(t *Task, scheduledAt, dueAt string, removeScheduled, removeDue 
 			lineNum = t.LineNum
 		}
 	}
+	previousTokens := map[string]string{"scheduled": t.ScheduledAt, "due": t.DueAt}
 	lines[lineNum-1] = applyDateChanges(lines[lineNum-1], scheduledAt, dueAt, removeScheduled, removeDue)
+	updated := ParseLine(&config.Config{Todo: config.Todo{Active: []string{t.Keyword}}}, lines[lineNum-1], t.Project, t.Zettel, t.FilePath)
+	if updated != nil {
+		t.RawTitle = updated.RawTitle
+	}
+	t.LineNum = lineNum
 
 	if err := os.WriteFile(t.FilePath, []byte(strings.Join(lines, "\n")), 0644); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
@@ -1464,6 +1470,27 @@ func SetTaskDate(t *Task, scheduledAt, dueAt string, removeScheduled, removeDue 
 		t.DueAt = dueAt
 	} else if removeDue {
 		t.DueAt = ""
+	}
+	for _, field := range []string{"scheduled", "due"} {
+		token := scheduledAt
+		if field == "due" {
+			token = dueAt
+		}
+		if token == "" {
+			continue
+		}
+		schedule, err := ParseSchedule(token)
+		if err != nil {
+			return err
+		}
+		reset := true
+		previous, err := ParseSchedule(previousTokens[field])
+		if err == nil && previous.Rule != "" && schedule.Rule != "" {
+			reset = previous.identity() != schedule.identity()
+		}
+		if err := schedule.anchor(t, field, time.Now(), true, reset); err != nil {
+			return err
+		}
 	}
 
 	return nil

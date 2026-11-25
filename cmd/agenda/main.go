@@ -801,6 +801,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if t.Event(m.config) {
 					return m, nil
 				}
+				item := m.flatItems[m.cursor]
+				if item.Schedule != nil && item.Schedule.Rule != "" && item.Date.Format("2006-01-02") != time.Now().Format("2006-01-02") {
+					m.statusMessage = "Calendar tasks can only be completed on today's occurrence"
+					return m, nil
+				}
 				m.statusPickerTask = t
 				m.showingStatusPicker = true
 				m.statusPicker = task.NewStatusPicker(t, m.config)

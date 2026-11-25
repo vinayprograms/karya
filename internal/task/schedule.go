@@ -37,6 +37,8 @@ type Schedule struct {
 	Recurrence *RecurrenceSpec
 	Warning    *WarningSpec
 	Raw        string
+	Rule       string
+	Anchor     time.Time
 }
 
 // ParseSchedule parses a date token (the part after @s: or @d:) into a Schedule.
@@ -50,6 +52,9 @@ func ParseSchedule(raw string) (*Schedule, error) {
 		return nil, fmt.Errorf("empty date token")
 	}
 
+	if raw[0] < '0' || raw[0] > '9' {
+		return calendar(raw)
+	}
 	s := &Schedule{Raw: raw}
 	remaining := raw
 
@@ -128,6 +133,9 @@ func ParseSchedule(raw string) (*Schedule, error) {
 
 // FormatToken reconstructs the date token string from the Schedule.
 func (s *Schedule) FormatToken() string {
+	if s.Rule != "" {
+		return s.Raw
+	}
 	var b strings.Builder
 
 	if s.HasTime {
@@ -218,6 +226,15 @@ func addMonths(t time.Time, months int) time.Time {
 
 // NextOccurrence computes the next occurrence date based on the recurrence mode.
 func (s *Schedule) NextOccurrence(completionDate time.Time) time.Time {
+	if s.Rule != "" {
+		start := truncateToDay(completionDate).AddDate(0, 0, 1)
+		end := start.AddDate(0, 0, s.Recurrence.Interval*7+7)
+		occurrences := s.occurrences(start, end)
+		if len(occurrences) > 0 {
+			return occurrences[0]
+		}
+		return time.Time{}
+	}
 	if s.Recurrence == nil {
 		return s.Date
 	}
@@ -248,6 +265,9 @@ func (s *Schedule) NextOccurrence(completionDate time.Time) time.Time {
 // Range comparisons use calendar-day granularity so timed tasks are included when
 // their day falls within the range, regardless of the time-of-day component.
 func (s *Schedule) ExpandOccurrences(rangeStart, rangeEnd time.Time) []time.Time {
+	if s.Rule != "" {
+		return s.occurrences(rangeStart, rangeEnd)
+	}
 	startDay := truncateToDay(rangeStart)
 	endDay := truncateToDay(rangeEnd)
 
@@ -315,6 +335,37 @@ func CompleteRecurringTask(t *Task, c *config.Config, targetKeyword string) (adv
 	sched, err := ParseSchedule(dateField)
 	if err != nil || sched.Recurrence == nil {
 		return false, nil
+	}
+
+	if sched.Rule != "" {
+		data, err := os.ReadFile(t.FilePath)
+		if err != nil {
+			return false, err
+		}
+		lines := strings.Split(string(data), "\n")
+		if t.LineNum < 1 || t.LineNum > len(lines) {
+			return false, fmt.Errorf("task location changed; reload before completing")
+		}
+		text, _ := StripLinePrefix(lines[t.LineNum-1])
+		if t.RawTitle != "" && (!strings.HasPrefix(text, t.Keyword+":") || strings.TrimSpace(strings.TrimPrefix(text, t.Keyword+":")) != strings.TrimSpace(t.RawTitle)) {
+			return false, fmt.Errorf("task changed; reload before completing")
+		}
+		if PendingChildren(t, c) > 0 {
+			return false, ErrPendingChildren
+		}
+		field := "scheduled"
+		if !isScheduled {
+			field = "due"
+		}
+		if err := sched.anchor(t, field, time.Now(), true); err != nil {
+			return false, err
+		}
+		if IsClockActive(t) {
+			if err := ClockOut(t); err != nil {
+				return false, err
+			}
+		}
+		return true, recordOrUpdateTransition(t, truncateToDay(time.Now()), t.Keyword, targetKeyword)
 	}
 
 	// Auto clock-out if active

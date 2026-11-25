@@ -18,7 +18,7 @@ const (
 type pickerSection int
 
 const (
-	sectionDate       pickerSection = iota
+	sectionDate pickerSection = iota
 	sectionTime
 	sectionRecurrence
 	sectionWarning
@@ -50,6 +50,11 @@ type DatePicker struct {
 	ClearedScheduled bool
 	ClearedDue       bool
 	ErrorMsg         string
+	rule             string
+	baseline         string
+	editing          bool
+	draft            string
+	accepted         bool
 
 	// Section navigation
 	Section pickerSection
@@ -120,17 +125,54 @@ func NewDatePicker(t *Task, field DatePickerField) *DatePicker {
 		}
 	}
 
+	dp.baseline = dp.buildToken()
+	if schedule, err := ParseSchedule(raw); err == nil && schedule.Rule != "" {
+		dp.rule = raw
+	}
 	return dp
 }
 
 func (dp *DatePicker) Update(key string) {
 	dp.ErrorMsg = ""
+	if dp.editing {
+		switch key {
+		case "esc":
+			dp.editing = false
+			dp.rule = dp.draft
+		case "enter":
+			if _, err := ParseSchedule(dp.rule); err != nil {
+				dp.ErrorMsg = err.Error()
+				return
+			}
+			dp.editing = false
+			dp.accepted = true
+			dp.Confirmed = true
+		case "backspace":
+			if len(dp.rule) > 0 {
+				dp.rule = dp.rule[:len(dp.rule)-1]
+			}
+		default:
+			if len(key) == 1 {
+				dp.rule += key
+			}
+		}
+		return
+	}
+	if key == "r" {
+		dp.draft = dp.rule
+		dp.editing = true
+		return
+	}
 
 	switch key {
 	case "esc":
 		dp.Cancelled = true
 		return
 	case "enter":
+		if _, err := ParseSchedule(dp.buildToken()); err != nil {
+			dp.ErrorMsg = err.Error()
+			return
+		}
 		dp.Confirmed = true
 		return
 	case "tab":
@@ -147,6 +189,13 @@ func (dp *DatePicker) Update(key string) {
 		return
 	}
 
+	if dp.rule != "" {
+		dp.ErrorMsg = "Press r to edit this calendar rule"
+		if dp.Section == sectionDate && key == "backspace" {
+			dp.updateDate(key)
+		}
+		return
+	}
 	switch dp.Section {
 	case sectionDate:
 		dp.updateDate(key)
@@ -160,6 +209,9 @@ func (dp *DatePicker) Update(key string) {
 }
 
 func (dp *DatePicker) toggleField() {
+	dp.rule = ""
+	dp.accepted = false
+	dp.baseline = ""
 	if dp.Field == FieldScheduled {
 		dp.Field = FieldDue
 		if !dp.ClearedDue && dp.Task.DueAt != "" {
@@ -174,6 +226,7 @@ func (dp *DatePicker) toggleField() {
 }
 
 func (dp *DatePicker) loadFromToken(raw string) {
+	dp.rule = ""
 	if s, err := ParseSchedule(raw); err == nil {
 		dp.Cursor = s.Date
 		dp.HasTime = s.HasTime
@@ -192,11 +245,16 @@ func (dp *DatePicker) loadFromToken(raw string) {
 			dp.RecurrenceInterval = s.Recurrence.Interval
 			dp.RecurrenceUnit = s.Recurrence.Unit
 		}
+		dp.baseline = ""
+		if s.Rule != "" {
+			dp.rule = raw
+		}
 		dp.HasWarning = s.Warning != nil
 		if s.Warning != nil {
 			dp.WarningDays = s.Warning.Days
 		}
 	}
+	dp.baseline = dp.buildToken()
 }
 
 func (dp *DatePicker) updateDate(key string) {
@@ -483,6 +541,9 @@ func (dp *DatePicker) unclearActive() {
 }
 
 func (dp *DatePicker) buildToken() string {
+	if dp.accepted {
+		return dp.rule
+	}
 	sched := &Schedule{
 		Date:    dp.Cursor,
 		HasTime: dp.HasTime,
@@ -507,7 +568,11 @@ func (dp *DatePicker) buildToken() string {
 	if dp.HasWarning {
 		sched.Warning = &WarningSpec{Days: dp.WarningDays}
 	}
-	return sched.FormatToken()
+	token := sched.FormatToken()
+	if dp.rule != "" && (dp.editing || token == dp.baseline) {
+		return dp.rule
+	}
+	return token
 }
 
 func (dp *DatePicker) Result() (scheduledAt, dueAt string, removeScheduled, removeDue bool) {
@@ -538,6 +603,9 @@ func (dp *DatePicker) Result() (scheduledAt, dueAt string, removeScheduled, remo
 }
 
 func (dp *DatePicker) View(width int) string {
+	if dp.editing {
+		return "Calendar rule (@s:/@d: value): " + dp.rule + "\nEnter: apply • Esc: back\n" + dp.ErrorMsg
+	}
 	if width < 40 {
 		width = 40
 	}
@@ -681,7 +749,7 @@ func (dp *DatePicker) View(width int) string {
 				b.WriteString(sectionActiveStyle.Render(intervalStr))
 				b.WriteString(dimStyle.Render(unitStr))
 			case recFocusUnit:
-				b.WriteString(dimStyle.Render(modeStr+intervalStr))
+				b.WriteString(dimStyle.Render(modeStr + intervalStr))
 				b.WriteString(sectionActiveStyle.Render(unitStr))
 			}
 		} else {
@@ -731,7 +799,7 @@ func (dp *DatePicker) View(width int) string {
 		b.WriteString(dimStyle.Render("j/k: adjust days • 0-9: type • backspace: clear"))
 	}
 	b.WriteString("\n")
-	b.WriteString(dimStyle.Render("tab/shift+tab: section • enter: confirm • esc: cancel"))
+	b.WriteString(dimStyle.Render("r: calendar rule • tab/shift+tab: section • enter: confirm • esc: cancel"))
 
 	return boxStyle.Render(b.String())
 }

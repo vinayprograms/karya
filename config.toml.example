@@ -55,7 +55,7 @@
 #     "SOMEDAY", "MAYBE", "LATER", "WISHLIST"
 # ]
 #
-events = ["MEETING", "EVENT", "CALL"]
+# events = ["MEETING", "EVENT", "CALL"]
 
 # -----------------------------------------------
 # Settings specific to 'goal' tool

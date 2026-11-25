@@ -156,13 +156,41 @@ events = ["MEETING", "EVENT", "CALL"]
 
 These are also the defaults. Set `events = []` to disable event classification, or add your own keywords for deadlines, launches, appointments and reminders. Events take precedence if a keyword also appears in a task-state category.
 
-Events appear on their scheduled or due day in `agenda`, never as overdue work. Press Enter in agenda to open the source file and add indented notes below the event. Events do not cycle through TODO/DONE, support clock tracking, or generate logbook entries. They are excluded from the todo TUI, `todo list`, and MCP work-task lists and counts.
+Events appear on their scheduled or due day in `agenda`, never as overdue work. Press Enter in agenda to open the source file and add indented notes below the event. Events do not cycle through TODO/DONE, support clock tracking, or generate completion logbook entries. They are excluded from the todo TUI, `todo list`, and MCP work-task lists and counts.
 
 Agenda refreshes recurring events on startup and every 15 minutes while running. Past-day dates advance to today or the next recurrence, preserving the keyword, times, recurrence modifiers and notes. Today's event stays visible all day. For events, all recurrence modes advance from the stored date because there is no completion action. One-off events are left unchanged. Refresh pauses while the external editor owns the TUI and retries after one minute while the date picker is open.
 
 The former routines view and `r` toggle have been removed. Migrate `routines` configuration to `events`; unlike routines, events include one-off and undated items. Undated events are available through MCP but have no agenda day.
 
 Todo MCP provides `list_events` (optional project and filter), `schedule_event` (exact title or `raw_title`), and `refresh_events`. `get_keywords` includes Events. The old `show_routines` arguments and `routine_count` result have been removed. Existing task inspection tools can still inspect event notes; task-status and clock operations reject events.
+
+## Calendar rules
+
+Both `@s:` and `@d:` accept recurring calendar rules without a concrete date:
+
+```markdown
+MEETING: Team sync @s:monT14:30-15:00
+MEETING: Alternating sync @s:mondayT14:30+2w
+EVENT: Morning reminder @s:weekdaysT09:00
+EVENT: Daily reminder @s:dailyT09:00
+EVENT: Weekly deadline @d:fridayT17:00
+TODO: Daily review @s:daily
+```
+
+Weekday names accept their full spelling or three-letter abbreviation, case-insensitively. `mon`, `monday`, `mon+1w` and `monday+1w` are equivalent; `daily+1d` and `weekdays+1w` are accepted too. Optional time ranges and `!Nd` warnings use the existing syntax. Ambiguous intervals such as `mon+2d` are rejected. Weekday lists, monthly calendar rules and time zones are not yet supported.
+
+Calendar tokens retain the user's spelling and are never advanced to dated tokens. Agenda expands their occurrences in the requested view. Calendar TODO completion records a normal state transition for today without changing the keyword or rule; missed calendar occurrences are not accumulated as overdue work.
+
+Intervals greater than one require a stable anchor. On first detection by agenda/refresh, or when setting a date through the picker/MCP, a direct child entry is added:
+
+```markdown
+MEETING: Alternating sync @s:mondayT14:30+2w
+  * LOG(scheduled): 2026-11-30T14:30
+```
+
+The anchor is the next eligible day, including today, with the rule's time (00:00 for all-day rules). `LOG(scheduled):` and `LOG(due):` contain only this timestamp; repetition is read from the current `@s:` or `@d:` token. New entries are inserted immediately below the task, so the first entry for a field is its latest anchor. Changes through the picker/MCP add a new anchor when needed, leaving prior logs intact; equivalent spellings reuse the anchor. For manual edits, the current rule is applied to the existing anchor; update the top anchor timestamp when you want to start a new series. These entries are schedule metadata, never completion or clock records. Keep them with the task when copying or syncing files. First detection cannot recover the date when an offline manual edit was originally typed.
+
+In the date picker, press `r` to enter/edit the rule, Enter to apply, or Escape to discard the rule edit. Existing calendar rules are protected from accidental conversion by the numeric date controls; edit them with `r` or remove them with Backspace in the date section.
 
 ## Configuration
 

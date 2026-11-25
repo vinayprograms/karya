@@ -46,6 +46,35 @@ func QueryAgenda(c *config.Config, start, end time.Time, includeOverdue bool) ([
 	// Collect agenda items grouped by day
 	dayMap := make(map[time.Time][]AgendaItem)
 
+	sort.SliceStable(tasks, func(left, right int) bool {
+		if tasks[left].FilePath != tasks[right].FilePath {
+			return tasks[left].FilePath < tasks[right].FilePath
+		}
+		return tasks[left].LineNum > tasks[right].LineNum
+	})
+	for index := 0; index < len(tasks); index++ {
+		t := tasks[index]
+		for _, field := range []string{"scheduled", "due"} {
+			token := t.ScheduledAt
+			if field == "due" {
+				token = t.DueAt
+			}
+			if token == "" {
+				continue
+			}
+			schedule, err := ParseSchedule(token)
+			if err != nil || schedule.Rule == "" {
+				continue
+			}
+			if err := schedule.anchor(t, field, time.Now(), true); err != nil {
+				return nil, err
+			}
+		}
+	}
+	tasks, err = ListTasks(c, "", true)
+	if err != nil {
+		return nil, err
+	}
 	for _, t := range tasks {
 		// Process scheduled date
 		if t.ScheduledAt != "" {
@@ -86,6 +115,9 @@ func QueryAgenda(c *config.Config, start, end time.Time, includeOverdue bool) ([
 			continue
 		}
 		for _, tr := range transitions {
+			if KeywordStatus(c, tr.To) != Completed {
+				continue
+			}
 			compDay := truncateToDay(tr.Timestamp)
 			if compDay.Before(startDay) || compDay.After(endDay) {
 				continue
@@ -136,11 +168,44 @@ func QueryAgenda(c *config.Config, start, end time.Time, includeOverdue bool) ([
 }
 
 func addAgendaEntries(c *config.Config, t *Task, dateToken string, isDeadline bool, start, end, today time.Time, includeOverdue bool, dayMap map[time.Time][]AgendaItem) {
-	sched, err := ParseSchedule(dateToken)
+	field := "scheduled"
+	if isDeadline {
+		field = "due"
+	}
+	sched, err := resolve(t, dateToken, field, today, false)
 	if err != nil {
 		return
 	}
 
+	if sched.Rule != "" {
+		transitions, _ := ParseStateTransitions(t)
+		for _, occurrence := range sched.ExpandOccurrences(start, end) {
+			day := truncateToDay(occurrence)
+			item := AgendaItem{Task: t, Date: occurrence, HasTime: sched.HasTime, HasEnd: sched.HasEnd, IsDeadline: isDeadline, Schedule: sched}
+			warning := c.Schedule.DefaultWarningDays
+			if !isDeadline {
+				warning = 0
+			}
+			if sched.Warning != nil {
+				warning = sched.Warning.Days
+			}
+			item.Warning = warning > 0 && today.Before(day) && !today.Before(day.AddDate(0, 0, -warning))
+			if sched.HasEnd {
+				item.EndTime = time.Date(day.Year(), day.Month(), day.Day(), sched.EndTime.Hour(), sched.EndTime.Minute(), 0, 0, day.Location())
+			}
+			if !t.Event(c) {
+				for _, transition := range transitions {
+					if KeywordStatus(c, transition.To) == Completed && truncateToDay(transition.Timestamp).Equal(day) {
+						item.IsCompleted = true
+						item.CompletedAt = transition.Timestamp
+						item.TargetState = transition.To
+					}
+				}
+			}
+			dayMap[day] = append(dayMap[day], item)
+		}
+		return
+	}
 	event := t.Event(c)
 	warningDays := 0
 	if sched.Warning != nil {
