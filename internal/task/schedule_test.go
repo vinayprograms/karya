@@ -118,6 +118,29 @@ func TestParseSchedule_Invalid(t *testing.T) {
 	}
 }
 
+func TestParseSchedule_UnpaddedHour(t *testing.T) {
+	s, err := ParseSchedule("2026-07-10T9:00-10:00")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !s.HasTime || !s.HasEnd || s.Date.Hour() != 9 || s.Date.Minute() != 0 || s.EndTime.Hour() != 10 || s.EndTime.Minute() != 0 {
+		t.Fatalf("unexpected schedule: %+v", s)
+	}
+}
+
+func TestParseSchedule_CommonDateLayouts(t *testing.T) {
+	for _, token := range []string{"10-07-2026", "10/07/2026", "2026/07/10", "10.07.2026"} {
+		schedule, err := ParseSchedule(token)
+		if err != nil {
+			t.Errorf("ParseSchedule(%q): %v", token, err)
+			continue
+		}
+		if schedule.Date.Year() != 2026 || schedule.Date.Month() != time.July || schedule.Date.Day() != 10 {
+			t.Errorf("ParseSchedule(%q) = %v", token, schedule.Date)
+		}
+	}
+}
+
 func TestParseSchedule_EndTime(t *testing.T) {
 	s, err := ParseSchedule("2025-06-17T09:00-10:30")
 	if err != nil {

@@ -58,28 +58,23 @@ func ParseSchedule(raw string) (*Schedule, error) {
 	s := &Schedule{Raw: raw}
 	remaining := raw
 
-	// Extract warning suffix (!Nd) from end
 	warningRe := regexp.MustCompile(`!(\d+)d$`)
-	if m := warningRe.FindStringSubmatch(remaining); len(m) > 0 {
-		days, _ := strconv.Atoi(m[1])
+	if match := warningRe.FindStringSubmatch(remaining); len(match) > 0 {
+		days, _ := strconv.Atoi(match[1])
 		s.Warning = &WarningSpec{Days: days}
-		remaining = remaining[:len(remaining)-len(m[0])]
+		remaining = remaining[:len(remaining)-len(match[0])]
 	}
 
-	// Extract recurrence suffix. Find the recurrence marker after the date portion.
-	// Date is at least 10 chars (YYYY-MM-DD), time adds 6 (THH:MM) = 16.
-	// Look for .+, ++, or + (in that order to avoid prefix conflicts).
 	recurrenceRe := regexp.MustCompile(`(\.\+|\+\+|\+)(\d+)([dwmyb])$`)
-	if m := recurrenceRe.FindStringSubmatch(remaining); len(m) > 0 {
-		matchStart := strings.LastIndex(remaining, m[0])
-		// Only treat as recurrence if it's after the date portion (pos >= 10)
+	if match := recurrenceRe.FindStringSubmatch(remaining); len(match) > 0 {
+		matchStart := strings.LastIndex(remaining, match[0])
 		if matchStart >= 10 {
-			interval, err := strconv.Atoi(m[2])
+			interval, err := strconv.Atoi(match[2])
 			if err != nil || interval <= 0 {
-				return nil, fmt.Errorf("invalid recurrence interval %q", m[2])
+				return nil, fmt.Errorf("invalid recurrence interval %q", match[2])
 			}
 			var mode RecurrenceMode
-			switch m[1] {
+			switch match[1] {
 			case ".+":
 				mode = RecurrenceFromDone
 			case "++":
@@ -87,47 +82,52 @@ func ParseSchedule(raw string) (*Schedule, error) {
 			default:
 				mode = RecurrenceFixed
 			}
-			s.Recurrence = &RecurrenceSpec{
-				Mode:     mode,
-				Interval: interval,
-				Unit:     m[3][0],
-			}
+			s.Recurrence = &RecurrenceSpec{Mode: mode, Interval: interval, Unit: match[3][0]}
 			remaining = remaining[:matchStart]
 		}
 	}
 
-	// Parse date and optional time from remaining
-	// Supports: YYYY-MM-DD, YYYY-MM-DDTHH:MM, YYYY-MM-DDTHH:MM-HH:MM (with end time)
-	if len(remaining) >= 16 && remaining[10] == 'T' {
-		// Date + Time: YYYY-MM-DDTHH:MM[-HH:MM]
-		t, err := time.ParseInLocation("2006-01-02T15:04", remaining[:16], time.Local)
-		if err != nil {
-			return nil, fmt.Errorf("invalid datetime %q: %w", remaining, err)
+	dateLayouts := []string{"2006-01-02", "02-01-2006", "01-02-2006", "2006/01/02", "02/01/2006", "01/02/2006", "02.01.2006", "01.02.2006"}
+	var parsed time.Time
+	var parseErr error
+	for _, layout := range dateLayouts {
+		dateLength := len(layout)
+		if len(remaining) < dateLength {
+			continue
 		}
-		s.Date = t
-		s.HasTime = true
-
-		// Check for end time: -HH:MM
-		if len(remaining) >= 22 && remaining[16] == '-' {
-			endStr := remaining[17:22]
-			endT, err := time.ParseInLocation("15:04", endStr, time.Local)
-			if err == nil {
-				s.EndTime = time.Date(t.Year(), t.Month(), t.Day(), endT.Hour(), endT.Minute(), 0, 0, time.Local)
-				s.HasEnd = true
-			}
+		parsed, parseErr = time.ParseInLocation(layout, remaining[:dateLength], time.Local)
+		if parseErr == nil {
+			remaining = remaining[dateLength:]
+			break
 		}
-	} else if len(remaining) >= 10 {
-		// Date only: YYYY-MM-DD
-		t, err := time.ParseInLocation("2006-01-02", remaining[:10], time.Local)
-		if err != nil {
-			return nil, fmt.Errorf("invalid date %q: %w", remaining, err)
-		}
-		s.Date = t
-		s.HasTime = false
-	} else {
-		return nil, fmt.Errorf("date token too short: %q", remaining)
 	}
-
+	if parseErr != nil || parsed.IsZero() {
+		return nil, fmt.Errorf("invalid date %q: %w", remaining, parseErr)
+	}
+	s.Date = parsed
+	if len(remaining) > 0 && remaining[0] == 'T' {
+		remaining = remaining[1:]
+		timeParts := regexp.MustCompile(`^(\d{1,2}:\d{2})(?:-(\d{1,2}:\d{2}))?$`).FindStringSubmatch(remaining)
+		if timeParts == nil {
+			return nil, fmt.Errorf("invalid time %q", remaining)
+		}
+		start, err := time.ParseInLocation("15:04", timeParts[1], time.Local)
+		if err != nil {
+			return nil, fmt.Errorf("invalid time %q: %w", timeParts[1], err)
+		}
+		s.Date = time.Date(parsed.Year(), parsed.Month(), parsed.Day(), start.Hour(), start.Minute(), 0, 0, time.Local)
+		s.HasTime = true
+		if timeParts[2] != "" {
+			end, err := time.ParseInLocation("15:04", timeParts[2], time.Local)
+			if err != nil {
+				return nil, fmt.Errorf("invalid end time %q: %w", timeParts[2], err)
+			}
+			s.EndTime = time.Date(parsed.Year(), parsed.Month(), parsed.Day(), end.Hour(), end.Minute(), 0, 0, time.Local)
+			s.HasEnd = true
+		}
+	} else if remaining != "" {
+		return nil, fmt.Errorf("invalid date suffix %q", remaining)
+	}
 	return s, nil
 }
 
