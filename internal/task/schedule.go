@@ -228,7 +228,10 @@ func addMonths(t time.Time, months int) time.Time {
 func (s *Schedule) NextOccurrence(completionDate time.Time) time.Time {
 	if s.Rule != "" {
 		start := truncateToDay(completionDate).AddDate(0, 0, 1)
-		end := start.AddDate(0, 0, s.Recurrence.Interval*7+7)
+		end := start.AddDate(0, 0, 365*10)
+		if s.Recurrence.Unit == 'y' {
+			end = start.AddDate(10000, 0, 0)
+		}
 		occurrences := s.occurrences(start, end)
 		if len(occurrences) > 0 {
 			return occurrences[0]
@@ -238,17 +241,13 @@ func (s *Schedule) NextOccurrence(completionDate time.Time) time.Time {
 	if s.Recurrence == nil {
 		return s.Date
 	}
-
 	r := s.Recurrence
 	switch r.Mode {
 	case RecurrenceFixed:
-		// Advance from original date by one interval
 		return addInterval(s.Date, r.Interval, r.Unit)
 	case RecurrenceFromDone:
-		// Advance from completion date
 		return addInterval(completionDate, r.Interval, r.Unit)
 	case RecurrenceNextFuture:
-		// Keep advancing from original date until we're in the future
 		now := time.Now()
 		next := s.Date
 		for !next.After(now) {

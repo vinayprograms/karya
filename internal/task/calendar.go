@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-var calendarPattern = regexp.MustCompile(`(?i)^([a-z]+)(?:T(\d{2}:\d{2})(?:-(\d{2}:\d{2}))?)?(?:\+(\d+)([dw]))?(?:!(\d+)d)?$`)
+var calendarPattern = regexp.MustCompile(`(?i)^([a-z]+)(?:T(\d{2}:\d{2})(?:-(\d{2}:\d{2}))?)?(?:\+(\d+)([dwmy]))?(?:!(\d+)d)?$`)
 
 func calendar(raw string) (*Schedule, error) {
 	match := calendarPattern.FindStringSubmatch(raw)
@@ -37,9 +37,15 @@ func calendar(raw string) (*Schedule, error) {
 		if err != nil || interval < 1 || interval > 10000 {
 			return nil, fmt.Errorf("invalid calendar interval %q", match[4])
 		}
-		supplied := strings.ToLower(match[5])[0]
-		if supplied != unit {
-			return nil, fmt.Errorf("%s requires recurrence in %c units", name, unit)
+		unit = strings.ToLower(match[5])[0]
+		if name == "daily" && unit != 'd' {
+			return nil, fmt.Errorf("daily requires recurrence in d units")
+		}
+		if name == "weekdays" && unit != 'w' {
+			return nil, fmt.Errorf("weekdays requires recurrence in w units")
+		}
+		if name != "daily" && name != "weekdays" && unit == 'd' {
+			return nil, fmt.Errorf("%s requires recurrence in w, m, or y units", name)
 		}
 	}
 	if name == "weekdays" && interval != 1 {
@@ -93,23 +99,56 @@ func (s *Schedule) occurrences(start, end time.Time) []time.Time {
 		if !s.matches(day) {
 			continue
 		}
-		if s.Recurrence.Interval > 1 {
-			if s.Anchor.IsZero() || day.Before(truncateToDay(s.Anchor)) {
+		anchored := s.Recurrence.Interval > 1 || s.Recurrence.Unit == 'm' || s.Recurrence.Unit == 'y'
+		if anchored {
+			if s.Anchor.IsZero() {
 				continue
 			}
-			anchor := s.Anchor
-			days := int(time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.UTC).Sub(time.Date(anchor.Year(), anchor.Month(), anchor.Day(), 0, 0, 0, 0, time.UTC)).Hours() / 24)
-			interval := s.Recurrence.Interval
-			if s.Recurrence.Unit == 'w' {
-				interval *= 7
-			}
-			if days%interval != 0 {
+			anchor := truncateToDay(s.Anchor)
+			if day.Before(anchor) {
 				continue
+			}
+			switch s.Recurrence.Unit {
+			case 'd':
+				if calendardays(anchor, day)%s.Recurrence.Interval != 0 {
+					continue
+				}
+			case 'w':
+				if day.Weekday() != anchor.Weekday() || calendardays(anchor, day)%(s.Recurrence.Interval*7) != 0 {
+					continue
+				}
+			case 'm':
+				months := (day.Year()-anchor.Year())*12 + int(day.Month()-anchor.Month())
+				if months%s.Recurrence.Interval != 0 || ordinalday(day, anchor) != day.Day() {
+					continue
+				}
+			case 'y':
+				years := day.Year() - anchor.Year()
+				if years%s.Recurrence.Interval != 0 || day.Month() != anchor.Month() || ordinalday(day, anchor) != day.Day() {
+					continue
+				}
 			}
 		}
 		result = append(result, time.Date(day.Year(), day.Month(), day.Day(), s.Date.Hour(), s.Date.Minute(), 0, 0, day.Location()))
 	}
 	return result
+}
+
+func calendardays(start, end time.Time) int {
+	start = time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
+	end = time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, time.UTC)
+	return int(end.Sub(start).Hours() / 24)
+}
+
+func ordinalday(day, anchor time.Time) int {
+	first := time.Date(day.Year(), day.Month(), 1, 0, 0, 0, 0, day.Location())
+	offset := (int(anchor.Weekday()) - int(first.Weekday()) + 7) % 7
+	candidate := first.AddDate(0, 0, offset+((anchor.Day()-1)/7)*7)
+	last := time.Date(day.Year(), day.Month()+1, 0, 0, 0, 0, 0, day.Location())
+	if candidate.After(last) {
+		candidate = candidate.AddDate(0, 0, -7)
+	}
+	return candidate.Day()
 }
 
 func (s *Schedule) identity() string {

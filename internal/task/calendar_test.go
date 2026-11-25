@@ -12,13 +12,19 @@ func TestCalendar(t *testing.T) {
 	for _, test := range []struct {
 		token string
 		count int
-	}{{"mon", 1}, {"MONDAY+1w", 1}, {"weekdaysT09:00", 5}, {"dailyT09:00+1d", 7}, {"friT14:30-15:00", 1}, {"mondayT14:30+2w", 1}} {
+	}{{"mon", 1}, {"MONDAY+1w", 1}, {"weekdaysT09:00", 5}, {"dailyT09:00+1d", 7}, {"friT14:30-15:00", 1}, {"mondayT14:30+2w", 1}, {"wednesday+1m", 1}, {"wed+2m", 1}, {"wednesday+1y", 1}} {
 		t.Run(test.token, func(t *testing.T) {
 			schedule, err := ParseSchedule(test.token)
 			if err != nil {
 				t.Fatal(err)
 			}
 			schedule.Anchor = start
+			if schedule.Recurrence.Unit == 'm' {
+				schedule.Anchor = time.Date(2026, 11, 25, 0, 0, 0, 0, time.Local)
+			}
+			if schedule.Recurrence.Unit == 'y' {
+				schedule.Anchor = time.Date(2026, 11, 25, 0, 0, 0, 0, time.Local)
+			}
 			dates := schedule.ExpandOccurrences(start, start.AddDate(0, 0, 6))
 			if len(dates) != test.count {
 				t.Fatalf("dates=%v", dates)
@@ -28,10 +34,83 @@ func TestCalendar(t *testing.T) {
 			}
 		})
 	}
-	for _, token := range []string{"mon+2d", "weekdays+2d", "daily+2w", "mon+0w", "mondayT25:00", "monT09:00-08:00", "mon.+2w", "noday", "mon+1wgarbage"} {
+	for _, token := range []string{"mon+2d", "weekdays+2d", "daily+2w", "weekdays+1m", "mon+0w", "mon+0m", "mondayT25:00", "monT09:00-08:00", "mon.+2w", "noday", "mon+1wgarbage"} {
 		if _, err := ParseSchedule(token); err == nil {
 			t.Errorf("accepted %s", token)
 		}
+	}
+}
+
+func TestCalendarMonthlyAnchor(t *testing.T) {
+	cfg := fixture(t, "MEETING: sync @s:wednesday+1m\n")
+	tasks, err := ListTasks(cfg, "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := tasks[0]
+	anchor := time.Date(2026, 11, 18, 0, 0, 0, 0, time.Local)
+	schedule, err := ParseSchedule(item.ScheduledAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := schedule.anchor(item, "scheduled", anchor, true); err != nil {
+		t.Fatal(err)
+	}
+	if !schedule.Anchor.Equal(anchor) {
+		t.Fatalf("anchor=%v", schedule.Anchor)
+	}
+	dates := schedule.ExpandOccurrences(anchor.AddDate(0, 0, 1), time.Date(2027, 2, 28, 0, 0, 0, 0, time.Local))
+	var got []string
+	for _, date := range dates {
+		got = append(got, date.Format("2006-01-02"))
+	}
+	want := []string{"2026-12-16", "2027-01-20", "2027-02-17"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("monthly occurrences=%v", got)
+	}
+	data, err := os.ReadFile(item.FilePath)
+	if err != nil || !strings.Contains(string(data), "LOG(scheduled): 2026-11-18T00:00") {
+		t.Fatalf("persisted anchor=%q, %v", data, err)
+	}
+	next := schedule.NextOccurrence(time.Date(2026, 11, 18, 0, 0, 0, 0, time.Local))
+	if next.Format("2006-01-02") != "2026-12-16" {
+		t.Fatalf("next occurrence=%v", next)
+	}
+}
+
+func TestCalendarMonthlyFifthOrdinalClamps(t *testing.T) {
+	schedule, err := ParseSchedule("wednesday+1m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	anchor := time.Date(2026, 7, 29, 0, 0, 0, 0, time.Local)
+	schedule.Anchor = anchor
+	dates := schedule.ExpandOccurrences(anchor.AddDate(0, 0, 1), time.Date(2026, 10, 31, 0, 0, 0, 0, time.Local))
+	var got []string
+	for _, date := range dates {
+		got = append(got, date.Format("2006-01-02"))
+	}
+	want := []string{"2026-08-26", "2026-09-30", "2026-10-28"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("clamped occurrences=%v", got)
+	}
+}
+
+func TestCalendarYearlyOrdinal(t *testing.T) {
+	schedule, err := ParseSchedule("wednesday+1y")
+	if err != nil {
+		t.Fatal(err)
+	}
+	anchor := time.Date(2024, 2, 28, 0, 0, 0, 0, time.Local)
+	schedule.Anchor = anchor
+	dates := schedule.ExpandOccurrences(anchor.AddDate(0, 0, 1), time.Date(2026, 2, 28, 0, 0, 0, 0, time.Local))
+	var got []string
+	for _, date := range dates {
+		got = append(got, date.Format("2006-01-02"))
+	}
+	want := []string{"2025-02-26", "2026-02-25"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("yearly occurrences=%v", got)
 	}
 }
 

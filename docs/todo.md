@@ -177,7 +177,7 @@ EVENT: Weekly deadline @d:fridayT17:00
 TODO: Daily review @s:daily
 ```
 
-Weekday names accept their full spelling or three-letter abbreviation, case-insensitively. `mon`, `monday`, `mon+1w` and `monday+1w` are equivalent; `daily+1d` and `weekdays+1w` are accepted too. Optional time ranges and `!Nd` warnings use the existing syntax. Ambiguous intervals such as `mon+2d` are rejected. Weekday lists, monthly calendar rules and time zones are not yet supported.
+Weekday names accept their full spelling or three-letter abbreviation, case-insensitively. Weekly intervals such as `monday+2w` select the named weekday at the anchored weekly cadence. Monthly and yearly intervals select one matching weekday per eligible period, on the anchor's day-of-month and month respectively; for example, `wednesday+1m` repeats on the anchor Wednesday each month. New rules receive a stable `LOG(scheduled):` or `LOG(due):` anchor on first agenda/refresh detection. `daily+1d` and `weekdays+1w` are accepted; incompatible units such as `mon+2d` are rejected. Weekday lists and time zones are not yet supported. Dated Org-mode repeaters (`+N`, `++N`, and `.+N` with supported units) remain separate from calendar-rule intervals.
 
 Calendar tokens retain the user's spelling and are never advanced to dated tokens. Agenda expands their occurrences in the requested view. Calendar TODO completion records a normal state transition for today without changing the keyword or rule; missed calendar occurrences are not accumulated as overdue work.
 

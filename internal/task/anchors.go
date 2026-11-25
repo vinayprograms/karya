@@ -8,7 +8,7 @@ import (
 )
 
 func (s *Schedule) anchor(item *Task, field string, now time.Time, persist bool, reset ...bool) error {
-	if s.Rule == "" || s.Recurrence.Interval == 1 {
+	if s.Rule == "" || (s.Recurrence.Interval == 1 && s.Recurrence.Unit != 'm' && s.Recurrence.Unit != 'y') {
 		return nil
 	}
 	if item.FilePath == "" {
