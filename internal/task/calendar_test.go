@@ -114,6 +114,26 @@ func TestCalendarYearlyOrdinal(t *testing.T) {
 	}
 }
 
+func TestBareEventAnchorBullet(t *testing.T) {
+	const event = "EVENT: sync @s:monT14:30+2w\n"
+	const sibling = "TODO: Neighbor\n"
+	cfg := fixture(t, event+sibling)
+	now := time.Date(2026, 11, 24, 0, 0, 0, 0, time.Local)
+	want := event + "* LOG(scheduled): 2026-11-30T14:30\n" + sibling
+	for _, date := range []time.Time{now, now.AddDate(0, 0, 10)} {
+		if err := Refresh(cfg, date); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(cfg.GetInboxFilePath())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != want {
+			t.Fatalf("file = %q, want %q", data, want)
+		}
+	}
+}
+
 func TestAnchors(t *testing.T) {
 	cfg := fixture(t, "MEETING: sync @s:monT14:30+2w @d:fri+2w\n  Notes stay.\nTODO: work\n")
 	now := time.Date(2026, 11, 24, 0, 0, 0, 0, time.Local)

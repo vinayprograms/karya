@@ -8,6 +8,56 @@ import (
 	"time"
 )
 
+func TestGeneratedChildBullets(t *testing.T) {
+	for _, tc := range []struct {
+		name, before, heading, children, sibling, indent string
+	}{
+		{"bare", "", "TODO: Example", "", "TODO: Neighbor", ""},
+		{"existing", "", "TODO: Example", "    * Notes\n", "TODO: Neighbor", "    "},
+		{"nested", "TODO: Parent\n", "  * TODO: Example", "", "  * TODO: Neighbor", "    "},
+		{"bulleted", "TODO: Parent\n", "* TODO: Example", "", "* TODO: Neighbor", "  "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "test.md")
+			tail := tc.children + "\n" + tc.sibling + "\n"
+			if err := os.WriteFile(path, []byte(tc.before+tc.heading+"\n"+tail), 0644); err != nil {
+				t.Fatal(err)
+			}
+			_, level := StripLinePrefix(tc.heading)
+			task := &Task{FilePath: path, LineNum: strings.Count(tc.before, "\n") + 1, IndentLevel: level}
+			if err := ClockIn(task); err != nil {
+				t.Fatal(err)
+			}
+			if !IsClockActive(task) {
+				t.Fatal("generated clock was not read as active")
+			}
+			if err := RecordStateTransition(task, "TODO", "DOING"); err != nil {
+				t.Fatal(err)
+			}
+			if err := ClockOut(task); err != nil {
+				t.Fatal(err)
+			}
+			entries, err := ParseClockEntries(task)
+			if err != nil || len(entries) != 1 || entries[0].Open || entries[0].End.IsZero() {
+				t.Fatalf("closed clock entries = %v, err = %v", entries, err)
+			}
+			transitions, err := ParseStateTransitions(task)
+			if err != nil || len(transitions) != 1 || transitions[0].From != "TODO" || transitions[0].To != "DOING" {
+				t.Fatalf("transitions = %v, err = %v", transitions, err)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			logLine := tc.indent + "* LOG(TODO -> DOING): " + transitions[0].Timestamp.Format("2006-01-02T15:04") + "\n"
+			clockLine := tc.indent + "* CLOCK: " + entries[0].Start.Format("2006-01-02T15:04") + "--" + entries[0].End.Format("2006-01-02T15:04") + "\n"
+			if want := tc.before + tc.heading + "\n" + logLine + clockLine + tail; string(data) != want {
+				t.Fatalf("file = %q, want %q", data, want)
+			}
+		})
+	}
+}
+
 func TestParseClockEntries(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "test.md")

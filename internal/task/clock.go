@@ -155,6 +155,9 @@ func subItemWriteIndent(lines []string) int {
 			return ws
 		}
 	}
+	if _, level := StripLinePrefix(lines[0]); level == 0 {
+		return 0
+	}
 	return taskRawSpaces + 2
 }
 
