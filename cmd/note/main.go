@@ -2,12 +2,14 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -94,6 +96,7 @@ type projectModel struct {
 	sortField     string
 	sortAsc       bool
 	termWidth     *int
+	termHeight    int
 	maxNameLen    int
 	showAll       bool
 	fullItems     []list.Item // all projects, unfiltered by notes status
@@ -119,17 +122,13 @@ func (i matchedNoteItem) FilterValue() string {
 }
 
 // renderName renders a project name with its namespace prefix dimmed,
-// highlighted when selected, padded to maxNameLen.
-func renderName(name string, isSelected bool, maxNameLen int) string {
-	main := colors.projectStyle
-	if isSelected {
-		main = colors.highlightStyle
-	}
+// padded to maxNameLen.
+func renderName(name string, style lipgloss.Style, maxNameLen int) string {
 	var rendered string
 	if lastDot := strings.LastIndex(name, "."); lastDot != -1 {
-		rendered = colors.grayStyle.Render(name[:lastDot+1]) + main.Render(name[lastDot+1:])
+		rendered = colors.grayStyle.Render(name[:lastDot+1]) + style.Render(name[lastDot+1:])
 	} else {
-		rendered = main.Render(name)
+		rendered = style.Render(name)
 	}
 	padding := max(maxNameLen-len(name), 0)
 	return rendered + strings.Repeat(" ", padding)
@@ -157,7 +156,11 @@ func selectorGlyph(isSelected bool) string {
 }
 
 func (i matchedNoteItem) renderWithSelection(isSelected bool, maxNameLen int, termWidth int) string {
-	nameCol := renderName(i.projectName, isSelected, maxNameLen)
+	style := colors.projectStyle
+	if isSelected {
+		style = colors.highlightStyle
+	}
+	nameCol := renderName(i.projectName, style, maxNameLen)
 	title := fitTitle(i.noteTitle, termWidth, 2+maxNameLen+2)
 	if isSelected {
 		title = colors.highlightStyle.Render(title)
@@ -166,7 +169,13 @@ func (i matchedNoteItem) renderWithSelection(isSelected bool, maxNameLen int, te
 }
 
 func (i projectItem) renderWithSelection(isSelected bool, maxNameLen int, termWidth int) string {
-	nameCol := renderName(i.project.Name, isSelected, maxNameLen)
+	nameStyle := colors.projectStyle
+	if isSelected {
+		nameStyle = colors.highlightStyle
+	} else if i.project.TodoCount == 0 {
+		nameStyle = colors.grayStyle
+	}
+	nameCol := renderName(i.project.Name, nameStyle, maxNameLen)
 
 	notesStr := fmt.Sprintf("%4d", i.project.NoteCount)
 	todosStr := fmt.Sprintf("%4d", i.project.TodoCount)
@@ -207,6 +216,15 @@ func (d projectDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	switch it := item.(type) {
 	case projectItem:
+		if it.project.TodoCount == 0 {
+			items := m.VisibleItems()
+			start, _ := m.Paginator.GetSliceBounds(len(items))
+			if width := min(12, *d.termWidth-2); index > start && width > 0 {
+				if previous, ok := items[index-1].(projectItem); ok && previous.project.TodoCount > 0 {
+					fmt.Fprintln(w, "  "+colors.grayStyle.Render(strings.Repeat("─", width)))
+				}
+			}
+		}
 		fmt.Fprint(w, it.renderWithSelection(isSelected, *d.maxNameLen, *d.termWidth))
 	case matchedNoteItem:
 		fmt.Fprint(w, it.renderWithSelection(isSelected, *d.maxNameLen, *d.termWidth))
@@ -230,7 +248,7 @@ func (m projectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "esc":
 				m.filtering = false
 				m.customFilter = ""
-				m.list.SetItems(m.allItems)
+				m.applyProjectFilter()
 				return m, nil
 			case "enter":
 				m.filtering = false
@@ -241,7 +259,7 @@ func (m projectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.applyProjectFilter()
 				} else {
 					m.filtering = false
-					m.list.SetItems(m.allItems)
+					m.applyProjectFilter()
 				}
 				return m, nil
 			default:
@@ -256,7 +274,7 @@ func (m projectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if msg.String() == "esc" && m.customFilter != "" {
 			m.customFilter = ""
-			m.list.SetItems(m.allItems)
+			m.applyProjectFilter()
 			return m, nil
 		}
 
@@ -264,7 +282,7 @@ func (m projectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filtering = true
 			if m.filterMode != "project" {
 				m.customFilter = ""
-				m.list.SetItems(m.allItems)
+				m.applyProjectFilter()
 			}
 			m.filterMode = "project"
 			return m, nil
@@ -274,7 +292,7 @@ func (m projectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filtering = true
 			if m.filterMode != "fulltext" {
 				m.customFilter = ""
-				m.list.SetItems(m.allItems)
+				m.applyProjectFilter()
 			}
 			m.filterMode = "fulltext"
 			return m, nil
@@ -282,7 +300,7 @@ func (m projectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if msg.String() == "a" {
 			m.showAll = !m.showAll
-			m.applyViewFilter()
+			m.applyViewFilter(false)
 			return m, nil
 		}
 
@@ -330,9 +348,8 @@ func (m projectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.WindowSizeMsg:
 		*m.termWidth = msg.Width
-		m.list.SetWidth(msg.Width)
-		// Reserve: title(1) + blank(1) + col-header(1) + separator(1) + help(2)
-		m.list.SetHeight(msg.Height - 6)
+		m.termHeight = msg.Height
+		m.list.SetSize(msg.Width, max(0, msg.Height-7))
 	case fileChangedMsg:
 		projects, err := listProjects(m.prjDir, m.cfg)
 		if err == nil {
@@ -350,7 +367,7 @@ func (m projectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				allProjectItems[i] = projectItem{project: prj}
 			}
 			m.fullItems = allProjectItems
-			m.applyViewFilter()
+			m.applyViewFilter(false)
 			updateProjectWatcher(m.watcher, m.prjDir)
 		}
 		return m, waitForFileChange(m.watcher)
@@ -422,7 +439,7 @@ func (m projectModel) View() string {
 	if sepWidth <= 0 {
 		sepWidth = 80
 	}
-	injected = append(injected, colors.grayStyle.Render(strings.Repeat("─", sepWidth-2)))
+	injected = append(injected, colors.grayStyle.Render(strings.Repeat("─", max(0, sepWidth-2))))
 
 	// Inject after title line (bubbles/list puts a blank line after title)
 	insertAt := 1
@@ -433,43 +450,32 @@ func (m projectModel) View() string {
 	result = append(result, lines[:insertAt]...)
 	result = append(result, injected...)
 	result = append(result, lines[insertAt:]...)
-	view = strings.Join(result, "\n")
-	return view
+	return lipgloss.NewStyle().MaxWidth(*m.termWidth).MaxHeight(m.termHeight).Render(strings.Join(result, "\n"))
 }
 
 func (m *projectModel) applySortOrder() {
-	items := make([]list.Item, len(m.allItems))
-	copy(items, m.allItems)
-
-	sort.SliceStable(items, func(i, j int) bool {
-		a := items[i].(projectItem).project
-		b := items[j].(projectItem).project
-		var less bool
+	m.allItems = slices.Clone(m.allItems)
+	slices.SortStableFunc(m.allItems, func(left, right list.Item) int {
+		a := left.(projectItem).project
+		b := right.(projectItem).project
+		if !m.sortAsc {
+			a, b = b, a
+		}
 		switch m.sortField {
 		case "notes":
-			less = a.NoteCount < b.NoteCount
+			return cmp.Compare(a.NoteCount, b.NoteCount)
 		case "todos":
-			less = a.TodoCount < b.TodoCount
+			return cmp.Compare(a.TodoCount, b.TodoCount)
 		case "modified":
-			less = a.LastNoteID < b.LastNoteID
+			return cmp.Compare(a.LastNoteID, b.LastNoteID)
 		default:
-			less = a.Name < b.Name
+			return cmp.Compare(a.Name, b.Name)
 		}
-		if !m.sortAsc {
-			return !less
-		}
-		return less
 	})
-
-	m.allItems = items
-	if m.customFilter != "" {
-		m.applyProjectFilter()
-	} else {
-		m.list.SetItems(items)
-	}
+	m.applyProjectFilter()
 }
 
-func (m *projectModel) applyViewFilter() {
+func (m *projectModel) applyViewFilter(fallbackToAll bool) {
 	if m.showAll {
 		m.allItems = m.fullItems
 	} else {
@@ -481,6 +487,9 @@ func (m *projectModel) applyViewFilter() {
 				}
 			}
 		}
+		if len(filtered) == 0 && fallbackToAll {
+			filtered = m.fullItems
+		}
 		m.allItems = filtered
 	}
 
@@ -491,23 +500,14 @@ func (m *projectModel) applyViewFilter() {
 		m.list.Title = fmt.Sprintf("Projects (%d)", count)
 	}
 
-	if m.customFilter != "" {
-		m.applyProjectFilter()
-	} else {
-		m.list.SetItems(m.allItems)
-	}
+	m.applySortOrder()
 }
 
 func (m *projectModel) applyProjectFilter() {
-	if m.customFilter == "" {
-		m.list.SetItems(m.allItems)
-		return
-	}
-
 	filterLower := strings.ToLower(m.customFilter)
 	var filteredItems []list.Item
 
-	if m.filterMode == "fulltext" {
+	if m.filterMode == "fulltext" && m.customFilter != "" {
 		// Search across all notes in all projects — one row per matching note
 		for _, item := range m.allItems {
 			if prjItem, ok := item.(projectItem); ok {
@@ -524,14 +524,19 @@ func (m *projectModel) applyProjectFilter() {
 			}
 		}
 	} else {
-		// Filter by project name
+		var inactive []list.Item
 		for _, item := range m.allItems {
-			if prjItem, ok := item.(projectItem); ok {
-				if strings.Contains(strings.ToLower(prjItem.project.Name), filterLower) {
-					filteredItems = append(filteredItems, item)
-				}
+			project := item.(projectItem).project
+			if !strings.Contains(strings.ToLower(project.Name), filterLower) {
+				continue
+			}
+			if project.TodoCount == 0 {
+				inactive = append(inactive, item)
+			} else {
+				filteredItems = append(filteredItems, item)
 			}
 		}
+		filteredItems = append(filteredItems, inactive...)
 	}
 
 	m.list.SetItems(filteredItems)
@@ -1244,19 +1249,6 @@ func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 			allProjectItems[i] = projectItem{project: prj}
 		}
 
-		// Default view: only projects with notes
-		var items []list.Item
-		for _, item := range allProjectItems {
-			if prjItem, ok := item.(projectItem); ok {
-				if prjItem.project.NoteCount > 0 {
-					items = append(items, item)
-				}
-			}
-		}
-		if len(items) == 0 {
-			items = allProjectItems
-		}
-
 		// Create delegate with shared pointers for dynamic width
 		termWidth := 80
 		delegate := projectDelegate{
@@ -1269,15 +1261,12 @@ func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 		delegate.SetSpacing(0)
 
 		// Create list
-		l := list.New(items, delegate, 0, 0)
-		l.Title = fmt.Sprintf("Projects (%d)", len(items))
+		l := list.New(nil, delegate, termWidth, 19)
 		l.SetShowTitle(true)
 		l.SetShowStatusBar(false)
 		l.SetFilteringEnabled(false)
 		l.KeyMap.Quit.SetKeys("q")
 		l.KeyMap.ForceQuit.SetKeys("ctrl+c")
-		l.SetHeight(20)
-
 		// Match vim-style keybindings
 		l.KeyMap.NextPage.SetKeys("pgdown", "ctrl+f", "ctrl+d")
 		l.KeyMap.PrevPage.SetKeys("pgup", "ctrl+b", "ctrl+u")
@@ -1367,7 +1356,6 @@ func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 			verbose:       verbose,
 			launchProject: "",
 			cfg:           cfg,
-			allItems:      items,
 			fullItems:     allProjectItems,
 			filterMode:    savedFilterMode,
 			customFilter:  savedFilter,
@@ -1378,11 +1366,7 @@ func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 			watcher:       prjWatcher,
 		}
 
-		m.applySortOrder()
-		// Restore filter if it was active
-		if savedFilter != "" {
-			m.applyProjectFilter()
-		}
+		m.applyViewFilter(true)
 
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		finalModel, err := p.Run()
