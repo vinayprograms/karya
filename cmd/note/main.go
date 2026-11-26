@@ -97,8 +97,9 @@ type projectModel struct {
 	sortAsc       bool
 	termWidth     *int
 	termHeight    int
-	maxNameLen    int
+	maxNameLen    *int
 	showAll       bool
+	fallbackToAll bool
 	fullItems     []list.Item // all projects, unfiltered by notes status
 	watcher       *fsnotify.Watcher
 }
@@ -298,6 +299,11 @@ func (m projectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		if msg.String() == "r" {
+			m.reload()
+			return m, nil
+		}
+
 		if msg.String() == "a" {
 			m.showAll = !m.showAll
 			m.applyViewFilter(false)
@@ -351,23 +357,7 @@ func (m projectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.termHeight = msg.Height
 		m.list.SetSize(msg.Width, max(0, msg.Height-7))
 	case fileChangedMsg:
-		projects, err := listProjects(m.prjDir, m.cfg)
-		if err == nil {
-			m.projects = projects
-			maxNameLen := 0
-			for _, prj := range projects {
-				if len(prj.Name) > maxNameLen {
-					maxNameLen = len(prj.Name)
-				}
-			}
-			m.maxNameLen = maxNameLen
-
-			allProjectItems := make([]list.Item, len(projects))
-			for i, prj := range projects {
-				allProjectItems[i] = projectItem{project: prj}
-			}
-			m.fullItems = allProjectItems
-			m.applyViewFilter(false)
+		if m.reload() {
 			updateProjectWatcher(m.watcher, m.prjDir)
 		}
 		return m, waitForFileChange(m.watcher)
@@ -376,6 +366,46 @@ func (m projectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
 	return m, cmd
+}
+
+func identity(item list.Item) string {
+	switch item := item.(type) {
+	case projectItem:
+		return item.project.Path
+	case matchedNoteItem:
+		return item.notePath
+	default:
+		return ""
+	}
+}
+
+func (m *projectModel) populate(projects []Project) {
+	m.projects = projects
+	m.fullItems = make([]list.Item, len(projects))
+	*m.maxNameLen = 0
+	for i, project := range projects {
+		m.fullItems[i] = projectItem{project: project}
+		*m.maxNameLen = max(*m.maxNameLen, len(project.Name))
+	}
+}
+
+func (m *projectModel) reload() bool {
+	projects, err := listProjects(m.prjDir, m.cfg)
+	if err != nil {
+		return false
+	}
+	selected := identity(m.list.SelectedItem())
+	index := m.list.Index()
+	m.populate(projects)
+	m.applyViewFilter(m.fallbackToAll)
+	items := m.list.Items()
+	if len(items) > 0 {
+		if i := slices.IndexFunc(items, func(item list.Item) bool { return identity(item) == selected }); i >= 0 {
+			index = i
+		}
+		m.list.Select(min(index, len(items)-1))
+	}
+	return true
 }
 
 func (m projectModel) View() string {
@@ -419,12 +449,12 @@ func (m projectModel) View() string {
 	}
 	var header string
 	if m.filterMode == "fulltext" && m.customFilter != "" {
-		nameHeader := fmt.Sprintf("%-*s", m.maxNameLen, "Project")
+		nameHeader := fmt.Sprintf("%-*s", *m.maxNameLen, "Project")
 		header = fmt.Sprintf("  %s  %s",
 			colors.grayStyle.Render(nameHeader),
 			colors.grayStyle.Render("Note"))
 	} else {
-		nameHeader := fmt.Sprintf("%-*s", m.maxNameLen, "Name"+sortArrow("name"))
+		nameHeader := fmt.Sprintf("%-*s", *m.maxNameLen, "Name"+sortArrow("name"))
 		header = fmt.Sprintf("  %s  %s%s  %s%s  %s%s  %s",
 			colors.grayStyle.Render(nameHeader),
 			colors.grayStyle.Render("Notes"), colors.grayStyle.Render(sortArrow("notes")),
@@ -476,6 +506,7 @@ func (m *projectModel) applySortOrder() {
 }
 
 func (m *projectModel) applyViewFilter(fallbackToAll bool) {
+	m.fallbackToAll = false
 	if m.showAll {
 		m.allItems = m.fullItems
 	} else {
@@ -489,6 +520,7 @@ func (m *projectModel) applyViewFilter(fallbackToAll bool) {
 		}
 		if len(filtered) == 0 && fallbackToAll {
 			filtered = m.fullItems
+			m.fallbackToAll = true
 		}
 		m.allItems = filtered
 	}
@@ -1235,22 +1267,8 @@ func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 			return
 		}
 
-		// Compute max project name length for column alignment
-		maxNameLen := 0
-		for _, prj := range projects {
-			if len(prj.Name) > maxNameLen {
-				maxNameLen = len(prj.Name)
-			}
-		}
-
-		// Convert projects to items (full list)
-		allProjectItems := make([]list.Item, len(projects))
-		for i, prj := range projects {
-			allProjectItems[i] = projectItem{project: prj}
-		}
-
 		// Create delegate with shared pointers for dynamic width
-		termWidth := 80
+		termWidth, maxNameLen := 80, 0
 		delegate := projectDelegate{
 			DefaultDelegate: list.NewDefaultDelegate(),
 			maxNameLen:      &maxNameLen,
@@ -1289,6 +1307,10 @@ func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 					key.WithHelp("*", "search"),
 				),
 				key.NewBinding(
+					key.WithKeys("r"),
+					key.WithHelp("r", "refresh"),
+				),
+				key.NewBinding(
 					key.WithKeys("s"),
 					key.WithHelp("s/S", "sort"),
 				),
@@ -1308,6 +1330,10 @@ func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 				key.NewBinding(
 					key.WithKeys("*"),
 					key.WithHelp("*", "fulltext search across all notes"),
+				),
+				key.NewBinding(
+					key.WithKeys("r"),
+					key.WithHelp("r", "refresh project list"),
 				),
 				key.NewBinding(
 					key.WithKeys("s"),
@@ -1350,22 +1376,21 @@ func showProjectList(prjDir, editor string, verbose bool, cfg *config.Config) {
 
 		m := projectModel{
 			list:          l,
-			projects:      projects,
 			prjDir:        prjDir,
 			editor:        editor,
 			verbose:       verbose,
 			launchProject: "",
 			cfg:           cfg,
-			fullItems:     allProjectItems,
 			filterMode:    savedFilterMode,
 			customFilter:  savedFilter,
 			sortField:     savedSortField,
 			sortAsc:       savedSortAsc,
 			termWidth:     &termWidth,
-			maxNameLen:    maxNameLen,
+			maxNameLen:    &maxNameLen,
 			watcher:       prjWatcher,
 		}
 
+		m.populate(projects)
 		m.applyViewFilter(true)
 
 		p := tea.NewProgram(m, tea.WithAltScreen())

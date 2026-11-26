@@ -39,7 +39,7 @@ note myproject todo
 note myproject d
 ```
 
-The project list starts with projects that have notes, or shows all projects if none have notes. Press `a` to toggle the all-projects view. Projects with outstanding todos appear first. A short divider separates the two groups when both appear on the same page. Projects without outstanding todos are muted when not selected; you can still select one and press `Enter` to open it. Press `s` to cycle through name, note count, todo count, and last note date, or `S` to reverse the sort within each group.
+The project list starts with projects that have notes, or shows all projects if none have notes. Press `a` to toggle the all-projects view. Projects with outstanding todos appear first. A short divider separates the two groups when both appear on the same page. Projects without outstanding todos are muted when not selected; you can still select one and press `Enter` to open it. Press `s` to cycle through name, note count, todo count, and last note date, or `S` to reverse the sort within each group. If you edit a note in another window and the project list still shows old counts, press `r` to refresh it without clearing your filter or sort.
 
 ## Directory Structure
 

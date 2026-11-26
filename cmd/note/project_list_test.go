@@ -28,7 +28,7 @@ func newProjectListForTest(projects []Project) projectModel {
 	l := list.New(nil, delegate, width, 19)
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
-	return projectModel{list: l, fullItems: items, sortField: "name", sortAsc: true, termWidth: &width, maxNameLen: nameWidth}
+	return projectModel{list: l, fullItems: items, sortField: "name", sortAsc: true, termWidth: &width, maxNameLen: &nameWidth}
 }
 
 func pressProjectKey(m projectModel, key string) projectModel {
@@ -145,6 +145,80 @@ func TestProjectListReload(t *testing.T) {
 	checkProjectOrder(t, m, "bbb", "aaa", "zzz")
 	m = pressProjectKey(m, "a")
 	checkProjectOrder(t, m, "aaa", "zzz")
+}
+
+func TestProjectListRefresh(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{Todo: config.Todo{Active: []string{"TODO"}, Completed: []string{"DONE"}}}
+	cfg.Directories.Projects = dir
+	const notePath = "notes/20240101000000/README.md"
+	for _, name := range []string{"report-a", "report-z", "report-docs", "other"} {
+		path := filepath.Join(dir, name, notePath)
+		if name == "report-docs" {
+			path = filepath.Join(dir, name, "README.md")
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("# Example\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	projects, err := listProjects(dir, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newProjectListForTest(projects)
+	m.prjDir, m.cfg = dir, cfg
+	m.applyViewFilter(true)
+	m = pressProjectKey(m, "a")
+	m = pressProjectKey(m, "S")
+	if err := os.WriteFile(filepath.Join(dir, "report-a", notePath), []byte("# Example\n\nTODO: Outstanding\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m = pressProjectKey(m, "/")
+	for _, r := range "report" {
+		m = pressProjectKey(m, string(r))
+	}
+	m = pressProjectKey(m, "enter")
+	checkProjectOrder(t, m, "report-z", "report-docs", "report-a")
+	m.list.Select(2)
+	if selected := m.list.SelectedItem().(projectItem).project; selected.TodoCount != 0 {
+		t.Fatalf("todo count before refresh = %d, want 0", selected.TodoCount)
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	if cmd != nil {
+		t.Fatal("manual refresh returned a command")
+	}
+	m = updated.(projectModel)
+	checkProjectOrder(t, m, "report-a", "report-z", "report-docs")
+	if selected := m.list.SelectedItem().(projectItem).project; selected.Name != "report-a" || selected.TodoCount != 1 {
+		t.Fatalf("selected project after refresh = %q (%d todos), want report-a (1 todo)", selected.Name, selected.TodoCount)
+	}
+	if !m.showAll || m.sortField != "name" || m.sortAsc || m.customFilter != "report" || m.filterMode != "project" || m.filtering {
+		t.Fatal("manual refresh changed the view settings")
+	}
+}
+
+func TestProjectListRefreshFallback(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "without-notes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	projects, err := listProjects(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newProjectListForTest(projects)
+	m.prjDir = dir
+	m.applyViewFilter(true)
+	m = pressProjectKey(m, "r")
+	checkProjectOrder(t, m, "without-notes")
+	m = pressProjectKey(m, "a")
+	m = pressProjectKey(m, "a")
+	m = pressProjectKey(m, "r")
+	checkProjectOrder(t, m)
 }
 
 func TestInactiveProjectRow(t *testing.T) {
